@@ -1,6 +1,6 @@
 # spec-tacular
 
-A Clojure library designed to ... well, that part is up to you.
+Write spectacular data definitions!
 
 ## Usage
 
@@ -8,7 +8,6 @@ FIXME
 
 ## License
 
-Copyright © 2014 FIXME
+Copyright © 2014 SparkFund Community Investment
 
-Distributed under the Eclipse Public License either version 1.0 or (at
-your option) any later version.
+Distributed under the Apache License Version 2.0
