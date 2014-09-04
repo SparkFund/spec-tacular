@@ -10,6 +10,10 @@
             [schema.core :as s]
             [schema.macros :as m]))
 
+(def spark-type-attr 
+  "The datomic attribute holding onto a keyword-valued spec type."
+  :spec-tacular/spec)
+
 ;; TODO: map data definition
 
 ;; TODO: integrate db-type->spec-type, recursiveness, and core-types
@@ -92,12 +96,12 @@
            (if (empty? vals) nil (ffirst vals)))))))
 
 (defn db->sp
-  [db ent sp-type]
-  (if-not
-      nil
+  [db ent & [sp-type]]
+  (if-not ent
+    nil
     (let [eid (:db/id ent)
           ent (into {} ent)
-          spec (get-spec sp-type)
+          spec (get-spec (or sp-type (spark-type-attr ent)))
           ctor (get-ctor sp-type)
           reduce-attr->kw #(assoc %1 (keyword (datomic-ns spec) (name %2)) (-> %2 name keyword))
           val (rename-keys ent (reduce reduce-attr->kw {} (map :name (:items spec))))
@@ -173,6 +177,7 @@
          (filter (fn [[_ v]] (some? v)))
          (into {})
          (#(assoc % :db/id eid))
+         (#(assoc % spark-type-attr (:name spec)))
          (#(with-meta % {:eid eid})))))
 
 (defn shallow-mask

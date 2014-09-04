@@ -35,7 +35,8 @@
     :db/valueType :db.type/ref
     :db/cardinality :db.cardinality/many
     :db/doc ""
-    :db.install/_attribute :db.part/db}])
+    :db.install/_attribute :db.part/db}
+   datomic-spec-schema])
 
 (sp/defspec TestSpec 
   [val1 :is-a :string :unique :identity]

@@ -1,5 +1,6 @@
 (ns spark.test-utils
-  (:require [datomic.api :as db]))
+  (:require [datomic.api :as db]
+            [spark.sparkspec.datomic :refer [spark-type-attr]]))
 
 ;;;; Macro for using fresh datomic instances for every test.
 
@@ -16,3 +17,12 @@
   `(binding [*conn* (make-db ~schema)]
      ~@body))
 
+;;;; Datomic schema attribute for datomic.clj
+
+(def datomic-spec-schema
+  {:db/id #db/id [:db.part/db]
+   :db/ident spark-type-attr
+   :db/valueType :db.type/keyword
+   :db/cardinality :db.cardinality/one
+   :db/doc ""
+   :db.install/_attribute :db.part/db})

@@ -6,24 +6,29 @@
         spark.test-utils)
   (:require [datomic.api :as db]))
 
+
+
 ;;;; check-schema tests
 
 (def schema
   [{:db/id 123124
     :db/ident :spec/var1
     :db/unique :db.unique/identity
-    :db/valueType :db.type/string}])
+    :db/valueType :db.type/string}
+   datomic-spec-schema])
 
 (def schema-by-value
   [{:db/id 123124
     :db/ident :spec/var1
     :db/unique :db.unique/value
-    :db/valueType :db.type/string}])
+    :db/valueType :db.type/string}
+   datomic-spec-schema])
 
 (def schema-alt-keys
   [{:db/id 123124
     :db/ident :spec/var2
-    :db/valueType :db.type/string}])
+    :db/valueType :db.type/string}
+   datomic-spec-schema])
 
 (def matching-spec
   (map->Spec
@@ -104,7 +109,7 @@
     :db/cardinality :db.cardinality/many
     :db/doc ""
     :db.install/_attribute :db.part/db}
-   ])
+   datomic-spec-schema])
 
 (defspec Scm
   [val1 :is-a :string :unique :identity]
@@ -171,13 +176,19 @@
 
 (defn inspect-eids
   [eids]
-  (doall (into #{} (map #(recursive-expand
-                          (db/entity (db) (first %)))
-                        eids))))
+  (->> 
+   eids
+   (map #(recursive-expand (db/entity (db) (first %))))
+   (into #{})
+   doall))
 
 (deftest nested-is-many
   (testing "can create an object with several is-many children."
-    (is (= #{{:scmm/vals #{{:scm2/val1 3} {:scm2/val1 4}}}}
+    (is (= #{{:scmm/vals #{{:scm2/val1 3
+                            :spec-tacular/spec :Scm2} 
+                           {:scm2/val1 4
+                            :spec-tacular/spec :Scm2}}
+              :spec-tacular/spec :ScmM}}
            (with-test-db simple-schema
              (let [txs (sp->transactions
                         (db)
@@ -191,26 +202,31 @@
 
 (deftest several-nested
   (testing "can create multiple distinct objects."
-      (is (= #{{:scmm/vals #{{:scm2/val1 1}}} {:scmm/vals #{{:scm2/val1 2}}}}
-             (with-test-db simple-schema
-               (let [txs (concat
-                          (sp->transactions
-                           (db)
-                           (recursive-ctor :ScmM {:vals [{:val1 1}]}))
-                          (sp->transactions
-                           (db)
-                           (recursive-ctor :ScmM {:vals [{:val1 2}]})))
-                     _ @(db/transact *conn* txs)
-                     res (db/q '[:find ?eid
-                                 :where
-                                 [?eid :scmm/vals ?es]
-                                 [?es  :scm2/val1 ?v1]] (db))]
-                 (inspect-eids res)))))))
+    (is (= #{{:scmm/vals #{{:scm2/val1 1, :spec-tacular/spec :Scm2}},
+              :spec-tacular/spec :ScmM}
+             {:scmm/vals #{{:scm2/val1 2, :spec-tacular/spec :Scm2}},
+              :spec-tacular/spec :ScmM}}
+           (with-test-db simple-schema
+             (let [txs (concat
+                        (sp->transactions
+                         (db)
+                         (recursive-ctor :ScmM {:vals [{:val1 1}]}))
+                        (sp->transactions
+                         (db)
+                         (recursive-ctor :ScmM {:vals [{:val1 2}]})))
+                   _ @(db/transact *conn* txs)
+                   res (db/q '[:find ?eid
+                               :where
+                               [?eid :scmm/vals ?es]
+                               [?es  :scm2/val1 ?v1]] (db))]
+               (inspect-eids res)))))))
 
 (deftest identity-add-one
   (testing "setting an is-many valued object updates the set to exactly the new set"
     (is (= #{{:scmm/identity "myident",
-              :scmm/vals #{{:scm2/val1 2}}}}
+              :scmm/vals #{{:scm2/val1 2
+                            :spec-tacular/spec :Scm2}}
+              :spec-tacular/spec :ScmM}}
            (with-test-db simple-schema
              (let [tx1 (sp->transactions
                         (db)
@@ -230,7 +246,9 @@
       "fixing a unique attribute on parent AND is-many child will
       upsert that item, and not add a new one."
     (is (= #{{:scmm/identity "myident",
-              :scmm/vals #{{:scm2/val1 2}}}}
+              :scmm/vals #{{:scm2/val1 2
+                            :spec-tacular/spec :Scm2}}
+              :spec-tacular/spec :ScmM}}
            (with-test-db simple-schema
              (let [tx1 (sp->transactions
                         (db)
