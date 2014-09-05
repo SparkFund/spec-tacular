@@ -119,7 +119,7 @@
                             m)))
                       val recs)]
       (assert ctor (str "No ctor found for " sp-type))
-      (assoc (ctor val) :db-ref {:eid eid}))))
+      (dissoc (assoc (ctor val) :db-ref {:eid eid}) spark-type-attr))))
 
 (defn get-by-eid [db-or-conn eid sp-type]
   (let [db (if (instance? datomic.Connection db-or-conn)
