@@ -51,7 +51,7 @@
    "coll-post"
    spec
    (fn [req]
-     (let [sp (sp/recursive-ctor (:name spec) (:json-params req))
+     (let [sp (sp/recursive-ctor (:name spec) (:data (:json-params req)))
            conn (get-conn-fn)
            db (d/db (get-conn-fn))]
        (assert (not (spd/get-eid db sp)) 

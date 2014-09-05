@@ -72,7 +72,7 @@
     (let [{status :status {loc "Location"} :headers}
           (response-for server :post "/testspec"
                         :headers {"Content-Type" "application/json"}
-                        :body (json/encode {:val1 "woah" :val2 [124]}))
+                        :body (json/encode {:data {:val1 "woah" :val2 [124]}}))
           eid (Long/valueOf (second (re-matches #"http://.*/testspec/(\d+)" loc)))]
       (is (= 201 status)
           "When we create an entity, we should get back the appropriate
