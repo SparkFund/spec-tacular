@@ -37,7 +37,7 @@
            [:double Double double]
            [:bigdec java.math.BigDecimal bigdec]
            [:instant java.util.Date nil]
-           [:uuid java.util.UUID nil]
+           [:uuid java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
            [:uri java.net.URI nil]
            [:bytes Bytes nil]
            [:ref Object nil]])) ; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
