@@ -88,16 +88,10 @@
    (fn [{{id :id} :path-params json :json-params :as req}]
      (let [id (java.lang.Long/valueOf id)
            db (d/db (get-conn-fn))
-           {:keys [old new]} json
            ctor (sp/get-ctor spec)
-           old (ctor old)
-           new (ctor new)
-           current (spd/db->sp db (d/entity db id) (:name spec))]
-       (if (sp/basis= old current)
-         (do 
-           @(d/transact (get-conn-fn) (spd/sp->transactions db new))
-           (ring-resp/response {:body {:new new}}))
-         (ring-resp/status {:old old :new new :db current} 409))))))
+           new (ctor (:data json))]
+       @(d/transact (get-conn-fn) (spd/sp->transactions db new))
+       (ring-resp/response {:body {:new new}})))))
 
 (defn- mk-elem-delete 
   "Helper function for building handlers that delete a particular
