@@ -102,7 +102,7 @@
     (let [eid (:db/id ent)
           ent (into {} ent)
           spec (get-spec (or sp-type (spark-type-attr ent)))
-          ctor (get-ctor sp-type)
+          ctor (get-ctor (:name spec))
           reduce-attr->kw #(assoc %1 (keyword (datomic-ns spec) (name %2)) (-> %2 name keyword))
           val (rename-keys ent (reduce reduce-attr->kw {} (map :name (:items spec))))
           {recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))
@@ -118,10 +118,10 @@
                                      :many (map #(db->sp db % type) v)))
                             m)))
                       val recs)]
-      (assert ctor (str "No ctor found for " sp-type))
+      (assert ctor (str "No ctor found for " (:name spec)))
       (dissoc (assoc (ctor val) :db-ref {:eid eid}) spark-type-attr))))
 
-(defn get-by-eid [db-or-conn eid sp-type]
+(defn get-by-eid [db-or-conn eid & [sp-type]]
   (let [db (if (instance? datomic.Connection db-or-conn)
              (db/db db-or-conn)
              db-or-conn)]
