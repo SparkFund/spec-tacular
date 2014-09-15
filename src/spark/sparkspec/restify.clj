@@ -9,6 +9,7 @@
             [datomic.api :as d]
             [cheshire.core :as json]
             [clojure.string :refer [lower-case]]
+            [clojure.walk :as walk]
             [io.pedestal.interceptor :as i]
             [spark.sparkspec.datomic :as spd]
             [spark.sparkspec :as sp])
@@ -135,3 +136,35 @@
              [(body-params/body-params)
               http/html-body
               http/json-body])]])))
+
+(defn explicitly-tag
+  "deep-walks a sp object adding explicit :spec-tacular/spec
+   spec name tags to the object and all its child items."
+  [sp]
+  (let [spec (sp/get-spec sp)
+        {recs :rec non-recs :non-rec} (group-by sp/recursiveness (:items spec))
+        sub-kvs (->> recs
+                     (map (fn [{[arity sub-spec-name] :type :as item}]
+                            (let [sub-sp (get sp (:name item))]
+                              (cond
+                               (and (= arity :one) (some? sub-sp)) ; only build non-nil sub-sps
+                               , [(:name item) (explicitly-tag sub-sp)]
+                               (and (= arity :many) (some? sub-sp))
+                               , [(:name item) (map #(explicitly-tag %) sub-sp)]
+                               :else nil))))
+                     (filter some?))]
+    (into (merge sp {:spec-tacular/spec (:name spec)}) sub-kvs)))
+
+(defn to-json
+  "converts sp object to json representation with explicit spec tags"
+  [sp]
+  (json/generate-string (explicitly-tag sp)))
+
+(defn from-json
+  "converts from the json converted rep to the given spec"
+  [spec-name sp]
+  (->> (json/parse-string sp true)
+       (walk/postwalk (fn [o] (if (and (map? o) (string? (get o :spec-tacular/spec)))
+                                (update-in o [:spec-tacular/spec] keyword)
+                                o)))
+       (sp/recursive-ctor spec-name)))

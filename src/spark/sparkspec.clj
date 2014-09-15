@@ -116,7 +116,8 @@
             is-type? (fn [v] 
                        (if (class? spec-class)
                          (instance? spec-class v)
-                         (contains? (set (:elements (get-spec typ))) v)))]
+                         (contains? (set (:elements (get-spec typ)))
+                                    (:name (get-spec v)))))]
         (assert
          (case cardinality
            :many (every? (fn [i] (is-type? i)) v)
@@ -154,8 +155,7 @@
          (every? identity (map #(basis= (% a) (% b)) (get-basis a))))
     (= a b)))
 
-(defn recursiveness [{[_ t] :type}] (if (or (contains? core-types t)
-                                            (:elements (get-spec t)))
+(defn recursiveness [{[_ t] :type}] (if (contains? core-types t)
                                       :non-rec
                                       :rec))
 
@@ -182,7 +182,7 @@
            (if (some? dv)
              (assoc m (keyword name) (if (ifn? dv) (dv) dv))
              m))
-         {}
+         sp ; We have to write over the provided so we don't lose the type. It may be the only way to choose the right constructor if the spec is an enum.
          items)
         sp-map (reduce (fn [m k] 
                          (let [coerced (coerce spec k (get sp k))]
@@ -196,7 +196,8 @@
             (fn [i]
               (check-component! spec (:name i) (get sp-map (:name i))))
             items))
-    (with-meta (recfn sp-map) {:spec spec})))
+    (dissoc (with-meta (recfn sp-map) {:spec spec})
+            :spec-tacular/spec)))
 
 (m/defn recursive-ctor 
   "deep-walks a nested map structure, constructing 
@@ -217,7 +218,9 @@
                                :else nil))))
                      (filter some?))]
     (if (and (instance? clojure.lang.IRecord sp)
-             (not= spec (get-spec (class sp)))) ;sp is already an instance of some specific record; has to agree.
+             (if (:elements spec)
+               (not (contains? (:elements spec) (:name (get-spec (class sp)))))
+               (not= spec (get-spec (class sp))))) ;sp is already an instance of some specific record; has to agree.
       (throw (ex-info (str "provided wrong spec type in ctor: " (class sp) " expecting " spec-name) 
                       {:provided (class sp) :expecting spec-name}))
       (non-recursive-ctor (get-map-ctor spec-name) spec (into sp sub-kvs)))))
@@ -231,7 +234,7 @@
     `(do
        (defn ~ctor-name ~(str "deep-walks a nested map structure to construct a "
                               (name (:name spec)))
-         [sp#] (recursive-ctor ~(:name spec) sp#))
+         [& [sp#]] (recursive-ctor ~(:name spec) (if (some? sp#) sp# {})))
        (defmethod get-ctor ~(:name spec) [_#] ~ctor-name)
        (defmethod get-ctor ~spec [_#] ~ctor-name))))
 
@@ -272,6 +275,20 @@
   [spec]
   `(defmethod get-spec ~(:name spec) [_#] ~spec))
 
+(defn mk-enum-get-map-ctor
+  ^:private
+  [spec]
+  (let [fac-sym (symbol (str "map->" (name (:name spec))))]
+    `(do
+       (defn ~fac-sym [o#] ; the "map ctor" for an enum means it's arg needs to be a tagged map or a record type of one of the enum's ctors.
+         (let [subspec-name# (if (:spec-tacular/spec o#)
+                               (:spec-tacular/spec o#)
+                               (:name (get-spec o#)))]
+           (assert (contains? ~(:elements spec) subspec-name#) (str subspec-name#" is not an element of "~(:name spec)))
+           ((get-map-ctor subspec-name#) o#)))
+       (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
+       (defmethod get-map-ctor ~(symbol (name (:name spec))) [_#] ~fac-sym))))
+
 (defn mk-huh
   ^:private
   [spec]
@@ -282,7 +299,7 @@
   ^:private
   [spec]
   (let [huh (symbol (str (-> spec :name name lower-case) "?"))]
-    `(defn ~huh [o#] (contains? ~(set (:elements spec)) o#))))
+    `(defn ~huh [o#] (contains? ~(:elements spec) (:name (get-spec o#))))))
 
 ;;;; defspec Macro
 
@@ -302,6 +319,7 @@
          (fn [s]
            `(do
               (def ~(-> s :name name symbol) ~(:name s))
+              ~(mk-enum-get-map-ctor s)
               ~(mk-enum-get-spec s)
               ~(mk-enum-huh s)))))
 

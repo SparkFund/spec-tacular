@@ -12,6 +12,8 @@
 (defspec TestSpec2
   [sillyval :is-a :TestSpec1])
 
+(defspec TestSpec3)
+
 (def good-spec (testspec1 {:val1 3 :val2 "hi"}))
 
 (deftest defspec-tests
@@ -43,24 +45,24 @@
   (testing "order of spec definition does not matter"
     (is (testspec1? (testspec1 {:val1 1 :val5 (testspec2 {})})))))
 
-(defenum testenum [foo bar baz])
+(defenum testenum :TestSpec2 :TestSpec3)
 
 (defspec ES [foo :is-a :testenum])
 (defspec ESParent [es :is-a :ES])
 
 (deftest defenum-tests
-  (is (testenum? :foo))
+  (is (testenum? (testspec2 {})))
   (is (instance? spark.sparkspec.spec.EnumSpec (get-spec testenum)))
-  (is (true? (check-component! (get-spec ES) :foo :bar)))
+  (is (true? (check-component! (get-spec ES) :foo (testspec2 {}))))
   (is (thrown? java.lang.AssertionError (check-component! (get-spec ES) :foo :nope)))
-  (is (= (es {:foo :bar})
-         #spark.sparkspec_test.ES{:foo :bar}))
-  (is (thrown? java.lang.AssertionError (es {:foo :nope})))
-  (is (= (esparent {:es {:foo :bar}})
-         #spark.sparkspec_test.ESParent{:es #spark.sparkspec_test.ES{:foo :bar}})
+  (is (= (es {:foo (testspec3)})
+         #spark.sparkspec_test.ES{:foo #spark.sparkspec_test.TestSpec3{}}))
+  (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
+  (is (= (esparent {:es {:foo (testspec3)}})
+         #spark.sparkspec_test.ESParent{:es #spark.sparkspec_test.ES{:foo #spark.sparkspec_test.TestSpec3{}}})
       "nested ctor works with enums")
-  (is (thrown? java.lang.AssertionError
-               (esparent {:es {:foo :nope}}))
+  (is (thrown? clojure.lang.ExceptionInfo
+               (esparent {:es {:foo (testspec1 {:val1 1})}}))
       "nested ctor fails properly with enums"))
 
 (defrecord FakeContact [phones])

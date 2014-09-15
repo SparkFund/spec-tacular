@@ -19,7 +19,7 @@
 
 (defrule defspec-rule
   (recap (cat (cap name)
-              (cap (rep+ (vec-form (delay item)))))
+              (cap (rep* (vec-form (delay item)))))
          (fn [[name] & items] 
            (map->Spec {:name (keyword name) :items (rest items)}))))
 
@@ -56,8 +56,8 @@
                  :else {v true}))))
 
 (defrule defenum-rule 
-  (recap (cat (cap name) (vec-form (cap (rep+ name))))
+  (recap (cat (cap name) (cap (rep* type)))
          (fn [[name] elements]
            (map->EnumSpec
             {:name (keyword name)
-             :elements (map keyword elements)}))))
+             :elements (into #{} elements)}))))
