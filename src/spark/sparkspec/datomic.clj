@@ -237,7 +237,8 @@
              [_ typ] :type
              :as item} (first (filter #(= (:name %) k) (:items spec)))
              is-nested (= :rec (recursiveness item))]
-        (MapEntry. k (if is-nested (complete-mask (get-spec typ)) true)))))
+        (MapEntry. k (when (some? item)
+                       (if is-nested (complete-mask (get-spec typ)) true))))))
   clojure.lang.ILookup
   (valAt [t k] (.val (.entryAt t k)))
   (valAt [t k default] (let [v (.val (.entryAt t k))] (if v v default))))
