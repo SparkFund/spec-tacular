@@ -185,14 +185,34 @@
   build-transactions. Only lets top-level and is-component fields
   through."
   [spec]
-  (->> (for [{iname :name
-              is-component :is-component?
-              :as item} (:items spec)]
-         [iname
-          (if is-component
-            (shallow-mask (get-spec iname))
-            true)])
-       (into {})))
+  (if (:elements spec)
+    (into {} (map #(vector % true) (:elements spec)))
+    (->> (for [{iname :name
+                [_ typ] :type
+                is-component :is-component?
+                :as item} (:items spec)]
+           [iname
+            (if is-component
+              (shallow-mask (get-spec typ))
+              true)])
+         (into {}))))
+
+(defn depth-n-mask
+  [spec n]
+  (if (= n 0)
+    (shallow-mask spec)
+    (if (:elements spec)
+      (into {} (map #(vector % (depth-n-mask % (dec n))) (:elements spec)))
+      (->> (for [{iname :name
+                  [_ typ] :type
+                  is-component :is-component?
+                  :as item} (:items spec)]
+             [iname
+              (if (= (recursiveness item) :rec)
+                (depth-n-mask (get-spec typ)
+                              (if is-component n (dec n))) ; components don't count as depth-increasing
+                true)]) 
+           (into {})))))
 
 (declare complete-mask)
 
@@ -206,13 +226,18 @@
     (throw (ex-info "Mask function not implemented." {:name "without"})))
   clojure.lang.Associative
   (containsKey [_ k]
-    (not-empty (filter #(= (:name %) k) (:items spec))))
+    (if (:elements spec)
+      (contains? (:elements spec) k)
+      (not-empty (filter #(= (:name %) k) (:items spec)))))
   (entryAt [_ k]
-    (let [{iname :name
-           [_ typ] :type
-           :as item} (first (filter #(= (:name %) k) (:items spec)))
-           is-nested (= :rec (recursiveness item))]
-      (MapEntry. k (if is-nested (complete-mask (get-spec typ)) true))))
+    (if (:elements spec)
+      (if (contains? (:elements spec) k)
+        (MapEntry. k (complete-mask (get-spec k))))
+      (let [{iname :name
+             [_ typ] :type
+             :as item} (first (filter #(= (:name %) k) (:items spec)))
+             is-nested (= :rec (recursiveness item))]
+        (MapEntry. k (if is-nested (complete-mask (get-spec typ)) true)))))
   clojure.lang.ILookup
   (valAt [t k] (.val (.entryAt t k)))
   (valAt [t k default] (let [v (.val (.entryAt t k))] (if v v default))))

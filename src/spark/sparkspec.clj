@@ -327,21 +327,27 @@
   "Produces a json-friendly nested-map representation of a spec.
    Nesting depth is bounded by the mask."
   [spec-name mask]
-  (let [spec (get-spec spec-name)]
-    (let [items
-          , (for [{iname :name [cardinality type] :type :as item} (:items spec)
-                  :when (iname mask)]
-              {iname {:many (= cardinality :many)
-                      :required (if (:required item) true false)
+  (if (map? mask)
+    (let [spec (get-spec spec-name)]
+      (if (:elements spec)
+        {:spec-name spec-name
+         :enum-elements (->> (:elements spec)
+                        (map #(inspect-spec % (get mask %)))
+                        (filter some?))}
+        (let [items
+              , (for [{iname :name [cardinality type] :type :as item} (:items spec)
+                      :when (iname mask)]
+                  {iname {:many (= cardinality :many)
+                          :required (if (:required item) true false)
 ;                     :identity (:identity item) ; not meaningful for front-end?
 ;                     :unique (:unique item)
 ;                     :optional (:optional item)
-                      :spec (if (= (recursiveness item) :rec)
-                              (if (map? (iname mask)) ; "component" items specified
-                                (inspect-spec type (iname mask))
-                                {:spec-name :ref ;ref id only
-                                 :ref type})
-                              {:spec-name type
-                               :primitive-type true})}})] ; Not a recursive field
-      {:spec-name spec-name
-       :items (reduce merge items)})))
+                          :spec (if (= (recursiveness item) :rec)
+                                  (inspect-spec type (iname mask))
+                                  {:spec-name type
+                                   :primitive-type true})}})] ; Not a recursive field
+          {:spec-name spec-name
+           :items (or (reduce merge items) [])})))
+    (when mask
+      {:spec-name :ref
+       :ref spec-name})))
