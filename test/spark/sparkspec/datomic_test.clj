@@ -3,7 +3,7 @@
         spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic
-        spark.test-utils)
+        spark.sparkspec.test-utils)
   (:require [datomic.api :as db]))
 
 

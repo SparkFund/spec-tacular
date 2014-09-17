@@ -1,4 +1,4 @@
-(ns spark.test-utils
+(ns spark.sparkspec.test-utils
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :refer [spark-type-attr]]))
 
