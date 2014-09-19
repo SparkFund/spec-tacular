@@ -101,7 +101,7 @@
     nil
     (let [eid (:db/id ent)
           ent (into {} ent)
-          spec (get-spec (or sp-type (spark-type-attr ent)))
+          spec (get-spec (spark-type-attr ent))
           ctor (get-ctor (:name spec))
           reduce-attr->kw #(assoc %1 (keyword (datomic-ns spec) (name %2)) (-> %2 name keyword))
           val (rename-keys ent (reduce reduce-attr->kw {} (map :name (:items spec))))
@@ -133,17 +133,23 @@
   "Builds a nested datomic-data datastructure for the sp data, only
   for what's specified in the mask. Adds Datomicy deletion commands to
   the given atomic list of deletions when appropriate."
-  [db sp mask deletions]
-  (let [spec (get-spec sp)
+  [db sp mask deletions & [spec]]
+  (let [spec (or spec (get-spec sp))
+        [spec mask] (if (:elements spec) ; Need to pick which enum branch to pick in the mask.
+                      (let [sub-name (:name (get-spec sp))]
+                        [(get-spec (get-in spec [:elements sub-name]))
+                         (get mask sub-name)])
+                      [spec mask])
         eid (get-eid db sp)
         db-value (if eid (get-by-eid db eid (:name spec)) nil)
         eid (or eid (db/tempid :db.part/user))]
     (->> (for [{iname :name [cardinality type] :type :as item} (:items spec)
                :when (iname mask)
-               :let [mask (iname mask)
-                     is-nested (= (recursiveness item) :rec)
+               :let [is-nested (= (recursiveness item) :rec)
                      is-many (= cardinality :many)
                      ival (iname sp)
+                     sub-spec (get-spec type) ; Not necessarily ival's spec: could be an enum.
+                     mask (iname mask)
                      ival-db (iname db-value)
                      datomic-key (keyword (datomic-ns spec) (name iname))
                      retract (fn [r] [:db/retract eid datomic-key r])]]
@@ -155,9 +161,9 @@
                         new-eids (set (map (partial get-eid db) ival))
                         [_ deletes _] (diff new-eids old-eids)]
                     (swap! deletions concat (map retract deletes))
-                    (set (map #(build-transactions db % mask deletions)
+                    (set (map #(build-transactions db % mask deletions sub-spec)
                               ival)))
-                  (if ival (build-transactions db ival mask deletions) nil))
+                  (if ival (build-transactions db ival mask deletions sub-spec) nil))
                 (if is-many
                   (let [old-eids (set (map get-eid ival-db))
                         new-eids (set (map get-eid ival))
@@ -240,8 +246,8 @@
         (MapEntry. k (when (some? item)
                        (if is-nested (complete-mask (get-spec typ)) true))))))
   clojure.lang.ILookup
-  (valAt [t k] (.val (.entryAt t k)))
-  (valAt [t k default] (let [v (.val (.entryAt t k))] (if v v default))))
+  (valAt [t k] (when-let [e (.entryAt t k)] (.val e)))
+  (valAt [t k default] (if-let [e (.entryAt t k)] (.val e) default)))
 
 (defn complete-mask [spec]
   "Builds a mask-map of the given spec for consumption by

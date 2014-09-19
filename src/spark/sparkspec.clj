@@ -155,7 +155,9 @@
          (every? identity (map #(basis= (% a) (% b)) (get-basis a))))
     (= a b)))
 
-(defn recursiveness [{[_ t] :type}] (if (contains? core-types t)
+(defn primitive? [spec-name] (contains? core-types spec-name))
+
+(defn recursiveness [{[_ t] :type}] (if (primitive? t)
                                       :non-rec
                                       :rec))
 
@@ -332,8 +334,8 @@
       (if (:elements spec)
         {:spec-name spec-name
          :enum-elements (->> (:elements spec)
-                        (map #(inspect-spec % (get mask %)))
-                        (filter some?))}
+                             (map #(inspect-spec % (get mask %)))
+                             (filter some?))}
         (let [items
               , (for [{iname :name [cardinality type] :type :as item} (:items spec)
                       :when (iname mask)]
@@ -342,12 +344,12 @@
 ;                     :identity (:identity item) ; not meaningful for front-end?
 ;                     :unique (:unique item)
 ;                     :optional (:optional item)
-                          :spec (if (= (recursiveness item) :rec)
-                                  (inspect-spec type (iname mask))
-                                  {:spec-name type
-                                   :primitive-type true})}})] ; Not a recursive field
+                          :spec (inspect-spec type (iname mask))}})]
           {:spec-name spec-name
            :items (or (reduce merge items) [])})))
     (when mask
-      {:spec-name :ref
-       :ref spec-name})))
+      (if (primitive? spec-name)
+        {:spec-name spec-name
+         :primitive-type true}
+        {:spec-name :ref
+         :ref spec-name}))))

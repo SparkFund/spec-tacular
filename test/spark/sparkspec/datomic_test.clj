@@ -104,6 +104,18 @@
     :db/doc ""
     :db.install/_attribute :db.part/db}
    {:db/id (db/tempid :db.part/db)
+    :db/ident :scmownsenum/enum
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one
+    :db/doc ""
+    :db.install/_attribute :db.part/db}
+   {:db/id (db/tempid :db.part/db)
+    :db/ident :scmownsenum/enums
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/many
+    :db/doc ""
+    :db.install/_attribute :db.part/db}
+   {:db/id (db/tempid :db.part/db)
     :db/ident :scmm/vals
     :db/valueType :db.type/ref
     :db/cardinality :db.cardinality/many
@@ -119,6 +131,14 @@
 
 (defspec Scm2
   [val1 :is-a :long :unique :identity])
+
+(defspec Scm3)
+
+(defenum ScmEnum :Scm2 :Scm3)
+
+(defspec ScmOwnsEnum
+  [enum :is-a :ScmEnum]
+  [enums :is-many :ScmEnum])
 
 (defspec ScmM
   [identity :is-a :string :unique :identity]
@@ -294,4 +314,50 @@
               entity (db/entity (db) eid)]
           (is (= (:scm/multi entity) #{"hi"})))))))
 
+(deftest enum-tests
+  (with-test-db simple-schema
+    (let [tx1 (sp->transactions (db) (scmownsenum {:enum (scm3)}))
+          tx-info @(db/transact *conn* tx1)]
+      (is (= 1 (count tx1)))
+      (is (= 2 (count (:tempids tx-info))))))
+  (with-test-db simple-schema
+    (let [tx1 (sp->transactions (db) (scmownsenum {:enum (scm3)}))
+          tx-info1 @(db/transact *conn* tx1)
+          tx2 (sp->transactions (db) (assoc (scmownsenum {:enum (scm3)}) :enum (scm2 {:val1 123})))
+          tx-info2 @(db/transact *conn* tx2)]
+      (is (= (db/q '[:find ?val
+                     :where
+                     [?owner :scmownsenum/enum ?eid]
+                     [?eid :scm2/val1 ?val] ]
+                   (db))
+             #{[123]})
+          "Can update to change an enum field from one to another")))
+  (with-test-db simple-schema
+    (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm3) (scm3) (scm2 {:val1 123})]}))
+          eid (commit-sp-transactions *conn* tx1)
+          sp (db->sp (db) (db/entity (db) eid))
+          _ (is (= (count (db/q '[:find ?eid
+                                  :where
+                                  [?owner :scmownsenum/enums ?eid]]
+                                (db)))
+                   3)
+                "can store a list of enums")
+          tx2 (sp->transactions (db) (update-in sp [:enums] concat [(scm3) (scm3)]))
+          tx-info2 @(db/transact *conn* tx2)]
+      (is (= (count (db/q '[:find ?eid
+                            :where
+                            [?owner :scmownsenum/enums ?eid]]
+                          (db)))
+             5)
+          "can append more enums to a list of enums")))
+  (with-test-db simple-schema
+    (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm2 {:val1 1}) (scm2 {:val1 2})]}))
+          eid (commit-sp-transactions *conn* tx1)
+          sp (db->sp (db) (db/entity (db) eid))
+          tx2 (sp->transactions (db) (assoc sp :enums [(scm2 {:val1 1})]))
+          eid2 (commit-sp-transactions *conn* tx2)
+          ]
+      (is (= (count (:enums (db->sp (db) (db/entity (db) eid2))))
+             1)
+          "can delete enums from a list of enums"))))
 ; TODO test ":ref" types adding/enums , eg :user/role

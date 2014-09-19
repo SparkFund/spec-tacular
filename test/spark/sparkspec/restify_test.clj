@@ -50,6 +50,7 @@
 
 (def seed 
   [{:db/id #db/id[:db.part/user -1] 
+    :spec-tacular/spec :TestSpec
     :testspec/val1 "hi"
     :testspec/val2 13124}])
 
