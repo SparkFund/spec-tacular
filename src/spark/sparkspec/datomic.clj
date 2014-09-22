@@ -203,6 +203,24 @@
               true)])
          (into {}))))
 
+(defn new-components-mask
+  "Builds a mask that specifies only adding entities that don't already
+  have eids. Any value with an eid will be treaded as an association and 
+  will not result in any updates to the properties of that object in the
+  transaction.
+  Spec is generated from a particular sp value, not just the value's spec."
+  [sp spec]
+  (if (:elements spec)
+    (let [sub-sp (get-spec sp)]
+      {(:name sub-sp) (new-components-mask sp sub-sp)}) ; only need to specify the actual type for the enum branch.
+    (if (get-in sp [:db-ref :eid])
+      true ;treat as a ref, already in db
+      (if-let [spec (get-spec sp)]
+        (->> (for [{iname :name [_ type] :type :as item} (:items spec)]
+               [iname (new-components-mask (get sp iname) type)])
+             (into {}))
+        true)))) ;primitive
+
 (defn depth-n-mask
   [spec n]
   (if (= n 0)
@@ -302,3 +320,15 @@
     (let [txns (sp->transactions db new-sp)]
       (commit-sp-transactions conn txns))))
 
+; TODO consider replocing the old "update-sp" etc with something more explicitly masked like this?
+(defn masked-update-sp!
+  "Ensures sp is in the db prior to updating. aborts if not."
+  [conn sp mask]
+  (let [db (db/db conn)
+        _ (assert (db/entity db (get-in sp [:db-ref :eid])) "Entity must exist in DB before updating.")
+        deletions (atom '())
+        datomic-data (build-transactions db sp mask deletions)
+        txns (with-meta
+               (cons datomic-data @deletions)
+               (meta datomic-data))]
+    (commit-sp-transactions conn txns)))

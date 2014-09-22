@@ -361,3 +361,41 @@
              1)
           "can delete enums from a list of enums"))))
 ; TODO test ":ref" types adding/enums , eg :user/role
+
+(deftest mask-tests
+  (with-test-db simple-schema
+    (let [a1 (scm2 {:val1 1})
+          a2 (scm2 {:val1 2})
+          a1id (create-sp! *conn* a1)
+          a2id (create-sp! *conn* a2)
+          a1db (get-by-eid (db) a1id)
+          a2db (get-by-eid (db) a2id)
+          b1 (scm {:val1 "b" :scm2 a1db})
+          b1eid (create-sp! *conn* b1)
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 1 (:val1 (:scm2 b1db)))
+                "create compound objects referring to a1db")
+          b1eid (masked-update-sp! *conn*
+                                   (assoc b1db :scm2 a2db)
+                                   {:scm2 (new-components-mask a2 :Scm2)})
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 2 (:val1 (:scm2 b1db)))
+                "succesfully switched sub-object to refer to the a2db.")
+          b1eid (masked-update-sp! *conn*
+                                   (assoc b1db :scm2 a1db)
+                                   {})
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 2 (:val1 (:scm2 b1db)))
+                "still a2 -- our mask didn't mention we would change :scm2")
+          b1eid (masked-update-sp! *conn*
+                                   (assoc b1db :scm2 (assoc a2 :val1 666))
+                                   {:scm2 (new-components-mask a2 :Scm2)})
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 666 (:val1 (:scm2 b1db)))
+                "We've created a new :scm2 w/ 666 -- we assoc'd to the a2 which had not been added to the db yet.")
+          b1eid (masked-update-sp! *conn*
+                                   (assoc b1db :scm2 (assoc a2db :val1 666))
+                                   {:scm2 (new-components-mask a2db :Scm2)})
+          b1db (get-by-eid (db) b1eid)
+          _  (is (= 2 (:val1 (:scm2 b1db)))
+                 "switched back to 2, NOT 666. our mask says we aren't editing the values in from-db values")])))
