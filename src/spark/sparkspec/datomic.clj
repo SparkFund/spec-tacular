@@ -165,12 +165,12 @@
                               ival)))
                   (if ival (build-transactions db ival mask deletions sub-spec) nil))
                 (if is-many
-                  (let [old-eids (set (map get-eid ival-db))
-                        new-eids (set (map get-eid ival))
+                  (let [old-eids (set (map (partial get-eid db) ival-db))
+                        new-eids (set (map (partial get-eid db) ival))
                         [adds deletes _] (diff new-eids old-eids)]
                     (swap! deletions concat (map retract deletes))
                     adds)
-                  (get-eid ival)))
+                  (get-eid db ival)))
               (if is-many
                 (let [[adds deletes] (diff ival ival-db)]
                   (swap! deletions concat (map retract deletes))
