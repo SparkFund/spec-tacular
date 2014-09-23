@@ -87,7 +87,7 @@
        (if eid
          eid
          (let [sname (datomic-ns spec)
-               idents (filter #(and (:identity? %) ((keyword (:name %)) sp)) (:items spec))
+               idents (filter #(and (or (:identity? %) (:unique? %)) ((keyword (:name %)) sp)) (:items spec))
                query '[:find ?eid :in $ ?attr ?val :where [?eid ?attr ?val]]
                names (map :name idents)
                vals (apply
