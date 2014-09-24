@@ -340,9 +340,9 @@
               , (for [{iname :name [cardinality type] :type :as item} (:items spec)
                       :when (iname mask)]
                   {iname {:many (= cardinality :many)
-                          :required (if (:required item) true false)
-;                     :identity (:identity item) ; not meaningful for front-end?
-;                     :unique (:unique item)
+                          :required? (if (:required? item) true false)
+;                     :identity? (:identity? item) ; not meaningful for front-end?
+;                     :unique? (:unique? item)
 ;                     :optional (:optional item)
                           :spec (inspect-spec type (iname mask))}})]
           {:spec-name spec-name
