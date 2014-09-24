@@ -25,6 +25,27 @@
            :db.type/bigint :db.type/float :db.type/double :db.type/bigdec
            :db.type/instant :db.type/uuid :db.type/uri :db.type/bytes]))
 
+(defn- datomic-ns
+  "Returns a string representation of the db-normalized namespace for
+  the given spec."
+  [spec]
+  (some-> spec :name name lower-case))
+
+(defn datomic-schema 
+  "generate a list of entries for a datomic schema to represent this spec."
+  [spec]
+  (for [{iname :name [cardinality type] :type :as item} (:items spec)]
+    {:db/id #db/id [:db.part/db]
+     :db/ident (keyword (datomic-ns spec) (name iname))
+     :db/valueType (if (primitive? type)
+                     (keyword "db.type" (name type))
+                     (keyword "db.type" (name :ref)))
+     :db/cardinality (if (= cardinality :many)
+                       :db.cardinality/many
+                       :db.cardinality/one)
+     :db/doc ""
+     :db.install/_attribute :db.part/db}))
+
 (defn check-schema
   "Returns a list of errors representing discrepencies between the
   given spec and schema."
@@ -62,12 +83,6 @@
        (map diff-uniques component->item)
        ;; TODO: Add more checks! Be strict!
        ))))
-
-(defn- datomic-ns
-  "Returns a string representation of the db-normalized namespace for
-  the given spec."
-  [spec]
-  (some-> spec :name name lower-case))
 
 (defn get-all-eids
   "Retrives all of the eids described by the given spec from the
