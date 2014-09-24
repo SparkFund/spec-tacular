@@ -6,6 +6,7 @@
         [clojure.set :only [rename-keys difference]])
   (:import clojure.lang.MapEntry)
   (:require [clojure.data :only diff]
+            [clojure.walk :as walk]
             [datomic.api :as db]
             [schema.core :as s]
             [schema.macros :as m]))
@@ -347,3 +348,12 @@
                (cons datomic-data @deletions)
                (meta datomic-data))]
     (commit-sp-transactions conn txns)))
+
+(defn remove-eids
+  "recursively strip all entries of :db-ref {:eid ...} from sp.
+   can be used for checking equality with a non-db value."
+  [sp]
+  (walk/postwalk (fn [m] (if (get-in m [:db-ref :eid])
+                           (dissoc m :db-ref)
+                           m))
+                 sp))
