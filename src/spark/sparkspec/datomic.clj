@@ -103,13 +103,19 @@
        (if eid
          eid
          (let [sname (datomic-ns spec)
-               idents (filter #(and (or (:identity? %) (:unique? %)) ((keyword (:name %)) sp)) (:items spec))
+               idents (filter #(or (:identity? %) (:unique? %)) (:items spec))
                query '[:find ?eid :in $ ?attr ?val :where [?eid ?attr ?val]]
-               names (map :name idents)
-               vals (apply
-                     concat
-                     (map #(db/q query db (keyword (name sname) (name %)) (% sp)) names))]
-           (if (empty? vals) nil (ffirst vals)))))))
+               eids
+               , (for [{iname :name [_ type] :type} idents]
+                   (let [sub-val (if (primitive? type)
+                                   (get sp iname)
+                                   (get-eid db (get sp iname)))
+                         eid (when (some? sub-val)
+                                (db/q query db
+                                      (keyword (name sname) (name iname))
+                                      sub-val))]
+                     eid))]
+           (first (map ffirst (filter not-empty eids))))))))
 
 (defn db->sp
   [db ent & [sp-type]]
