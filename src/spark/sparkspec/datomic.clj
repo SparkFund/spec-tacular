@@ -174,34 +174,47 @@
                      mask (iname mask)
                      ival-db (iname db-value)
                      datomic-key (keyword (datomic-ns spec) (name iname))
-                     retract (fn [r] [:db/retract eid datomic-key r])]]
-           [datomic-key
-            (if is-nested
-              (if (map? mask)
+                     retract (fn [r] [:db/retract eid datomic-key
+                                      (if-let [eid (get-in r [:db-ref :eid])]
+                                        eid
+                                        r)])]]
+           (do
+;             (prn "ival-db" ival-db "ival" ival)
+             [datomic-key
+              (if is-nested
+                (if (map? mask)
+                  (if is-many
+                    (let [old-eids (set (map (partial get-eid db) ival-db))
+                          new-eids (set (map (partial get-eid db) ival))
+                          [_ deletes _] (diff new-eids old-eids)]
+                      (swap! deletions concat (map retract deletes))
+                      (set (map #(build-transactions db % mask deletions sub-spec)
+                                ival)))
+                    (if (some? ival)
+                      (build-transactions db ival mask deletions sub-spec)
+                      (if (some? ival-db)
+                        (do (swap! deletions conj (retract ival-db)) nil)
+                        nil)))
+                  (if is-many
+                    (let [old-eids (set (map (partial get-eid db) ival-db))
+                          new-eids (set (map (partial get-eid db) ival))
+                          [adds deletes _] (diff new-eids old-eids)]
+                      (swap! deletions concat (map retract deletes))
+                      adds)
+                    (if (some? ival)
+                      (get-eid db ival)
+                      (if (some? ival-db)
+                        (do (swap! deletions conj (retract ival-db)) nil)
+                        nil))))
                 (if is-many
-                  (let [old-eids (set (map (partial get-eid db) ival-db))
-                        new-eids (set (map (partial get-eid db) ival))
-                        [_ deletes _] (diff new-eids old-eids)]
-                    (swap! deletions concat (map retract deletes))
-                    (set (map #(build-transactions db % mask deletions sub-spec)
-                              ival)))
-                  (if ival (build-transactions db ival mask deletions sub-spec) nil))
-                (if is-many
-                  (let [old-eids (set (map (partial get-eid db) ival-db))
-                        new-eids (set (map (partial get-eid db) ival))
-                        [adds deletes _] (diff new-eids old-eids)]
+                  (let [[adds deletes] (diff ival ival-db)]
                     (swap! deletions concat (map retract deletes))
                     adds)
-                  (get-eid db ival)))
-              (if is-many
-                (let [[adds deletes] (diff ival ival-db)]
-                  (swap! deletions concat (map retract deletes))
-                  adds)
-                (if (some? ival)
-                  ival
-                  (if (some? ival-db)
-                    (do (swap! deletions conj (retract ival-db)) nil)
-                    nil))))])
+                  (if (some? ival)
+                    ival
+                    (if (some? ival-db)
+                      (do (swap! deletions conj (retract ival-db)) nil)
+                      nil))))]))
          (filter (fn [[_ v]] (some? v)))
          (into {})
          (#(assoc % :db/id eid))
@@ -332,6 +345,7 @@
    old-sp knows about has changed, abort upserting to sp-new.
    Returns datomic transaction result."
   [conn old-sp new-sp]
+  (assert old-sp "must be updating something")
   (let [spec (get-spec old-sp)
         _ (when (not= spec (get-spec new-sp)) (throw (ex-info "old-sp and new-sp have mismatched specs" {:old-spec spec :new-spec (get-spec new-sp)})))
         db (db/db conn)
