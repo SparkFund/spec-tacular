@@ -328,28 +328,34 @@
 (defn inspect-spec
   "Produces a json-friendly nested-map representation of a spec.
    Nesting depth is bounded by the mask."
-  [spec-name mask]
-  (if (map? mask)
-    (let [spec (get-spec spec-name)]
-      (if (:elements spec)
-        {:spec-name spec-name
-         :enum-elements (->> (:elements spec)
-                             (map #(inspect-spec % (get mask %)))
-                             (filter some?))}
-        (let [items
-              , (for [{iname :name [cardinality type] :type :as item} (:items spec)
-                      :when (iname mask)]
-                  {iname {:many (= cardinality :many)
-                          :required? (if (:required? item) true false)
+  [spec-name mask & [resource-prefix-str]]
+  (let [resource-kv (when resource-prefix-str
+                      {:resource (str resource-prefix-str "/"
+                                      (lower-case (name spec-name)))})]
+    (if (map? mask)
+      (let [spec (get-spec spec-name)]
+        (if (:elements spec)
+          (merge {:spec-name spec-name
+                  :enum-elements (->> (:elements spec)
+                                      (map #(inspect-spec % (get mask %) resource-prefix-str))
+                                      (filter some?))}
+                 resource-kv)
+          (let [items
+                , (for [{iname :name [cardinality type] :type :as item} (:items spec)
+                        :when (iname mask)]
+                    {iname {:many (= cardinality :many)
+                            :required? (if (:required? item) true false)
 ;                     :identity? (:identity? item) ; not meaningful for front-end?
 ;                     :unique? (:unique? item)
 ;                     :optional (:optional item)
-                          :spec (inspect-spec type (iname mask))}})]
+                            :spec (inspect-spec type (iname mask) resource-prefix-str)}})]
+            (merge {:spec-name spec-name
+                    :items (or (reduce merge items) [])}
+                   resource-kv))))
+      (when mask
+        (if (primitive? spec-name)
           {:spec-name spec-name
-           :items (or (reduce merge items) [])})))
-    (when mask
-      (if (primitive? spec-name)
-        {:spec-name spec-name
-         :primitive-type true}
-        {:spec-name :ref
-         :ref spec-name}))))
+           :primitive-type true}
+          (merge {:spec-name :ref
+                  :ref spec-name}
+                 resource-kv))))))
