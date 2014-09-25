@@ -140,4 +140,4 @@
 
 (deftest test-json
   (let [sp (testspec {:val1 "atest" :val2 [111 222] :val3 (testspec {})})]
-    (is (= sp (from-json :TestSpec (to-json sp))))))
+    (is (= sp (from-json-friendly :TestSpec (to-json-friendly sp))))))

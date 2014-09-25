@@ -21,6 +21,50 @@
   (format "http://%s%s/%s"
           remote-addr servlet-path eid))
 
+(defn explicitly-tag
+  "deep-walks a sp object adding explicit :spec-tacular/spec
+   spec name tags to the object and all its child items."
+  [sp]
+  (let [spec (sp/get-spec sp)
+        {recs :rec non-recs :non-rec} (group-by sp/recursiveness (:items spec))
+        sub-kvs (->> recs
+                     (map (fn [{[arity sub-spec-name] :type :as item}]
+                            (let [sub-sp (get sp (:name item))]
+                              (cond
+                               (and (= arity :one) (some? sub-sp)) ; only build non-nil sub-sps
+                               , [(:name item) (explicitly-tag sub-sp)]
+                               (and (= arity :many) (some? sub-sp))
+                               , [(:name item) (map #(explicitly-tag %) sub-sp)]
+                               :else nil))))
+                     (filter some?))]
+    (into (merge sp {:spec-tacular/spec (:name spec)}) sub-kvs)))
+
+(defn to-json-friendly
+  "converts sp object to json representation with explicit spec tags
+  with the un-namespaced :spec-tacular-spec keyword"
+  [sp]
+  (->> (explicitly-tag sp)
+       (walk/postwalk
+        (fn [o] (if (and (map? o) (get o :spec-tacular/spec))
+                  (-> o
+                      (assoc :spec-tacular-spec (get o :spec-tacular/spec))
+                      (dissoc :spec-tacular/spec))
+                  o)))))
+
+(defn from-json-friendly
+  "converts from the json converted rep to the given spark record re-namespacing the 
+  spec tag :spec-tacular-spec to :spec-tacular/spec.
+  Also converts the spec tag back into a keyword, (json would have stringed it)"
+  [spec-name jf]
+  (->> jf
+       (walk/postwalk
+        (fn [o] (if (and (map? o) (get o :spec-tacular-spec))
+                  (-> o
+                      (assoc :spec-tacular/spec (keyword (get o :spec-tacular-spec)))
+                      (dissoc :spec-tacular-spec))
+                  o)))
+       (sp/recursive-ctor spec-name)))
+
 (defn- handler
   "Helper function for making Pedestal handlers from request->response
   functions and some data."
@@ -41,7 +85,7 @@
        (ring-resp/response
         {:data {:locations (map #(make-url req %) eids)
                 :items (map (fn [eid]
-                              (spd/db->sp db (d/entity db eid) (:name spec)))
+                              (to-json-friendly (spd/db->sp db (d/entity db eid) (:name spec))))
                             eids)}})))))
 
 (defn- mk-coll-post 
@@ -52,7 +96,7 @@
    "coll-post"
    spec
    (fn [req]
-     (let [sp (sp/recursive-ctor (:name spec) (:data (:json-params req)))
+     (let [sp (from-json-friendly (:name spec) (:data (:json-params req)))
            conn (get-conn-fn)
            db (d/db (get-conn-fn))]
        (assert (not (spd/get-eid db sp)) 
@@ -76,7 +120,7 @@
            ent (d/entity db id)]
        (assert (some? ent) "entity should exist in the database")
        (ring-resp/response 
-        {:data (spd/db->sp db ent (:name spec))})))))
+        {:data (to-json-friendly (spd/db->sp db ent (:name spec)))})))))
 
 (defn- mk-elem-put
   "Helper function for building handlers that modify a particular
@@ -89,8 +133,7 @@
    (fn [{{id :id} :path-params json :json-params :as req}]
      (let [id (java.lang.Long/valueOf id)
            db (d/db (get-conn-fn))
-           ctor (sp/get-ctor spec)
-           new (ctor (:data json))]
+           new (from-json-friendly (:name spec) (:data json))]
        @(d/transact (get-conn-fn) (spd/sp->transactions db new))
        (ring-resp/response {:body {:new new}})))))
 
@@ -136,35 +179,3 @@
              [(body-params/body-params)
               http/html-body
               http/json-body])]])))
-
-(defn explicitly-tag
-  "deep-walks a sp object adding explicit :spec-tacular/spec
-   spec name tags to the object and all its child items."
-  [sp]
-  (let [spec (sp/get-spec sp)
-        {recs :rec non-recs :non-rec} (group-by sp/recursiveness (:items spec))
-        sub-kvs (->> recs
-                     (map (fn [{[arity sub-spec-name] :type :as item}]
-                            (let [sub-sp (get sp (:name item))]
-                              (cond
-                               (and (= arity :one) (some? sub-sp)) ; only build non-nil sub-sps
-                               , [(:name item) (explicitly-tag sub-sp)]
-                               (and (= arity :many) (some? sub-sp))
-                               , [(:name item) (map #(explicitly-tag %) sub-sp)]
-                               :else nil))))
-                     (filter some?))]
-    (into (merge sp {:spec-tacular/spec (:name spec)}) sub-kvs)))
-
-(defn to-json
-  "converts sp object to json representation with explicit spec tags"
-  [sp]
-  (json/generate-string (explicitly-tag sp)))
-
-(defn from-json
-  "converts from the json converted rep to the given spec"
-  [spec-name sp]
-  (->> (json/parse-string sp true)
-       (walk/postwalk (fn [o] (if (and (map? o) (string? (get o :spec-tacular/spec)))
-                                (update-in o [:spec-tacular/spec] keyword)
-                                o)))
-       (sp/recursive-ctor spec-name)))
