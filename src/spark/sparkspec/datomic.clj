@@ -350,7 +350,7 @@
         _ (when (not= spec (get-spec new-sp)) (throw (ex-info "old-sp and new-sp have mismatched specs" {:old-spec spec :new-spec (get-spec new-sp)})))
         db (db/db conn)
         old-eid (get-in old-sp [:db-ref :eid])
-        _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to upsert.")))
+        _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to update."  {:old-eid old-eid :new-eid (get-in new-sp [:db-ref :eid])})))
         current (db->sp db (db/entity db old-eid) (:name spec))]
     (when (not= old-sp current) (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
     (let [txns (sp->transactions db new-sp)]
