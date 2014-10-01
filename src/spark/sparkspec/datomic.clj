@@ -36,16 +36,22 @@
   "generate a list of entries for a datomic schema to represent this spec."
   [spec]
   (for [{iname :name [cardinality type] :type :as item} (:items spec)]
-    {:db/id #db/id [:db.part/db]
-     :db/ident (keyword (datomic-ns spec) (name iname))
-     :db/valueType (if (primitive? type)
-                     (keyword "db.type" (name type))
-                     (keyword "db.type" (name :ref)))
-     :db/cardinality (if (= cardinality :many)
-                       :db.cardinality/many
-                       :db.cardinality/one)
-     :db/doc ""
-     :db.install/_attribute :db.part/db}))
+    (merge
+     {:db/id #db/id [:db.part/db]
+      :db/ident (keyword (datomic-ns spec) (name iname))
+      :db/valueType (if (primitive? type)
+                      (keyword "db.type" (name type))
+                      :db.type/ref)
+      :db/cardinality (if (= cardinality :many)
+                        :db.cardinality/many
+                        :db.cardinality/one)
+      :db/doc ""
+      :db.install/_attribute :db.part/db}
+     (if (:unique? item)
+       (if (:identity? item)
+         {:db/unique :db.unique/identity}
+         {:db/unique :db.unique/value})
+       {}))))
 
 (defn check-schema
   "Returns a list of errors representing discrepencies between the
