@@ -223,7 +223,7 @@
              (if (:elements spec)
                (not (contains? (:elements spec) (:name (get-spec (class sp)))))
                (not= spec (get-spec (class sp))))) ;sp is already an instance of some specific record; has to agree.
-      (throw (ex-info (str "provided wrong spec type in ctor: " (class sp) " expecting " spec-name) 
+      (throw (ex-info (str "provided wrong spec type in ctor: " (class sp) " expecting " spec-name)
                       {:provided (class sp) :expecting spec-name}))
       (non-recursive-ctor (get-map-ctor spec-name) spec (into sp sub-kvs)))))
 

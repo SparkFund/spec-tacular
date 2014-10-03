@@ -267,7 +267,7 @@
   (if (= n 0)
     (shallow-mask spec)
     (if (:elements spec)
-      (into {} (map #(vector % (depth-n-mask % (dec n))) (:elements spec)))
+      (into {} (map #(vector % (depth-n-mask (get-spec %) (dec n))) (:elements spec)))
       (->> (for [{iname :name
                   [_ typ] :type
                   is-component :is-component?
