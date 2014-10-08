@@ -74,8 +74,9 @@
 
 (defn- mk-coll-get
   "Helper function for building handlers that return all elements of a
-  certain spec."
-  [spec get-conn-fn]
+  certain spec.  If ?simple=true is passed as a query param, then the items
+  will go through a transformation function which returns {:value value :display \"display\"} representation"
+  [spec get-conn-fn simple-repr-fn]
   (handler
    "coll-get"
    spec
@@ -84,9 +85,9 @@
            eids (spd/get-all-eids db spec)]
        (ring-resp/response
         {:data {:locations (map #(make-url req %) eids)
-                :items (map (fn [eid]
-                              (to-json-friendly (spd/db->sp db (d/entity db eid) (:name spec))))
-                            eids)}})))))
+                :items (let [result (map (fn [eid] (to-json-friendly (spd/db->sp db (d/entity db eid) (:name spec))))
+                                         eids)]
+                         (if (and (fn? simple-repr-fn) (= (-> req :query-params :simple) "true")) (map simple-repr-fn result) result))}})))))
 
 (defn- mk-coll-post 
   "Helper function for building handlers that add a particular element
@@ -155,9 +156,9 @@
   spec. Allows for get/post on the collection and get/put/delete on
   individual resources.  expects body-params, html-body and json-body
   interceptors."
-  [parent-route spec get-conn-fn]
+  [parent-route spec get-conn-fn & [simple-repr-fn]]
   [parent-route
-   {:get (mk-coll-get spec get-conn-fn)
+   {:get (mk-coll-get spec get-conn-fn simple-repr-fn)
     :post (mk-coll-post spec get-conn-fn)}
    ["/:id" 
     {:get (mk-elem-get spec get-conn-fn)
