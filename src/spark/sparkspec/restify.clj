@@ -45,7 +45,7 @@
   [sp]
   (->> (explicitly-tag sp)
        (walk/postwalk
-        (fn [o] (if (and (map? o) (get o :spec-tacular/spec))
+        (fn [o] (if (and (map? o) (contains? o :spec-tacular/spec))
                   (-> o
                       (assoc :spec-tacular-spec (get o :spec-tacular/spec))
                       (dissoc :spec-tacular/spec))
