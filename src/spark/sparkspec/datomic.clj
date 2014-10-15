@@ -172,7 +172,7 @@
                                            (into #{:db-ref} ; this extra key is fine.
                                                  (map :name (:items spec))))
         _ (assert (empty? extra-keys)
-                  (str "sp has extra keys not in the spec:" extra-keys))
+                  (str (:name spec) " has extra keys not in the spec: " extra-keys))
         eid (get-eid db sp)
         db-value (if eid (get-by-eid db eid (:name spec)) nil)
         eid (or eid (db/tempid :db.part/user))]
