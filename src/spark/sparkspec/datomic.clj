@@ -168,6 +168,11 @@
                         [(get-spec (get-in spec [:elements sub-name]))
                          (get mask sub-name)])
                       [spec mask])
+        extra-keys (clojure.set/difference (into #{} (keys sp)) ; we could check for just non-nil extra keys if we had to for some reason. starting with pickier for now.
+                                           (into #{:db-ref} ; this extra key is fine.
+                                                 (map :name (:items spec))))
+        _ (assert (empty? extra-keys)
+                  (str "sp has extra keys not in the spec:" extra-keys))
         eid (get-eid db sp)
         db-value (if eid (get-by-eid db eid (:name spec)) nil)
         eid (or eid (db/tempid :db.part/user))]

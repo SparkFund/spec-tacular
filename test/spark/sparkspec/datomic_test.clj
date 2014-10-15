@@ -154,7 +154,9 @@
     (is (every? :added (:tx-data tx-info))))
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) scm-non-nested)]
-      (is (= 1 (count tx1))))))
+      (is (= 1 (count tx1)))
+      (is (thrown? java.lang.AssertionError
+                   (sp->transactions (db) (scm {:extra-key 1})))))))
 
 (deftest update-transaction-tests
   (with-test-db simple-schema
@@ -301,7 +303,7 @@
           (is (nil? (:scm/val2 entity)))))))
   (testing "removing multi data"
     (with-test-db simple-schema
-      (let [scm-a (scmm {:val1 "name" :val2 123124 :multi ["hi" "ho"]})
+      (let [scm-a (scm {:val1 "name" :val2 123124 :multi ["hi" "ho"]})
             scm-b (scm {:val1 "name"})
             scm-c (scm {:val1 "name" :multi ["hi"]})]
         @(db/transact *conn* (sp->transactions (db) scm-a))
