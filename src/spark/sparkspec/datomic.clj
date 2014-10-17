@@ -334,51 +334,57 @@
       (meta datomic-data))))
 
 (defn commit-sp-transactions
-  [conn transaction]
-  (let [tx @(db/transact conn transaction)
+  "if :transaction-log is specified in conn-ctx (a regular sp object),
+   we attach its attributes to the transaction."
+  [conn-ctx transaction]
+  (let [txn-id (db/tempid :db.part/tx)
+        txn-log (when-let [tl (:transaction-log conn-ctx)]
+                  (->> (sp->transactions (db/db (:conn conn-ctx)) tl) ; hijack db/id to point to txn.
+                       (map #(assoc % :db/id txn-id))))
+        tx @(db/transact (:conn conn-ctx) (concat transaction txn-log))
         eid (->> transaction meta :eid)
-        entid (db/resolve-tempid (db/db conn) (:tempids tx) eid)]
+        entid (db/resolve-tempid (db/db (:conn conn-ctx)) (:tempids tx) eid)]
     (or entid eid)))
 
 (defn create-sp!
   "aborts if sp is already in db.
    if successful, returns the eid of the newly-added entity."
-  [conn new-sp]
+  [conn-ctx new-sp]
   (let [spec (get-spec new-sp)
-        db (db/db conn)]
+        db (db/db (:conn conn-ctx))]
     (assert (not (get-eid db new-sp))
             "object must not already be in the db")
-    (commit-sp-transactions conn (sp->transactions db new-sp))))
+    (commit-sp-transactions conn-ctx (sp->transactions db new-sp))))
 
 (defn update-sp!
   "old-sp and new-sp need {:db-ref {:eid eid}} defined.
    ultra-conservative transaction semantics -- if anything that
    old-sp knows about has changed, abort upserting to sp-new.
    Returns datomic transaction result."
-  [conn old-sp new-sp]
+  [conn-ctx old-sp new-sp]
   (assert old-sp "must be updating something")
   (let [spec (get-spec old-sp)
         _ (when (not= spec (get-spec new-sp)) (throw (ex-info "old-sp and new-sp have mismatched specs" {:old-spec spec :new-spec (get-spec new-sp)})))
-        db (db/db conn)
+        db (db/db (:conn conn-ctx))
         old-eid (get-in old-sp [:db-ref :eid])
         _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to update."  {:old-eid old-eid :new-eid (get-in new-sp [:db-ref :eid])})))
         current (db->sp db (db/entity db old-eid) (:name spec))]
     (when (not= old-sp current) (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
     (let [txns (sp->transactions db new-sp)]
-      (commit-sp-transactions conn txns))))
+      (commit-sp-transactions conn-ctx txns))))
 
 ; TODO consider replocing the old "update-sp" etc with something more explicitly masked like this?
 (defn masked-update-sp!
   "Ensures sp is in the db prior to updating. aborts if not."
-  [conn sp mask]
-  (let [db (db/db conn)
+  [conn-ctx sp mask]
+  (let [db (db/db (:conn conn-ctx))
         _ (assert (db/entity db (get-in sp [:db-ref :eid])) "Entity must exist in DB before updating.")
         deletions (atom '())
         datomic-data (build-transactions db sp mask deletions)
         txns (with-meta
                (cons datomic-data @deletions)
                (meta datomic-data))]
-    (commit-sp-transactions conn txns)))
+    (commit-sp-transactions conn-ctx txns)))
 
 (defn remove-eids
   "recursively strip all entries of :db-ref {:eid ...} from sp.

@@ -76,12 +76,12 @@
   "Helper function for building handlers that return all elements of a
   certain spec.  If ?simple=true is passed as a query param, then the items
   will go through a transformation function which returns {:value value :display \"display\"} representation"
-  [spec get-conn-fn simple-repr-fn]
+  [spec get-conn-ctx-fn simple-repr-fn]
   (handler
    "coll-get"
    spec
    (fn [req]
-     (let [db (d/db (get-conn-fn))
+     (let [db (d/db (:conn (get-conn-ctx-fn)))
            eids (spd/get-all-eids db spec)]
        (ring-resp/response
         {:data {:locations (map #(make-url req %) eids)
@@ -92,32 +92,32 @@
 (defn- mk-coll-post 
   "Helper function for building handlers that add a particular element
   to the database."
-  [spec get-conn-fn]
+  [spec get-conn-ctx-fn]
   (handler
    "coll-post"
    spec
    (fn [req]
      (let [sp (from-json-friendly (:name spec) (:data (:json-params req)))
-           conn (get-conn-fn)
-           db (d/db (get-conn-fn))]
+           conn-ctx (get-conn-ctx-fn)
+           db (d/db (:conn conn-ctx))]
        (assert (not (spd/get-eid db sp)) 
                "object must not already be in the db")
        (let [txs (spd/sp->transactions db sp)
              _ (log/info :msg "about to commit" :data txs)
-             eid (spd/commit-sp-transactions conn txs)
+             eid (spd/commit-sp-transactions conn-ctx txs)
              url (make-url req eid)]
          (ring-resp/created url))))))
 
 (defn- mk-elem-get 
   "Helper function for building handlers that get a particular element
   according to its EID and type."
-  [spec get-conn-fn]
+  [spec get-conn-ctx-fn]
   (handler
    "elem-get"
    spec
    (fn [{{id :id} :path-params}]
      (let [id (java.lang.Long/valueOf id)
-           db (d/db (get-conn-fn))
+           db (d/db (:conn (get-conn-ctx-fn)))
            ent (d/entity db id)]
        (assert (some? ent) "entity should exist in the database")
        (ring-resp/response 
@@ -127,27 +127,28 @@
   "Helper function for building handlers that modify a particular
   element (by EID) in the database with information given in the
   body."
-  [spec get-conn-fn]
+  [spec get-conn-ctx-fn]
   (handler
    "elem-put"
    spec
    (fn [{{id :id} :path-params json :json-params :as req}]
      (let [id (java.lang.Long/valueOf id)
-           db (d/db (get-conn-fn))
+           conn-ctx (get-conn-ctx-fn)
+           db (d/db (:conn conn-ctx))
            new (from-json-friendly (:name spec) (:data json))]
-       @(d/transact (get-conn-fn) (spd/sp->transactions db new))
+       (spd/commit-sp-transactions conn-ctx (spd/sp->transactions db new))
        (ring-resp/response {:body {:new new}})))))
 
 (defn- mk-elem-delete 
   "Helper function for building handlers that delete a particular
   element (by EID) in the database with information given in the
   body."
-  [spec get-conn-fn]
+  [spec get-conn-ctx-fn]
   (handler
    "elem-delete"
    spec
    (fn [{{id :id} :path-params}]
-     @(d/transact (get-conn-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
+     (spd/commit-sp-transactions (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
      (ring-resp/response
       {:body {:deleted id}}))))
 
@@ -156,26 +157,26 @@
   spec. Allows for get/post on the collection and get/put/delete on
   individual resources.  expects body-params, html-body and json-body
   interceptors."
-  [parent-route spec get-conn-fn & [simple-repr-fn]]
+  [parent-route spec get-conn-ctx-fn & [simple-repr-fn]]
   [parent-route
-   {:get (mk-coll-get spec get-conn-fn simple-repr-fn)
-    :post (mk-coll-post spec get-conn-fn)}
+   {:get (mk-coll-get spec get-conn-ctx-fn simple-repr-fn)
+    :post (mk-coll-post spec get-conn-ctx-fn)}
    ["/:id" 
-    {:get (mk-elem-get spec get-conn-fn)
-     :put (mk-elem-put spec get-conn-fn)
-     :delete (mk-elem-delete spec get-conn-fn)}]])
+    {:get (mk-elem-get spec get-conn-ctx-fn)
+     :put (mk-elem-put spec get-conn-ctx-fn)
+     :delete (mk-elem-delete spec get-conn-ctx-fn)}]])
 
 ;; TODO: document this better in terms of how
 (defn make-expanded-routes
   "Creates a list of routes for a RESTful API for the given
   spec. Allows for get/post on the collection and get/put/delete on
   individual resources."
-  [spec get-conn-fn]
+  [spec get-conn-ctx-fn]
   (let [parent-route (str "/" (-> spec :name name lower-case))
         api-name (keyword (str (name (:name spec)) "-API"))]
     (expand-routes
      [[api-name
-       (conj (make-routes parent-route spec get-conn-fn)
+       (conj (make-routes parent-route spec get-conn-ctx-fn)
              ^:interceptors
              [(body-params/body-params)
               http/html-body

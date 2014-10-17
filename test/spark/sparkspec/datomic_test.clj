@@ -179,7 +179,7 @@
 (deftest commit-sp-transactions-tests
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) scm-1)
-          eid (commit-sp-transactions *conn* tx1)]
+          eid (commit-sp-transactions {:conn *conn*} tx1)]
       (is (scm? (db->sp (db) (db/entity (db) eid) :Scm))
           "The eid we get back from commit-sp-transactions should be
           tied to what we put in."))))
@@ -336,7 +336,7 @@
           "Can update to change an enum field from one to another")))
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm3) (scm3) (scm2 {:val1 123})]}))
-          eid (commit-sp-transactions *conn* tx1)
+          eid (commit-sp-transactions {:conn *conn*} tx1)
           sp (db->sp (db) (db/entity (db) eid))
           _ (is (= (count (db/q '[:find ?eid
                                   :where
@@ -354,10 +354,10 @@
           "can append more enums to a list of enums")))
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm2 {:val1 1}) (scm2 {:val1 2})]}))
-          eid (commit-sp-transactions *conn* tx1)
+          eid (commit-sp-transactions {:conn *conn*} tx1)
           sp (db->sp (db) (db/entity (db) eid))
           tx2 (sp->transactions (db) (assoc sp :enums [(scm2 {:val1 1})]))
-          eid2 (commit-sp-transactions *conn* tx2)
+          eid2 (commit-sp-transactions {:conn *conn*} tx2)
           ]
       (is (= (count (:enums (db->sp (db) (db/entity (db) eid2))))
              1)
@@ -368,34 +368,34 @@
   (with-test-db simple-schema
     (let [a1 (scm2 {:val1 1})
           a2 (scm2 {:val1 2})
-          a1id (create-sp! *conn* a1)
-          a2id (create-sp! *conn* a2)
+          a1id (create-sp! {:conn *conn*} a1)
+          a2id (create-sp! {:conn *conn*} a2)
           a1db (get-by-eid (db) a1id)
           a2db (get-by-eid (db) a2id)
           b1 (scm {:val1 "b" :scm2 a1db})
-          b1eid (create-sp! *conn* b1)
+          b1eid (create-sp! {:conn *conn*} b1)
           b1db (get-by-eid (db) b1eid)
           _ (is (= 1 (:val1 (:scm2 b1db)))
                 "create compound objects referring to a1db")
-          b1eid (masked-update-sp! *conn*
+          b1eid (masked-update-sp! {:conn *conn*}
                                    (assoc b1db :scm2 a2db)
                                    {:scm2 (new-components-mask a2 :Scm2)})
           b1db (get-by-eid (db) b1eid)
           _ (is (= 2 (:val1 (:scm2 b1db)))
                 "succesfully switched sub-object to refer to the a2db.")
-          b1eid (masked-update-sp! *conn*
+          b1eid (masked-update-sp! {:conn *conn*}
                                    (assoc b1db :scm2 a1db)
                                    {})
           b1db (get-by-eid (db) b1eid)
           _ (is (= 2 (:val1 (:scm2 b1db)))
                 "still a2 -- our mask didn't mention we would change :scm2")
-          b1eid (masked-update-sp! *conn*
+          b1eid (masked-update-sp! {:conn *conn*}
                                    (assoc b1db :scm2 (assoc a2 :val1 666))
                                    {:scm2 (new-components-mask a2 :Scm2)})
           b1db (get-by-eid (db) b1eid)
           _ (is (= 666 (:val1 (:scm2 b1db)))
                 "We've created a new :scm2 w/ 666 -- we assoc'd to the a2 which had not been added to the db yet.")
-          b1eid (masked-update-sp! *conn*
+          b1eid (masked-update-sp! {:conn *conn*}
                                    (assoc b1db :scm2 (assoc a2db :val1 666))
                                    {:scm2 (new-components-mask a2db :Scm2)})
           b1db (get-by-eid (db) b1eid)
