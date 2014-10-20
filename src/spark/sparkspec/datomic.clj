@@ -99,12 +99,6 @@
         query '[:find ?eid :in $ [?attr ...] :where [?eid ?attr ?val]]]
     (apply concat (db/q query db names))))
 
-(defn get-all-of-type
-  "Helper function that returns all items of a single spec"
-  [db spec]
-  (let [eids (get-all-eids db spec)]
-    (map (fn [eid] (db->sp db (db/entity db eid) (:name spec))) eids)))
-
 (defn get-eid
   "Returns an EID associated with the data in the given spark type if
   it exists in the database. Looks up according to identity
@@ -157,6 +151,12 @@
 
 (defn get-by-eid [db eid & [sp-type]]
   (db->sp db (db/entity db eid) sp-type))
+
+(defn get-all-of-type
+  "Helper function that returns all items of a single spec"
+  [db spec]
+  (let [eids (get-all-eids db spec)]
+    (map (fn [eid] (db->sp db (db/entity db eid) (:name spec))) eids)))
 
 (defn- not-all-empty? [m] (not-any? (fn [[k v]] (some? v)) m))
 
