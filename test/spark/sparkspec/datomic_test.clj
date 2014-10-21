@@ -401,3 +401,41 @@
           b1db (get-by-eid (db) b1eid)
           _  (is (= 2 (:val1 (:scm2 b1db)))
                  "switched back to 2, NOT 666. our mask says we aren't editing the values in from-db values")])))
+
+(deftest transaction-log-test
+  (with-test-db simple-schema
+    (let [_ (create-sp! {:conn *conn* :transaction-log (scm {:val1 "log1"})}
+                        (scm2 {:val1 1234}))
+          r (db/q '[:find ?e ?v
+                    :where
+                    [?e :scm/val1 ?v]]
+                  (db))
+          [e v] (first r)
+          _ (is (= 1 (count r)) "only one thing logged at this point")
+          _ (is (= "log1" v))
+          r2 (db/q '[:find ?v
+                     :in $ ?e
+                     :where
+                     [?e :db/txInstant ?v]]
+                   (db) e)
+          _ (is (instance? java.util.Date (ffirst r2)) "we annotated a transaction object with a txnInstant")
+          r3 (db/q '[:find ?v
+                     :in $ ?e
+                     :where
+                     [?scm2 :scm2/val1 ?v ?e]]
+                   (db) e)
+          _ (is (= #{[1234]} r3) "we annotated the transaction that created the thing with val1 1234")
+          _ (create-sp! {:conn *conn* :transaction-log (scm {:val1 "log2"})}
+                        (scm2 {:val1 5678}))
+          _ (is (= 2 (count (get-all-of-type (db) (get-spec :Scm)))) "now have 2 logs")
+          [e2] (first (db/q '[:find ?e
+                              :in $ ?v
+                              :where
+                              [?e :scm/val1 ?v]]
+                            (db) "log2"))
+          r4 (db/q '[:find ?scm2
+                     :in $ ?v ?e
+                     :where
+                     [?scm2 :scm2/val1 ?v ?e]]
+                   (db) 5678 e2)
+          _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
