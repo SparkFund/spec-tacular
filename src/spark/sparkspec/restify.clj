@@ -166,7 +166,9 @@
              (= format "csv")
              , (mk-coll-get-response-csv spec-name sp-list)
              :else
-             , (ring-resp/response "ERROR: Invalid output format"))
+             , (-> "ERROR: Invalid output format (choices: json, csv)"
+                   (ring-resp/response)
+                   (ring-resp/status 400)))
            (downloadable (some-> req :query-params :filename)))))))
 
 (defn- mk-coll-post 
