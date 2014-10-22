@@ -88,12 +88,19 @@
                           (map (fn [{[arity sub-spec-name] :type :as item}]
                                  (let [sub-sp (get sp (:name item))]
                                    (cond
-                                     (and (= arity :one))
+                                     (= arity :one)
+                                     ;TODO: extract this and share w/ :many-arity case?
                                      , (->> (csv-extract-fields sub-spec-name sub-sp) ; :grandparentAttribute -> [[[:parentAttribute :subAttribute] col-value],...]
                                             (map (fn [[colName colVal]]
                                                    [(cons (:name item) colName) colVal])))
-                                     (and (= arity :many))
-                                     , [[(list (:name item)) (str "List of " (count sub-sp) " " (name (:name item)))]]
+                                     (= arity :many)
+                                     , (let [key-name (name (:name item))
+                                             ;for arrays, we want to expand columns for the FIRST element in the array
+                                             ;TODO: extract this and share w/ :one-arity case?
+                                             sub-fields (->> (csv-extract-fields sub-spec-name (first sub-sp))
+                                                            (map (fn [[colName colVal]]
+                                                                   [(cons (str key-name "[0]") colName) colVal])))]
+                                         (concat [[(list (str key-name "[].count")) (count sub-sp)]] sub-fields))
                                      :else nil))))
                           (filter some?)
                           (apply concat))
