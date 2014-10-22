@@ -12,4 +12,5 @@
                  [io.pedestal/pedestal.service-tools "0.3.0"]
                  [ring/ring-core "1.3.0"]
                  [clj-http "0.9.1"]
+                 [clojure-csv/clojure-csv "2.0.1"]
                  [org.immutant/immutant "1.1.3"]])
