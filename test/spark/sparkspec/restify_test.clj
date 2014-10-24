@@ -71,19 +71,19 @@
     (let [{:keys [body status] :as res} (response-for server :get "/testspec")
           body (json/parse-string body true)]
       (is (= 200 status))
-      (is (= 1 (count (get-in body [:data :locations])))))))
+      (is (= 1 (count body))))))
 
 (deftest post-collection
   (with-new-db
     (let [{status :status {loc "Location"} :headers}
           (response-for server :post "/testspec"
                         :headers {"Content-Type" "application/json"}
-                        :body (json/encode {:data {:val1 "woah" :val2 [124]}}))
-          eid (Long/valueOf (second (re-matches #"http://.*/testspec/(\d+)" loc)))]
+                        :body (json/encode {:val1 "woah" :val2 [124]}))
+          eid (Long/valueOf (second (re-matches #"/api/v1/testspec/(\d+)" loc)))]
       (is (= 201 status)
           "When we create an entity, we should get back the appropriate
         HTTP response (201).")
-      (is (and loc (re-matches #"http://.*/testspec/(\w+)" loc))
+      (is (and loc (re-matches #"/api/v1/testspec/(\w+)" loc))
              "We should get something that vaguely looks like a URL for the
         resource we created.")
       (is (= "woah" (:testspec/val1 (d/entity (db) eid)))))))
@@ -134,8 +134,6 @@
           {:keys [status body]} (response-for server :delete
                                               (str "/testspec/" seed-eid))]
       (is (= status 200) "DELETE expects a 200")
-      (is (= (-> body (json/parse-string true) :body :deleted Long/valueOf) seed-eid)
-          "We should get the entity ID of what we deleted")
       (is (= (into {} (d/entity (db) seed-eid)) {}) "The entity we delete should go away"))))
 
 (deftest test-json
