@@ -173,10 +173,25 @@
               (ring-resp/content-type "text/plain")
               (ring-resp/status 400)))))))
 
+(defn- ent-of-type?
+  "Helper; Given a datomic entity (from d/entity) and a spec,
+  returns true if the entity is of that spec's type"
+  [ent spec]
+  (and (some? ent)
+       (not (empty? ent))
+       (= (:name spec) (:spec-tacular/spec ent))))
+
+(defn- error-response
+  "Helper for generating plaintext error responses"
+  [code message]
+  (-> (str "ERROR: " message)
+      (ring-resp/response)
+      (ring-resp/status code)
+      (ring-resp/content-type "text/plain")))
+
 (defn- mk-elem-get
   "Helper function for building handlers that get a particular element
   according to its EID and type."
-  ;TODO: Respond with 404 if no entity with that ID exists in the DB
   [spec get-conn-ctx-fn]
   (handler
     "elem-get"
@@ -185,14 +200,16 @@
       (let [id (java.lang.Long/valueOf id)
             db (d/db (:conn (get-conn-ctx-fn)))
             ent (d/entity db id)]
-        (assert (some? ent) "entity should exist in the database")
-        (ring-resp/response
-          (to-json-friendly (spd/db->sp db ent (:name spec))))))))
+        (if (ent-of-type? ent spec)
+          (-> (spd/db->sp db ent (:name spec))
+              (to-json-friendly)
+              (ring-resp/response))
+          (error-response 404 "resource does not exist"))))))
 
 (defn- mk-elem-create
   "Helper function for building handlers that add a particular element
   to the database."
-  [spec get-conn-ctx-fn parent-route]
+  [spec get-conn-ctx-fn resource-route]
   (handler
    "coll-post"
    spec
@@ -204,48 +221,54 @@
        (let [txs (spd/sp->transactions db sp)
              _ (log/info :msg "about to commit" :data txs)
              eid (spd/commit-sp-transactions conn-ctx txs)
-             url (str "/api/v1" parent-route "/" eid)] ;TODO: don't hardcode /api/v1?
+             url (str resource-route "/" eid)]
          (ring-resp/created url))))))
 
 (defn- mk-elem-update
   "Helper function for building handlers that modify a particular
   element (by EID) in the database with information given in the
   body."
-  ;TODO: Respond with 404 if no entity with that ID exists in the DB
   [spec get-conn-ctx-fn]
   (handler
-   "elem-put"
-   spec
-   (fn [{{id :id} :path-params json :json-params :as req}]
-     (let [id (java.lang.Long/valueOf id)
-           conn-ctx (get-conn-ctx-fn)
-           db (d/db (:conn conn-ctx))
-           new (from-json-friendly (:name spec) json)]
-       (spd/commit-sp-transactions conn-ctx (spd/sp->transactions db new))
-       (ring-resp/response (to-json-friendly new))))))
+    "elem-put"
+    spec
+    (fn [{{id :id} :path-params json :json-params :as req}]
+      (let [id (java.lang.Long/valueOf id)
+            conn-ctx (get-conn-ctx-fn)
+            db (d/db (:conn conn-ctx))
+            new (from-json-friendly (:name spec) json)]
+        (if (ent-of-type? (d/entity db id) spec)
+          (do (spd/commit-sp-transactions conn-ctx (spd/sp->transactions db new))
+              (-> new (to-json-friendly) (ring-resp/response)))
+          (error-response 404 "resource does not exist"))))))
 
-(defn- mk-elem-delete 
+(defn- mk-elem-delete
   "Helper function for building handlers that delete a particular
   element (by EID) in the database with information given in the
   body."
-  ;TODO: Respond with 404 if no entity with that ID exists in the DB
   [spec get-conn-ctx-fn]
   (handler
-   "elem-delete"
-   spec
-   (fn [{{id :id} :path-params}]
-     (spd/commit-sp-transactions (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
-     (ring-resp/response ""))))
+    "elem-delete"
+    spec
+    (fn [{{id :id} :path-params}]
+      (let [id (java.lang.Long/valueOf id)
+            db (d/db (:conn (get-conn-ctx-fn)))
+            ent (d/entity db id)]
+        (if (ent-of-type? ent spec)
+          (do (spd/commit-sp-transactions (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
+              (ring-resp/response ""))
+          (error-response 404 "resource does not exist"))))))
+
 
 (defn make-routes
   "Creates a list of routes for a RESTful API for the given
   spec. Allows for get/post on the collection and get/put/delete on
   individual resources.  expects body-params, html-body and json-body
   interceptors."
-  [parent-route spec get-conn-ctx-fn & [simple-repr-fn]]
+  [route-above parent-route spec get-conn-ctx-fn & [simple-repr-fn]]
   [parent-route
    {:get (mk-coll-list-all spec get-conn-ctx-fn simple-repr-fn)
-    :post (mk-elem-create spec get-conn-ctx-fn parent-route)}
+    :post (mk-elem-create spec get-conn-ctx-fn (str route-above parent-route))}
    ["/:id" 
     {:get (mk-elem-get spec get-conn-ctx-fn)
      :put (mk-elem-update spec get-conn-ctx-fn)
@@ -256,12 +279,12 @@
   "Creates a list of routes for a RESTful API for the given
   spec. Allows for get/post on the collection and get/put/delete on
   individual resources."
-  [spec get-conn-ctx-fn]
+  [route-above spec get-conn-ctx-fn]
   (let [parent-route (str "/" (-> spec :name name lower-case))
         api-name (keyword (str (name (:name spec)) "-API"))]
     (expand-routes
      [[api-name
-       (conj (make-routes parent-route spec get-conn-ctx-fn)
+       (conj (make-routes route-above parent-route spec get-conn-ctx-fn)
              ^:interceptors
              [(body-params/body-params)
               http/html-body

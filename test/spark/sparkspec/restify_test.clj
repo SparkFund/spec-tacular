@@ -54,9 +54,7 @@
     :testspec/val1 "hi"
     :testspec/val2 13124}])
 
-;(def routes (make-expanded-routes (sp/get-spec :TestSpec) (fn [] {:conn *conn*})))
-
-(def service {::http/routes #(make-expanded-routes (sp/get-spec :TestSpec) (fn [] {:conn *conn*})) 
+(def service {::http/routes #(make-expanded-routes "/api/v1" (sp/get-spec :TestSpec) (fn [] {:conn *conn*}))
               ::http/port 8080})
 
 (def server (::http/service-fn (-> service dev/init http/create-server)))
