@@ -17,12 +17,6 @@
             [clojure.string :as str])
   (:import java.lang.Throwable))
 
-(defn make-url 
-  "Helper function for building resource URLs."
-  [{:keys [remote-addr servlet-path]} eid]
-  (format "http://%s%s/%s"
-          remote-addr servlet-path eid))
-
 (defn explicitly-tag
   "deep-walks a sp object adding explicit :spec-tacular/spec
    spec name tags to the object and all its child items."
@@ -126,12 +120,11 @@
   "Returns JSON describing the collection, in a ring-response. If ?simple=true is passed as a query param, then the items
   will go through a transformation function which returns {:value value :display \"display\"} representation"
   [req eids sp-list simple-repr-fn]
-  (ring-resp/response {:data {:locations (map #(make-url req %) eids)
-              :items (let [result (map to-json-friendly sp-list)]
-                       (if (and (fn? simple-repr-fn)
-                                (= (-> req :query-params :simple) "true"))
-                         (map simple-repr-fn result)
-                         result))}}))
+  (let [tagged (map to-json-friendly sp-list)
+        simple-mode (and (fn? simple-repr-fn)
+                         (= (-> req :query-params :simple) "true"))
+        result (if simple-mode (map simple-repr-fn tagged) tagged)]
+    (ring-resp/response result)))
 
 (defn- mk-coll-get-response-csv
   "Returns CSV describing the collection, in a ring-response.  :many-arity sub-items are ignored, and instead
@@ -141,7 +134,7 @@
     (ring-resp/response)
     (ring-resp/content-type "text/csv")))
 
-(defn- downloadable
+(defn- make-downloadable
   "utility function which accepts a ring-response and a filename, and wraps
   the response with a content-disposition: attachment header if filename isn't nil,
   forcing the response to show up as a save-as. This is useful for export functions.
@@ -154,105 +147,131 @@
       ; otherwise we want to just return the raw text to display in-browser
       ring-resp)))
 
-(defn- mk-coll-get
-  "Helper function for building handlers that return all elements of a
-  certain spec.  "
+(defn- mk-coll-list-all
+  "Helper function for building handlers that return all elements of a certain spec."
   [spec get-conn-ctx-fn simple-repr-fn]
   (handler
-   "coll-get"
-   spec
-   (fn [req]
-     (let [db (d/db (:conn (get-conn-ctx-fn)))
-           eids (spd/get-all-eids db spec)
-           spec-name (:name spec)
-           sp-list (map #(spd/db->sp db (d/entity db %) spec-name) eids)
-           format (-> req :query-params :format)]
-       (-> (cond
-             (or (nil? format) (= format "json"))
-             , (mk-coll-get-response-json req eids sp-list simple-repr-fn)
-             (= format "csv")
-             , (mk-coll-get-response-csv spec-name sp-list)
-             :else
-             , (-> "ERROR: Invalid output format (choices: json, csv)"
-                   (ring-resp/response)
-                   (ring-resp/status 400)))
-           (downloadable (some-> req :query-params :filename)))))))
+    "coll-list-all"
+    spec
+    (fn [req]
+      (let [db (d/db (:conn (get-conn-ctx-fn)))
+            eids (spd/get-all-eids db spec)
+            spec-name (:name spec)
+            sp-list (map #(spd/db->sp db (d/entity db %) spec-name) eids)
+            format (-> req :query-params :format)
+            filename (some-> req :query-params :filename)]
+        (cond
+          (= format "csv")
+          (-> (mk-coll-get-response-csv spec-name sp-list)
+              (make-downloadable filename))
+          (or (= format "json") (nil? format))
+          (-> (mk-coll-get-response-json req eids sp-list simple-repr-fn)
+              (make-downloadable filename))
+          :else
+          (-> "ERROR: Invalid output format (choices: json, csv)"
+              (ring-resp/response)
+              (ring-resp/content-type "text/plain")
+              (ring-resp/status 400)))))))
 
-(defn- mk-coll-post 
-  "Helper function for building handlers that add a particular element
-  to the database."
-  [spec get-conn-ctx-fn]
-  (handler
-   "coll-post"
-   spec
-   (fn [req]
-     (let [sp (from-json-friendly (:name spec) (:data (:json-params req)))
-           conn-ctx (get-conn-ctx-fn)
-           db (d/db (:conn conn-ctx))]
-       (assert (not (spd/get-eid db sp)) 
-               "object must not already be in the db")
-       (let [txs (spd/sp->transactions db sp)
-             _ (log/info :msg "about to commit" :data txs)
-             eid (spd/commit-sp-transactions conn-ctx txs)
-             url (make-url req eid)]
-         (ring-resp/created url))))))
+(defn- ent-of-type?
+  "Helper; Given a datomic entity (from d/entity) and a spec,
+  returns true if the entity is of that spec's type"
+  [ent spec]
+  (and (some? ent)
+       (not (empty? ent))
+       (= (:name spec) (:spec-tacular/spec ent))))
 
-(defn- mk-elem-get 
+(defn- error-response
+  "Helper for generating plaintext error responses"
+  [code message]
+  (-> (str "ERROR: " message)
+      (ring-resp/response)
+      (ring-resp/status code)
+      (ring-resp/content-type "text/plain")))
+
+(defn- mk-elem-get
   "Helper function for building handlers that get a particular element
   according to its EID and type."
   [spec get-conn-ctx-fn]
   (handler
-   "elem-get"
-   spec
-   (fn [{{id :id} :path-params}]
-     (let [id (java.lang.Long/valueOf id)
-           db (d/db (:conn (get-conn-ctx-fn)))
-           ent (d/entity db id)]
-       (assert (some? ent) "entity should exist in the database")
-       (ring-resp/response 
-        {:data (to-json-friendly (spd/db->sp db ent (:name spec)))})))))
+    "elem-get"
+    spec
+    (fn [{{id :id} :path-params}]
+      (let [id (java.lang.Long/valueOf id)
+            db (d/db (:conn (get-conn-ctx-fn)))
+            ent (d/entity db id)]
+        (if (ent-of-type? ent spec)
+          (-> (spd/db->sp db ent (:name spec))
+              (to-json-friendly)
+              (ring-resp/response))
+          (error-response 404 "resource does not exist"))))))
 
-(defn- mk-elem-put
+(defn- mk-elem-create
+  "Helper function for building handlers that add a particular element
+  to the database."
+  [spec get-conn-ctx-fn resource-route]
+  (handler
+   "coll-post"
+   spec
+   (fn [req]
+     (let [sp (from-json-friendly (:name spec) (:json-params req))
+           conn-ctx (get-conn-ctx-fn)
+           db (d/db (:conn conn-ctx))]
+       (assert (not (spd/get-eid db sp)) "object must not already be in the db")
+       (let [txs (spd/sp->transactions db sp)
+             _ (log/info :msg "about to commit" :data txs)
+             eid (spd/commit-sp-transactions conn-ctx txs)
+             url (str resource-route "/" eid)]
+         (ring-resp/created url))))))
+
+(defn- mk-elem-update
   "Helper function for building handlers that modify a particular
   element (by EID) in the database with information given in the
   body."
   [spec get-conn-ctx-fn]
   (handler
-   "elem-put"
-   spec
-   (fn [{{id :id} :path-params json :json-params :as req}]
-     (let [id (java.lang.Long/valueOf id)
-           conn-ctx (get-conn-ctx-fn)
-           db (d/db (:conn conn-ctx))
-           new (from-json-friendly (:name spec) (:data json))]
-       (spd/commit-sp-transactions conn-ctx (spd/sp->transactions db new))
-       (ring-resp/response {:body {:new new}})))))
+    "elem-put"
+    spec
+    (fn [{{id :id} :path-params json :json-params :as req}]
+      (let [id (java.lang.Long/valueOf id)
+            conn-ctx (get-conn-ctx-fn)
+            db (d/db (:conn conn-ctx))
+            new (from-json-friendly (:name spec) json)]
+        (if (ent-of-type? (d/entity db id) spec)
+          (do (spd/commit-sp-transactions conn-ctx (spd/sp->transactions db new))
+              (-> new (to-json-friendly) (ring-resp/response)))
+          (error-response 404 "resource does not exist"))))))
 
-(defn- mk-elem-delete 
+(defn- mk-elem-delete
   "Helper function for building handlers that delete a particular
   element (by EID) in the database with information given in the
   body."
   [spec get-conn-ctx-fn]
   (handler
-   "elem-delete"
-   spec
-   (fn [{{id :id} :path-params}]
-     (spd/commit-sp-transactions (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
-     (ring-resp/response
-      {:body {:deleted id}}))))
+    "elem-delete"
+    spec
+    (fn [{{id :id} :path-params}]
+      (let [id (java.lang.Long/valueOf id)
+            db (d/db (:conn (get-conn-ctx-fn)))
+            ent (d/entity db id)]
+        (if (ent-of-type? ent spec)
+          (do (spd/commit-sp-transactions (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
+              (ring-resp/response ""))
+          (error-response 404 "resource does not exist"))))))
+
 
 (defn make-routes
   "Creates a list of routes for a RESTful API for the given
   spec. Allows for get/post on the collection and get/put/delete on
   individual resources.  expects body-params, html-body and json-body
   interceptors."
-  [parent-route spec get-conn-ctx-fn & [simple-repr-fn]]
+  [route-above parent-route spec get-conn-ctx-fn & [simple-repr-fn]]
   [parent-route
-   {:get (mk-coll-get spec get-conn-ctx-fn simple-repr-fn)
-    :post (mk-coll-post spec get-conn-ctx-fn)}
+   {:get (mk-coll-list-all spec get-conn-ctx-fn simple-repr-fn)
+    :post (mk-elem-create spec get-conn-ctx-fn (str route-above parent-route))}
    ["/:id" 
     {:get (mk-elem-get spec get-conn-ctx-fn)
-     :put (mk-elem-put spec get-conn-ctx-fn)
+     :put (mk-elem-update spec get-conn-ctx-fn)
      :delete (mk-elem-delete spec get-conn-ctx-fn)}]])
 
 ;; TODO: document this better in terms of how
@@ -260,12 +279,12 @@
   "Creates a list of routes for a RESTful API for the given
   spec. Allows for get/post on the collection and get/put/delete on
   individual resources."
-  [spec get-conn-ctx-fn]
+  [route-above spec get-conn-ctx-fn]
   (let [parent-route (str "/" (-> spec :name name lower-case))
         api-name (keyword (str (name (:name spec)) "-API"))]
     (expand-routes
      [[api-name
-       (conj (make-routes parent-route spec get-conn-ctx-fn)
+       (conj (make-routes route-above parent-route spec get-conn-ctx-fn)
              ^:interceptors
              [(body-params/body-params)
               http/html-body
