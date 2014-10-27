@@ -359,6 +359,19 @@
             "object must not already be in the db")
     (commit-sp-transactions conn-ctx (sp->transactions db new-sp))))
 
+(defn masked-create-sp!
+  "Ensures sp is in the db prior to updating. aborts if not."
+  [conn-ctx sp mask]
+  (let [db (db/db (:conn conn-ctx))
+        _ (assert (not (get-eid db sp))
+                  "object must not already be in the db")
+        deletions (atom '())
+        datomic-data (build-transactions db sp mask deletions)
+        txns (with-meta
+               (cons datomic-data @deletions)
+               (meta datomic-data))]
+    (commit-sp-transactions conn-ctx txns)))
+
 (defn update-sp!
   "old-sp and new-sp need {:db-ref {:eid eid}} defined.
    ultra-conservative transaction semantics -- if anything that
