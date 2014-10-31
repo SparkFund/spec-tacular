@@ -328,7 +328,7 @@
 (defn inspect-spec
   "Produces a json-friendly nested-map representation of a spec.
    Nesting depth is bounded by the mask."
-  [spec-name mask & [resource-prefix-str inspect-prefix-str]]
+  [spec-name mask & [resource-prefix-str schema-prefix-str]]
   (let [spec (get-spec spec-name)
         spec-type (if (:elements spec)
                     :enum
@@ -336,10 +336,10 @@
                       :primitive
                       :record))
         resource-kv (when (and resource-prefix-str (= :record spec-type))
-                      {:resource (str resource-prefix-str "/"
+                      {:resource-url (str resource-prefix-str "/"
                                       (lower-case (name spec-name)))})
-        inspect-kv (when (and inspect-prefix-str (#{:record :enum} spec-type))
-                     {:inspect-route (str inspect-prefix-str "/"
+        inspect-kv (when (and schema-prefix-str (#{:record :enum} spec-type))
+                     {:schema-url (str schema-prefix-str "/"
                                           (lower-case (name spec-name)))})]
     (when mask
       (merge
@@ -351,7 +351,7 @@
          (if (= :enum spec-type)
            {:expanded true
             :enum-elements (->> (:elements spec)
-                                (map #(inspect-spec % (get mask %) resource-prefix-str inspect-prefix-str))
+                                (map #(inspect-spec % (get mask %) resource-prefix-str schema-prefix-str))
                                 (filter some?))}
            (let [items
                  , (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)
@@ -361,7 +361,7 @@
 ;                     :identity? (:identity? item) ; not meaningful for front-end?
 ;                     :unique? (:unique? item)
 ;                     :optional (:optional item)
-                             :spec (inspect-spec sub-sp-nm (iname mask) resource-prefix-str inspect-prefix-str)}})]
+                             :spec (inspect-spec sub-sp-nm (iname mask) resource-prefix-str schema-prefix-str)}})]
              {:expanded true
               :items (or (reduce merge items) [])}))
          (if (= :primitive spec-type)
