@@ -357,7 +357,7 @@
                  , (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)
                          :when (iname mask)]
                      {iname {:many (= cardinality :many)
-                             :required? (if (:required? item) true false)
+                             :required (if (:required? item) true false)
 ;                     :identity? (:identity? item) ; not meaningful for front-end?
 ;                     :unique? (:unique? item)
 ;                     :optional (:optional item)
