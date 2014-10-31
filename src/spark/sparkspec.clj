@@ -328,34 +328,42 @@
 (defn inspect-spec
   "Produces a json-friendly nested-map representation of a spec.
    Nesting depth is bounded by the mask."
-  [spec-name mask & [resource-prefix-str]]
-  (let [resource-kv (when resource-prefix-str
+  [spec-name mask & [resource-prefix-str inspect-prefix-str]]
+  (let [spec (get-spec spec-name)
+        spec-type (if (:elements spec)
+                    :enum
+                    (if (primitive? spec-name)
+                      :primitive
+                      :record))
+        resource-kv (when (and resource-prefix-str (= :record spec-type))
                       {:resource (str resource-prefix-str "/"
-                                      (lower-case (name spec-name)))})]
-    (if (map? mask)
-      (let [spec (get-spec spec-name)]
-        (if (:elements spec)
-          (merge {:spec-name spec-name
-                  :enum-elements (->> (:elements spec)
-                                      (map #(inspect-spec % (get mask %) resource-prefix-str))
-                                      (filter some?))}
-                 resource-kv)
-          (let [items
-                , (for [{iname :name [cardinality type] :type :as item} (:items spec)
-                        :when (iname mask)]
-                    {iname {:many (= cardinality :many)
-                            :required? (if (:required? item) true false)
+                                      (lower-case (name spec-name)))})
+        inspect-kv (when (and inspect-prefix-str (#{:record :enum} spec-type))
+                     {:inspect-route (str inspect-prefix-str "/"
+                                          (lower-case (name spec-name)))})]
+    (when mask
+      (merge
+       {:spec-name spec-name
+        :spec-type spec-type}
+       inspect-kv
+       resource-kv
+       (if (map? mask)
+         (if (= :enum spec-type)
+           {:expanded true
+            :enum-elements (->> (:elements spec)
+                                (map #(inspect-spec % (get mask %) resource-prefix-str inspect-prefix-str))
+                                (filter some?))}
+           (let [items
+                 , (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)
+                         :when (iname mask)]
+                     {iname {:many (= cardinality :many)
+                             :required? (if (:required? item) true false)
 ;                     :identity? (:identity? item) ; not meaningful for front-end?
 ;                     :unique? (:unique? item)
 ;                     :optional (:optional item)
-                            :spec (inspect-spec type (iname mask) resource-prefix-str)}})]
-            (merge {:spec-name spec-name
-                    :items (or (reduce merge items) [])}
-                   resource-kv))))
-      (when mask
-        (if (primitive? spec-name)
-          {:spec-name spec-name
-           :primitive-type true}
-          (merge {:spec-name :ref
-                  :ref spec-name}
-                 resource-kv))))))
+                             :spec (inspect-spec sub-sp-nm (iname mask) resource-prefix-str inspect-prefix-str)}})]
+             {:expanded true
+              :items (or (reduce merge items) [])}))
+         (if (= :primitive spec-type)
+           {:expanded true}
+           {:expanded false}))))))
