@@ -252,6 +252,34 @@
               true)])
          (into {}))))
 
+(defn shallow-plus-enums-mask
+  "Builds a mask-map of the given spec for consumption by
+  build-transactions. Only lets top-level and is-component fields
+  through As well, expands toplevel enums and any enum members which
+  have only primitive fields(intended to catch common cases like
+  'status' enums where the options have no interesting fields)."
+  [spec]
+  (let [is-leaf? (fn [sp-name]
+                   (let [spec (get-spec sp-name)]
+                     (and (:items spec)
+                          (every? primitive?
+                                  (map #(second (:type %)) (:items spec))))))]
+    (if (:elements spec)
+      (into {} (map #(if (is-leaf? %)
+                       [% (shallow-mask (get-spec %))] ; one more step is enough to expand leafy records
+                       [% true])
+                    (:elements spec)))
+      (->> (for [{iname :name
+                  [_ typ] :type
+                  is-component :is-component?
+                  :as item} (:items spec)]
+             (let [sub-sp (get-spec typ)]
+               [iname
+                (if (:elements sub-sp)
+                  (shallow-plus-enums-mask sub-sp) ;toplevel enums can be leaf-expanded
+                  true)]))
+           (into {})))))
+
 (defn new-components-mask
   "Builds a mask that specifies only adding entities that don't already
   have eids. Any value with an eid will be treaded as an association and 
