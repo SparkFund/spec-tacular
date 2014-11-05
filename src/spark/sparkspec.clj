@@ -76,7 +76,9 @@
 
 (defmulti get-map-ctor
   "If the keyword or class names a Spec MySpec,
-   returns the map->MySpec map factory fn"
+   returns a map->MySpec map factory fn-name.
+   return wrapped map-ctors, not the actual map->Record, to avoid CLJ-1388
+   while waiting for Clojure 1.7" 
   resolve-fn)
 
 (defmulti get-spec-class 
@@ -170,13 +172,12 @@
   "For use in macros, translates a Spec into a record type."
   ^:private
   [spec]
-  `(defrecord ~(symbol (-> spec :name name))
-       ~(vec (map #(-> % :name name symbol) (:items spec)))))
+  `(defrecord ~(symbol (-> spec :name name)) []))
 
 (m/defn non-recursive-ctor
   "builds a spark type from a record, checking fields, but children
    must all be primitive, non-recursive values or already spark types"
-  [recfn :- (s/=> s/Any {s/Keyword s/Any}) spec :- spark.sparkspec.spec.Spec sp :- {s/Keyword s/Any}]
+  [map-ctor :- (s/=> s/Any {s/Keyword s/Any}) spec :- spark.sparkspec.spec.Spec sp :- {s/Keyword s/Any}]
   (let [items (:items spec)
         defaults
         (reduce
@@ -198,7 +199,7 @@
             (fn [i]
               (check-component! spec (:name i) (get sp-map (:name i))))
             items))
-    (dissoc (with-meta (recfn sp-map) {:spec spec})
+    (dissoc (with-meta (map-ctor sp-map) {:spec spec})
             :spec-tacular/spec)))
 
 (m/defn recursive-ctor 
@@ -267,8 +268,11 @@
 (defn mk-get-map-ctor
   ^:private
   [spec]
-  (let [fac-sym (symbol (str "map->" (name (:name spec))))]
+  (let [builtin-sym (symbol (str "map->" (name (:name spec))))
+        fac-sym (symbol (str builtin-sym "-fixed"))]
     `(do
+       (defn ~fac-sym [o#]
+         (~builtin-sym (into {} o#))) ; avoid CLJ-1388 until Clojure 1.7 comes out.
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
        (defmethod get-map-ctor ~(symbol (name (:name spec))) [_#] ~fac-sym))))
 
