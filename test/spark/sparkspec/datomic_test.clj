@@ -316,6 +316,56 @@
               entity (db/entity (db) eid)]
           (is (= (:scm/multi entity) #{"hi"})))))))
 
+(deftest sp-filter-with-mask-test
+  (is (= (sp-filter-with-mask {:val2 true} :Scm (scm {:val1 "1" :val2 1}))
+         (scm {:val2 1})))
+  (is (= (sp-filter-with-mask {:val2 true} :Scm (scm {:db-ref {:eid 123} :val1 "1" :val2 1}))
+         (scm {:val2 1 :db-ref {:eid 123}}))
+      "eids come along for the ride")
+  (is (= (sp-filter-with-mask true :Scm (scm {:db-ref {:eid 123} :val1 "1" :val2 1}))
+         (scm {:db-ref {:eid 123}}))
+      "only eids on a 'true' mask")
+  (is (= (sp-filter-with-mask {:scm2 true} :Scm (scm {:db-ref {:eid 123} :val1 "1" :val2 1 :scm2 (scm2 {:val1 1 :db-ref {:eid 321}})}))
+         (scm {:db-ref {:eid 123} :scm2 (scm2 {:db-ref {:eid 321}})}))
+      "only eids on a 'true' mask, nested."))
+
+(deftest update-tests
+  (with-test-db simple-schema
+    (let [a1 (scm2 {:val1 1})
+          a2 (scm2 {:val1 2})
+          a1id (create-sp! {:conn *conn*} a1)
+          a2id (create-sp! {:conn *conn*} a2)
+          a1db (get-by-eid (db) a1id)
+          a2db (get-by-eid (db) a2id)
+          b1 (scm {:val1 "b" :scm2 a1db})
+          b1eid (create-sp! {:conn *conn*} b1)
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 1 (:val1 (:scm2 b1db)))
+                "create compound objects referring to a1db")
+          _ (update-sp! {:conn *conn*}
+                        b1db
+                        (assoc b1db :scm2 a2db))
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 2 (:val1 (:scm2 b1db)))
+                "succesfully switched sub-object to refer to the a2db.")
+          _ (update-sp! {:conn *conn*}
+                        b1db
+                        (assoc b1db :scm2 (assoc a2 :val1 666)))
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 666 (:val1 (:scm2 b1db)))
+                "We've created a new :scm2 w/ 666 -- we assoc'd to the a2 which had not been added to the db yet.")
+          _ (update-sp! {:conn *conn*}
+                        b1db
+                        (assoc b1db :val1 "c"))
+          ; intentionally did not fetch this write to val1
+          _ (update-sp! {:conn *conn*}
+                        (dissoc b1db :val1)
+                        (assoc (dissoc b1db :val1) :scm2 a2db))
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 2 (:val1 (:scm2 b1db)))
+             "We can update if there is a concurrent write to a key we don't care about")
+          ])))
+
 (deftest enum-tests
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) (scmownsenum {:enum (scm3)}))
@@ -401,6 +451,50 @@
           b1db (get-by-eid (db) b1eid)
           _  (is (= 2 (:val1 (:scm2 b1db)))
                  "switched back to 2, NOT 666. our mask says we aren't editing the values in from-db values")])))
+
+(deftest item-mask-test
+  (with-test-db simple-schema
+    (let [a1 (scm2 {:val1 1})
+          a2 (scm2 {:val1 2})
+          a1id (create-sp! {:conn *conn*} a1)
+          a2id (create-sp! {:conn *conn*} a2)
+          a1db (get-by-eid (db) a1id)
+          a2db (get-by-eid (db) a2id)
+          b1 (scm {:val1 "b" :scm2 a1db})
+          b1eid (masked-create-sp! {:conn *conn*} b1 (item-mask :Scm b1))
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 1 (:val1 (:scm2 b1db)))
+                "create compound objects referring to a1db")
+          _ (let [b2 (assoc b1db :scm2 (scm2 {:db-ref {:eid (get-in a2db [:db-ref :eid])}}))]
+              (masked-update-sp! {:conn *conn*}
+                                 b2
+                                 (item-mask :Scm b2)))
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 2 (:val1 (:scm2 b1db)))
+                "succesfully switched sub-object to refer to the a2db.")
+          _ (let [b2 (assoc b1db :scm2 (assoc a2db :val1 3))]
+              (masked-update-sp! {:conn *conn*}
+                                 b2
+                                 (item-mask :Scm b2)))
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= 3 (:val1 (:scm2 b1db)))
+                "Can update a sub-value if we want")
+          a2db (get-by-eid (db) a2id)
+          _ (is (= 3 (:val1 a2db))
+                "Can update a sub-value if we want, and it changes the sub-thing")
+          c1id (create-sp! {:conn *conn*} (scmownsenum {:enum (scm2 {:val1 4})}))
+          c1db (get-by-eid (db) c1id)
+          _ (let [c2 (assoc c1db :enum (scm3))]
+              (masked-update-sp! {:conn *conn*} c2 (item-mask :ScmOwnsEnum c2)))
+          c1db (get-by-eid (db) c1id)
+          _ (is (= (scm3) (dissoc (:enum c1db) :db-ref))
+                "can swich to a new enum value")
+          _ (let [c2 (assoc c1db :enum (scm2 {:db-ref {:eid (get-in a1db [:db-ref :eid])}}))]
+              (masked-update-sp! {:conn *conn*} c2 (item-mask :ScmOwnsEnum c2)))
+          c1db (get-by-eid (db) c1id)
+          _ (is (= 1 (:val1 (:enum c1db)))
+                "can swich to a new enum value via only eid")
+          ])))
 
 (deftest transaction-log-test
   (with-test-db simple-schema

@@ -235,6 +235,25 @@
          (#(assoc % spark-type-attr (:name spec)))
          (#(with-meta % {:eid eid})))))
 
+(defn item-mask
+  "Builds a mask-map representing a specific sp value,
+   where missing keys represent masked out fields and sp objects
+   consisting only of a db-ref are considered 'true' valued leaves
+   for identity updates only."
+  [spec-name sp]
+  (let [spec (get-spec spec-name)]
+    (if (some? spec)
+      (if (:elements spec)
+        (let [sub-spec-name (:name (get-spec sp))]
+          {sub-spec-name (item-mask sub-spec-name sp)}); only can set to the particular enum type of the instance
+        (if (= [:db-ref] (keys sp))
+          true
+          (into {} (map (fn [{iname :name [_ sub-spec-name] :type}]
+                          (when-let [sub-val (get sp iname)]
+                            [iname (item-mask sub-spec-name sub-val)]))
+                        (:items spec)))))
+      true)))
+
 (defn shallow-mask
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Only lets top-level and is-component fields
@@ -388,7 +407,7 @@
     (commit-sp-transactions conn-ctx (sp->transactions db new-sp))))
 
 (defn masked-create-sp!
-  "Ensures sp is in the db prior to updating. aborts if not."
+  "Ensures sp is not in the db prior to creating. aborts if so."
   [conn-ctx sp mask]
   (let [db (db/db (:conn conn-ctx))
         _ (assert (not (get-eid db sp))
@@ -400,21 +419,63 @@
                (meta datomic-data))]
     (commit-sp-transactions conn-ctx txns)))
 
+(defn sp-filter-with-mask
+  "applies a mask to a sp instance, keeping only the keys mentioned, 
+  (including any relevant :db-id keys)"
+  [mask spec-name sp]
+  (let [spec (get-spec spec-name)]
+    (if (some? spec)
+      (if (= true mask)
+        (reduce (fn [a k] (if (= :db-ref k) a (dissoc a k)))
+                sp (keys sp))
+        (if (map? mask)
+          (if (:elements spec)
+            (let [sub-spec-name (:name (get-spec sp))]
+              (sp-filter-with-mask (get mask sub-spec-name) sub-spec-name sp))
+            (let [kept-keys (into #{} (keys mask))]
+              (reduce (fn [a k] 
+                        (if (kept-keys k)
+                          (assoc a k (sp-filter-with-mask 
+                                      (get mask k)
+                                      (->> (:items spec)
+                                           (filter #(= k (:name %)) )
+                                           (first)
+                                           (:type)
+                                           (second))
+                                      (get sp k)))
+                          (if (= :db-ref k)
+                            a
+                            (dissoc a k))))
+                      sp (keys sp))))
+          nil))
+      (if (= true mask)
+        sp
+        nil))))
+
 (defn update-sp!
   "old-sp and new-sp need {:db-ref {:eid eid}} defined.
    ultra-conservative transaction semantics -- if anything that
    old-sp knows about has changed, abort upserting to sp-new.
-   Returns datomic transaction result."
+   Returns datomic transaction result.
+   Uses the semantics of item-mask, so keys that are not present 
+   won't be updated or checked for comparing old vs new."
   [conn-ctx old-sp new-sp]
   (assert old-sp "must be updating something")
   (let [spec (get-spec old-sp)
         _ (when (not= spec (get-spec new-sp)) (throw (ex-info "old-sp and new-sp have mismatched specs" {:old-spec spec :new-spec (get-spec new-sp)})))
+        mask (item-mask (:name spec) old-sp)
+        _ (let [new-mask (item-mask (:name spec) new-sp)]
+            (when (not= mask new-mask) (throw (ex-info "structure of old-sp and new-sp yield differing masks" {:old-sp old-sp :new-sp new-sp :old-mask mask :new-mask new-mask}))))
         db (db/db (:conn conn-ctx))
         old-eid (get-in old-sp [:db-ref :eid])
         _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to update."  {:old-eid old-eid :new-eid (get-in new-sp [:db-ref :eid])})))
-        current (db->sp db (db/entity db old-eid) (:name spec))]
+        current (sp-filter-with-mask mask (:name spec) (db->sp db (db/entity db old-eid) (:name spec)))]
     (when (not= old-sp current) (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
-    (let [txns (sp->transactions db new-sp)]
+    (let [deletions (atom '())
+          datomic-data (build-transactions db new-sp mask deletions)
+          txns  (with-meta
+                  (cons datomic-data @deletions)
+                  (meta datomic-data))]
       (commit-sp-transactions conn-ctx txns))))
 
 ; TODO consider replocing the old "update-sp" etc with something more explicitly masked like this?
