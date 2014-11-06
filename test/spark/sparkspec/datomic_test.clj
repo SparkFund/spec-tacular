@@ -453,6 +453,17 @@
                  "switched back to 2, NOT 666. our mask says we aren't editing the values in from-db values")])))
 
 (deftest item-mask-test
+  (is (= (item-mask :Scm {:val1 "b" :val2 nil})
+         {:val1 true, :val2 true})
+      "explicitly nil (but present) keyvals should be true in the mask")
+  (is (= (item-mask :ScmOwnsEnum (scmownsenum {:enums [(scm2 {:val1 1})
+                                                       (scm3)]}))
+         {:enums {:Scm3 {}, :Scm2 {:val1 true}}}))
+  (is (= (item-mask :ScmOwnsEnum (scmownsenum {:enums [(scm2 {:db-ref {:eid 1}})
+                                                       (scm3 {:db-ref {:eid 2}})
+                                                       (scm3 {:db-ref {:eid 4}})]}))
+         {:enums {:Scm3 true, :Scm2 true}})
+      "we collapse the is-many items properly")
   (with-test-db simple-schema
     (let [a1 (scm2 {:val1 1})
           a2 (scm2 {:val1 2})

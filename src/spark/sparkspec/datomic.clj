@@ -133,21 +133,24 @@
           ctor (get-ctor (:name spec))
           reduce-attr->kw #(assoc %1 (keyword (datomic-ns spec) (name %2)) (-> %2 name keyword))
           val (rename-keys ent (reduce reduce-attr->kw {} (map :name (:items spec))))
-          {recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))
-          val (reduce (fn [m {iname :name [cardinality type] :type}]
-                        (let [nsed-key (keyword (clojure.string/lower-case (name (:name spec)))
-                                                (name iname))
-                              v (or (iname ent)
-                                    (get ent nsed-key))]
-                          (if v
-                            (assoc m iname
+          val (reduce (fn [m {iname :name [cardinality typ] :type :as item}]
+                        (let [v (get val iname)]
+                          (if (nil? v)
+                            (assoc m iname ; explicitly list nils for missing values
                                    (case cardinality
-                                     :one (db->sp db v type)
-                                     :many (map #(db->sp db % type) v)))
-                            m)))
-                      val recs)]
+                                     :one nil
+                                     :many (list)))
+                            (case (recursiveness item)
+                              :rec (assoc m iname
+                                          (case cardinality
+                                            :one (db->sp db v typ)
+                                            :many (map #(db->sp db % typ) v)))
+                              :non-rec m))))
+                      val (:items spec))]
       (assert ctor (str "No ctor found for " (:name spec)))
-      (dissoc (assoc (ctor val) :db-ref {:eid eid}) spark-type-attr))))
+      (-> (ctor val)
+          (assoc :db-ref {:eid eid})
+          (dissoc spark-type-attr)))))
 
 (defn get-by-eid [db eid & [sp-type]]
   (db->sp db (db/entity db eid) sp-type))
@@ -235,6 +238,21 @@
          (#(assoc % spark-type-attr (:name spec)))
          (#(with-meta % {:eid eid})))))
 
+(defn sum-masks
+  "addition taken w.r.t. a lattice of 'specificity' eg -- nil < true < {:item ...} 
+   (recall 'true' means the mask consisting only of the db-ref)
+   keys are combined and their values are recursively summed.
+   Enums and Records can be summed the same, as we represent both with maps."
+  ([] nil)
+  ([m] m)
+  ([ma mb]
+     (cond
+      (and (map? ma) (map? mb))
+      (merge-with sum-masks ma mb)
+      (map? ma) ma
+      (map? mb) mb
+      :else (or ma mb))))
+
 (defn item-mask
   "Builds a mask-map representing a specific sp value,
    where missing keys represent masked out fields and sp objects
@@ -242,16 +260,26 @@
    for identity updates only."
   [spec-name sp]
   (let [spec (get-spec spec-name)]
-    (if (some? spec)
+    (if (and (some? spec) (some? sp))
       (if (:elements spec)
-        (let [sub-spec-name (:name (get-spec sp))]
-          {sub-spec-name (item-mask sub-spec-name sp)}); only can set to the particular enum type of the instance
-        (if (= [:db-ref] (keys sp))
-          true
-          (into {} (map (fn [{iname :name [_ sub-spec-name] :type}]
-                          (when-let [sub-val (get sp iname)]
-                            [iname (item-mask sub-spec-name sub-val)]))
-                        (:items spec)))))
+        (let [enum-mask (fn [sp-item]
+                          (let [sub-spec-name (:name (get-spec sp-item))]
+                            {sub-spec-name (item-mask sub-spec-name sp-item)}))]
+          (if (or (list? sp) (vector? sp) (set? sp))
+            (reduce sum-masks (map enum-mask sp)) ; only recover mask from the particular enum types used by the instance
+            (enum-mask sp)))
+        (let [item-mask
+              , (fn [sp-item]
+                  (if (= [:db-ref] (keys sp-item))
+                    true
+                    (into {} (map (fn [{iname :name [_ sub-spec-name] :type}]
+                                    (when (contains? sp-item iname) ; the "parent" 
+                                      [iname (item-mask sub-spec-name 
+                                                        (get sp-item iname))]))
+                                  (:items spec)))))]
+          (if (or (list? sp) (vector? sp) (set? sp))
+            (reduce sum-masks (map item-mask sp)) ; only recover mask from the particular enum types used by the instance
+            (item-mask sp))))
       true)))
 
 (defn shallow-mask
@@ -425,29 +453,36 @@
   [mask spec-name sp]
   (let [spec (get-spec spec-name)]
     (if (some? spec)
-      (if (= true mask)
-        (reduce (fn [a k] (if (= :db-ref k) a (dissoc a k)))
-                sp (keys sp))
-        (if (map? mask)
-          (if (:elements spec)
-            (let [sub-spec-name (:name (get-spec sp))]
-              (sp-filter-with-mask (get mask sub-spec-name) sub-spec-name sp))
-            (let [kept-keys (into #{} (keys mask))]
-              (reduce (fn [a k] 
-                        (if (kept-keys k)
-                          (assoc a k (sp-filter-with-mask 
-                                      (get mask k)
-                                      (->> (:items spec)
-                                           (filter #(= k (:name %)) )
-                                           (first)
-                                           (:type)
-                                           (second))
-                                      (get sp k)))
-                          (if (= :db-ref k)
-                            a
-                            (dissoc a k))))
-                      sp (keys sp))))
-          nil))
+      (let [filter-one
+            , (fn [sp]
+                (if (= true mask)
+                  (reduce (fn [a k] (if (= :db-ref k) a (dissoc a k)))
+                          sp (keys sp))
+                  (if (map? mask)
+                    (if (:elements spec)
+                      (let [sub-spec-name (:name (get-spec sp))]
+                        (sp-filter-with-mask (get mask sub-spec-name)
+                                             sub-spec-name sp))
+                      (let [kept-keys (into #{} (keys mask))]
+                        (reduce
+                         (fn [a k] 
+                           (if (kept-keys k)
+                             (assoc a k (sp-filter-with-mask 
+                                         (get mask k)
+                                         (->> (:items spec)
+                                              (filter #(= k (:name %)) )
+                                              (first)
+                                              (:type)
+                                              (second))
+                                         (get sp k)))
+                             (if (= :db-ref k)
+                               a
+                               (dissoc a k))))
+                         sp (keys sp))))
+                    nil)))]
+        (if (or (list? sp) (vector? sp) (set? sp))
+          (map filter-one sp)
+          (filter-one sp)))
       (if (= true mask)
         sp
         nil))))
@@ -463,14 +498,15 @@
   (assert old-sp "must be updating something")
   (let [spec (get-spec old-sp)
         _ (when (not= spec (get-spec new-sp)) (throw (ex-info "old-sp and new-sp have mismatched specs" {:old-spec spec :new-spec (get-spec new-sp)})))
-        mask (item-mask (:name spec) old-sp)
+        mask (sum-masks (item-mask (:name spec) old-sp) (item-mask (:name spec) new-sp)) ; Summed because we could be adding more "precise" keys etc than were present in old.
+        _ (prn "old" old-sp "new" new-sp "mask" mask)
         _ (let [new-mask (item-mask (:name spec) new-sp)]
             (when (not= mask new-mask) (throw (ex-info "structure of old-sp and new-sp yield differing masks" {:old-sp old-sp :new-sp new-sp :old-mask mask :new-mask new-mask}))))
         db (db/db (:conn conn-ctx))
         old-eid (get-in old-sp [:db-ref :eid])
         _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to update."  {:old-eid old-eid :new-eid (get-in new-sp [:db-ref :eid])})))
         current (sp-filter-with-mask mask (:name spec) (db->sp db (db/entity db old-eid) (:name spec)))]
-    (when (not= old-sp current) (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
+    (when (not= (sp-filter-with-mask mask (:name spec) old-sp) current) (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
     (let [deletions (atom '())
           datomic-data (build-transactions db new-sp mask deletions)
           txns  (with-meta
