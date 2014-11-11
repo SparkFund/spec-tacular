@@ -432,12 +432,15 @@
         db (db/db (:conn conn-ctx))]
     (assert (not (get-eid db new-sp))
             "object must not already be in the db")
+    (check-complete! spec new-sp)
     (commit-sp-transactions conn-ctx (sp->transactions db new-sp))))
 
 (defn masked-create-sp!
   "Ensures sp is not in the db prior to creating. aborts if so."
   [conn-ctx sp mask]
-  (let [db (db/db (:conn conn-ctx))
+  (let [spec (get-spec sp)
+        _ (check-complete! spec sp)
+        db (db/db (:conn conn-ctx))
         _ (assert (not (get-eid db sp))
                   "object must not already be in the db")
         deletions (atom '())

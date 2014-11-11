@@ -111,7 +111,7 @@
       (assert (precondition v)
               (format "precondition for %s failed for %s = %s"
                       sname iname v)))
-    (when (and typ (or required? v))
+    (when (and typ (or required? (some? v)))
       (let [;; This is a work-around for being able to define
             ;; recursive types
             spec-class (get-spec-class typ)
@@ -128,6 +128,16 @@
          (format "invalid type (%s %s) for %s in %s. value %s has class %s."
                  cardinality typ iname sname v (class v))))))
   true)
+
+(defn check-complete! 
+  "checks all fields of a record-sp (not enum), so will throw
+  exception if required field are missing."
+  [spec sp]
+  (assert (nil? (:elements spec)) "meant to be called on record specs only")
+  (doall (map
+          (fn [i]
+            (check-component! spec (:name i) (get sp (:name i))))
+          (:items spec))))
 
 (defn assoc+check
   ([m k v]
@@ -198,7 +208,9 @@
     (doall (map
             (fn [i]
               (check-component! spec (:name i) (get sp-map (:name i))))
-            items))
+            (filter
+             #(contains? sp-map (:name %))
+             items)))
     (dissoc (with-meta (map-ctor sp-map) {:spec spec})
             :spec-tacular/spec)))
 
