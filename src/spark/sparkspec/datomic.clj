@@ -261,14 +261,14 @@
   [spec-name sp]
   (let [spec (get-spec spec-name)]
     (if (and (some? spec) (and (some? sp)
-                               (if (or (list? sp) (vector? sp) (set? sp)) ; union-masks over empty lists would result in the nil mask, but we want an empty list to mean 'true' -- i.e. explicitly empty.
+                               (if (and (coll? sp) (not (map? sp))) ; union-masks over empty lists would result in the nil mask, but we want an empty list to mean 'true' -- i.e. explicitly empty.
                                  (not-empty sp)
                                  true)))
       (if (:elements spec)
         (let [enum-mask (fn [sp-item]
                           (let [sub-spec-name (:name (get-spec sp-item))]
                             {sub-spec-name (item-mask sub-spec-name sp-item)}))]
-          (if (or (list? sp) (vector? sp) (set? sp))
+          (if (and (coll? sp) (not (map? sp)))
             (reduce union-masks (map enum-mask sp)) ; only recover mask from the particular enum types used by the instance
             (enum-mask sp)))
         (let [field-mask
@@ -280,7 +280,7 @@
                                       [iname (item-mask sub-spec-name 
                                                         (get sp-item iname))]))
                                   (:items spec)))))]
-          (if (or (list? sp) (vector? sp) (set? sp))
+          (if (and (coll? sp) (not (map? sp)))
             (reduce union-masks (map field-mask sp)) ; only recover mask from the particular enum types used by the instance
             (field-mask sp))))
       true)))
@@ -486,7 +486,7 @@
                                (dissoc a k))))
                          sp (keys sp))))
                     nil)))]
-        (if (or (list? sp) (vector? sp) (set? sp))
+        (if (and (coll? sp) (not (map? sp)))
           (map filter-one sp)
           (filter-one sp)))
       (if (= true mask)
@@ -549,14 +549,14 @@
   [spec-name sp]
   (let [spec (get-spec spec-name)]
     (if (and (some? spec) (and (some? sp)
-                               (if (or (list? sp) (vector? sp) (set? sp))
+                               (if (and (coll? sp) (not (map? sp)))
                                  (not-empty sp)
                                  true)))
       (if (:elements spec)
         (let [enum-remove (fn [sp-item]
                             (remove-identity-items (:name (get-spec sp-item))
                                                    sp-item))]
-          (if (or (list? sp) (vector? sp) (set? sp))
+          (if (and (coll? sp) (not (map? sp)))
             (into (empty sp) (map enum-remove sp))
             (enum-remove sp)))
         (let [item-remove
@@ -571,7 +571,7 @@
                               (remove-identity-items sub-spec-name
                                                      (get sp-item iname)))))
                    sp-item (:items spec)))]
-          (if (or (list? sp) (vector? sp) (set? sp))
+          (if (and (coll? sp) (not (map? sp)))
             (into (empty sp) (map item-remove sp))
             (item-remove sp))))
       sp)))
@@ -582,11 +582,11 @@
   "recursively walks a sp and removes any sub things that have
   required fields in the spec. Another tricky-to-test updates helper. (including top-level)"
   [sp]
-  (if (or (list? sp) (vector? sp) (set? sp))
+  (if (and (coll? sp) (not (map? sp)))
     (into (empty sp) (remove #(= % ::remove-me) (map remove-items-with-required sp)))
     (let [spec (get-spec sp)]
       (if (and (some? spec) (and (some? sp)
-                                 (if (or (list? sp) (vector? sp) (set? sp))
+                                 (if (and (coll? sp) (not (map? sp)))
                                    (not-empty sp)
                                    true)))
         (if (some identity (map :required? (:items spec)))
@@ -610,7 +610,7 @@
   (let [spec (get-spec sp)]
     (assert (nil? (:elements sp)))
     (if (and (some? spec) (and (some? sp)
-                               (if (or (list? sp) (vector? sp) (set? sp))
+                               (if (and (coll? sp) (not (map? sp)))
                                  (not-empty sp)
                                  true)))
       (reduce 
