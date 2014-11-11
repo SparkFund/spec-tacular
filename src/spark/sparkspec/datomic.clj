@@ -238,8 +238,8 @@
          (#(assoc % spark-type-attr (:name spec)))
          (#(with-meta % {:eid eid})))))
 
-(defn sum-masks
-  "addition taken w.r.t. a lattice of 'specificity' eg -- nil < true < {:item ...} 
+(defn union-masks
+  "union (join) taken w.r.t. a lattice of 'specificity' eg -- nil < true < {:item ...} 
    (recall 'true' means the mask consisting only of the db-ref)
    keys are combined and their values are recursively summed.
    Enums and Records can be summed the same, as we represent both with maps."
@@ -248,7 +248,7 @@
   ([ma mb]
      (cond
       (and (map? ma) (map? mb))
-      (merge-with sum-masks ma mb)
+      (merge-with union-masks ma mb)
       (map? ma) ma
       (map? mb) mb
       :else (or ma mb))))
@@ -260,15 +260,18 @@
    for identity updates only."
   [spec-name sp]
   (let [spec (get-spec spec-name)]
-    (if (and (some? spec) (some? sp))
+    (if (and (some? spec) (and (some? sp)
+                               (if (or (list? sp) (vector? sp) (set? sp)) ; union-masks over empty lists would result in the nil mask, but we want an empty list to mean 'true' -- i.e. explicitly empty.
+                                 (not-empty sp)
+                                 true)))
       (if (:elements spec)
         (let [enum-mask (fn [sp-item]
                           (let [sub-spec-name (:name (get-spec sp-item))]
                             {sub-spec-name (item-mask sub-spec-name sp-item)}))]
           (if (or (list? sp) (vector? sp) (set? sp))
-            (reduce sum-masks (map enum-mask sp)) ; only recover mask from the particular enum types used by the instance
+            (reduce union-masks (map enum-mask sp)) ; only recover mask from the particular enum types used by the instance
             (enum-mask sp)))
-        (let [item-mask
+        (let [field-mask
               , (fn [sp-item]
                   (if (= [:db-ref] (keys sp-item))
                     true
@@ -278,8 +281,8 @@
                                                         (get sp-item iname))]))
                                   (:items spec)))))]
           (if (or (list? sp) (vector? sp) (set? sp))
-            (reduce sum-masks (map item-mask sp)) ; only recover mask from the particular enum types used by the instance
-            (item-mask sp))))
+            (reduce union-masks (map field-mask sp)) ; only recover mask from the particular enum types used by the instance
+            (field-mask sp))))
       true)))
 
 (defn shallow-mask
@@ -492,19 +495,19 @@
 
 (defn update-sp!
   "old-sp and new-sp need {:db-ref {:eid eid}} defined.
-   ultra-conservative transaction semantics -- if anything that
-   old-sp knows about has changed, abort upserting to sp-new.
-   Returns datomic transaction result.
-   Uses the semantics of item-mask, so keys that are not present 
-   won't be updated or checked for comparing old vs new."
+  Uses the semantics of item-mask, so keys that are not present in
+  new-sp won't be updated or checked for comparing old vs new.  
+
+  We may want to consider more conservative transaction semantics,
+  i.e.  take the maximum/union of old-sp and new-sp masks, (i.e. if
+  some property of new-sp is calculated as a function of other
+  proeprties, but those source properties aren't mentioned in the
+  sp-new they won't be locked for the update."
   [conn-ctx old-sp new-sp]
   (assert old-sp "must be updating something")
   (let [spec (get-spec old-sp)
         _ (when (not= spec (get-spec new-sp)) (throw (ex-info "old-sp and new-sp have mismatched specs" {:old-spec spec :new-spec (get-spec new-sp)})))
-        mask (sum-masks (item-mask (:name spec) old-sp) (item-mask (:name spec) new-sp)) ; Summed because we could be adding more "precise" keys etc than were present in old.
-        _ (prn "old" old-sp "new" new-sp "mask" mask)
-        _ (let [new-mask (item-mask (:name spec) new-sp)]
-            (when (not= mask new-mask) (throw (ex-info "structure of old-sp and new-sp yield differing masks" {:old-sp old-sp :new-sp new-sp :old-mask mask :new-mask new-mask}))))
+        mask (item-mask (:name spec) new-sp) ;(union-masks (item-mask (:name spec) old-sp) (item-mask (:name spec) new-sp)) ; Summed because we could be adding more "precise" keys etc than were present in old.
         db (db/db (:conn conn-ctx))
         old-eid (get-in old-sp [:db-ref :eid])
         _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to update."  {:old-eid old-eid :new-eid (get-in new-sp [:db-ref :eid])})))
@@ -538,3 +541,87 @@
                            (dissoc m :db-ref)
                            m))
                  sp))
+
+(defn remove-identity-items
+  "recursively walks a sp and removes any :unique? or :identity?
+  items (as those are harder to test.) We do want to come up with some
+  sensible :identity? tests at some point though."
+  [spec-name sp]
+  (let [spec (get-spec spec-name)]
+    (if (and (some? spec) (and (some? sp)
+                               (if (or (list? sp) (vector? sp) (set? sp))
+                                 (not-empty sp)
+                                 true)))
+      (if (:elements spec)
+        (let [enum-remove (fn [sp-item]
+                            (remove-identity-items (:name (get-spec sp-item))
+                                                   sp-item))]
+          (if (or (list? sp) (vector? sp) (set? sp))
+            (into (empty sp) (map enum-remove sp))
+            (enum-remove sp)))
+        (let [item-remove
+              , (fn [sp-item]
+                  (reduce 
+                   (fn [it {:keys [unique? identity?]
+                            iname :name
+                            [_ sub-spec-name] :type}]
+                     (if (or unique? identity?)
+                       (dissoc it iname) ; drop unique fields
+                       (assoc it iname
+                              (remove-identity-items sub-spec-name
+                                                     (get sp-item iname)))))
+                   sp-item (:items spec)))]
+          (if (or (list? sp) (vector? sp) (set? sp))
+            (into (empty sp) (map item-remove sp))
+            (item-remove sp))))
+      sp)))
+
+; TODO we could make it actually remove the keys instead of nil them, need a helper with some sentinal probably easiest?
+; also we probably want to only strip these on nested things, not the toplevel thing. (i.e. THIS is the helper already.)
+(defn remove-items-with-required
+  "recursively walks a sp and removes any sub things that have
+  required fields in the spec. Another tricky-to-test updates helper. (including top-level)"
+  [sp]
+  (if (or (list? sp) (vector? sp) (set? sp))
+    (into (empty sp) (remove #(= % ::remove-me) (map remove-items-with-required sp)))
+    (let [spec (get-spec sp)]
+      (if (and (some? spec) (and (some? sp)
+                                 (if (or (list? sp) (vector? sp) (set? sp))
+                                   (not-empty sp)
+                                   true)))
+        (if (some identity (map :required? (:items spec)))
+          ::remove-me           
+          (reduce 
+           (fn [it [sub-name sub-val]]
+             (let [rec-val (remove-items-with-required sub-val)]
+               (if (= ::remove-me rec-val)
+                 (dissoc it sub-name)
+                 (assoc it sub-name
+                        rec-val))))
+           sp sp))
+        sp))))
+
+(defn remove-sub-items-with-required
+  "recursively walks a single (map) sp and removes any sub-sps that
+  have required fields in the spec (but not the toplevel one, only
+  sub-items). Another tricky-to-test updates helper.  Also, remove any
+  top-level attributes that are required but have nil values."
+  [sp]
+  (let [spec (get-spec sp)]
+    (assert (nil? (:elements sp)))
+    (if (and (some? spec) (and (some? sp)
+                               (if (or (list? sp) (vector? sp) (set? sp))
+                                 (not-empty sp)
+                                 true)))
+      (reduce 
+       (fn [it {:keys [required?] sub-name :name}] ; [sub-name sub-val]
+         (if (contains? sp sub-name)
+           (let [rec-val (remove-items-with-required (get sp sub-name))]
+             (if (or (and required? (nil? rec-val))
+                     (= ::remove-me rec-val))
+               (dissoc it sub-name)
+               (assoc it sub-name
+                      rec-val)))
+           it))
+       sp (:items spec))
+      sp)))

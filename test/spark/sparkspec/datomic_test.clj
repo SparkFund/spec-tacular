@@ -337,7 +337,7 @@
           a2id (create-sp! {:conn *conn*} a2)
           a1db (get-by-eid (db) a1id)
           a2db (get-by-eid (db) a2id)
-          b1 (scm {:val1 "b" :scm2 a1db})
+          b1 (scm {:val1 "b" :scm2 a1db :multi ["1" "2"]})
           b1eid (create-sp! {:conn *conn*} b1)
           b1db (get-by-eid (db) b1eid)
           _ (is (= 1 (:val1 (:scm2 b1db)))
@@ -357,13 +357,36 @@
           _ (update-sp! {:conn *conn*}
                         b1db
                         (assoc b1db :val1 "c"))
-          ; intentionally did not fetch this write to val1
-          _ (update-sp! {:conn *conn*}
+          _ (update-sp! {:conn *conn*} ; intentionally did not fetch this write to val1
                         (dissoc b1db :val1)
                         (assoc (dissoc b1db :val1) :scm2 a2db))
           b1db (get-by-eid (db) b1eid)
           _ (is (= 2 (:val1 (:scm2 b1db)))
-             "We can update if there is a concurrent write to a key we don't care about")
+                "We can update if there is a concurrent write to a key we don't care about")
+          _ (update-sp! {:conn *conn*}
+                        b1db
+                        (assoc b1db :multi []))
+          b1db (get-by-eid (db) b1eid)
+          _ (is (= [] (:multi b1db))
+                "Can update to delete lists ")
+          b2eid (create-sp! {:conn *conn*} (scmm {:vals [(scm2 {:val1 1})
+                                                         (scm2 {:val1 2})]}))
+          b2db (get-by-eid (db) b2eid)
+          _ (update-sp! {:conn *conn*}
+                        b2db
+                        (assoc b2db :vals []))
+          b2db (get-by-eid (db) b2eid)
+          _ (is (= [] (:vals b2db))
+                "Can delete non-primitive is-manys too")
+          b2eid (create-sp! {:conn *conn*} (scmm {:vals [(scm2 {:val1 1})
+                                                         (scm2 {:val1 2})]}))
+          b3db (get-by-eid (db) b2eid)
+          _ (update-sp! {:conn *conn*}
+                        b3db
+                        (assoc b3db :vals nil))
+          b3db (get-by-eid (db) b2eid)
+          _ (is (= [] (:vals b3db))
+                "Can delete non-primitive is-manys via nil too")
           ])))
 
 (deftest enum-tests
@@ -464,6 +487,12 @@
                                                        (scm3 {:db-ref {:eid 4}})]}))
          {:enums {:Scm3 true, :Scm2 true}})
       "we collapse the is-many items properly")
+  (is (= (item-mask :ScmM (scmm {:vals [] :identity nil}))
+         {:identity true, :vals true})
+      "empty lists result in a 'true' mask value.")
+  (is (= (item-mask :ScmOwnsEnum (scmownsenum {:enums []}))
+         {:enums true})
+      "empty lists of enums are 'true' as well")
   (with-test-db simple-schema
     (let [a1 (scm2 {:val1 1})
           a2 (scm2 {:val1 2})
