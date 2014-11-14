@@ -24,8 +24,8 @@
   (testing "Invalid specs"
     (is (not (testspec1? {:val1 3 :val2 "hi"}))
         "Specs only care about types.")
-    (is (thrown? java.lang.AssertionError (testspec1 {})))
-    (is (thrown? java.lang.AssertionError (testspec1 {:val2 "hi"})))
+    (is (thrown? java.lang.AssertionError (testspec1 {:val1 nil})))
+    (is (thrown? java.lang.AssertionError (testspec1 {:val2 1})))
     (is (thrown? java.lang.AssertionError (testspec1 {:val1 0 :val2 1}))))
 
   (testing "Default values"
