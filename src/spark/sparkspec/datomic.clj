@@ -5,11 +5,11 @@
         [clojure.string :only [lower-case]]
         [clojure.set :only [rename-keys difference]])
   (:import clojure.lang.MapEntry)
-  (:require [clojure.data :only diff]
+  (:require [clojure.core.typed :as t]
+            [clojure.data :only diff]
+            [clojure.tools.macro :as m]
             [clojure.walk :as walk]
-            [datomic.api :as db]
-            [schema.core :as s]
-            [schema.macros :as m]))
+            [datomic.api :as db]))
 
 (def spark-type-attr 
   "The datomic attribute holding onto a keyword-valued spec type."
@@ -33,7 +33,7 @@
   [spec]
   (for [{iname :name [cardinality type] :type :as item} (:items spec)]
     (merge
-     {:db/id #db/id [:db.part/db]
+     {:db/id (db/tempid :db.part/db)
       :db/ident (keyword (datomic-ns spec) (name iname))
       :db/valueType (if (primitive? type)
                       (keyword "db.type" (name type))
@@ -158,6 +158,80 @@
   [db spec]
   (let [eids (get-all-eids db spec)]
     (map (fn [eid] (db->sp db (db/entity db eid) (:name spec))) eids)))
+
+(t/ann spark.sparkspec.test-utils/make-db [(t/Vec t/Any) -> datomic.peer.LocalConnection])
+(t/ann spark.sparkspec.datomic-test/simple-schema (t/Vec t/Any))
+(t/ann datomic.api/q [t/Any * -> (t/Vec (t/Vec t/Any))])
+(t/ann spark.sparkspec.test-utils/db [-> datomic.db.Db])
+(t/ann spark.sparkspec.test-utils/*conn* datomic.peer.LocalConnection)
+
+(defn- expand-pattern
+  [pattern spec-name sym in-env ret-type-env]
+  (let [spec (get-spec spec-name)
+        {recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))]
+    (concat
+     (->> recs 
+          (mapcat (fn [{[arity sub-spec-name] :type :as item}]
+                    (cond
+                     (map? (get pattern (:name item)))
+                     , (let [gs (gensym "?v")]
+                         (cons [sym (keyword (lower-case (name spec-name))
+                                             (name (:name item))) gs]
+                               (expand-pattern (get pattern (:name item)) sub-spec-name gs in-env ret-type-env)))
+                     (contains? pattern (:name item))
+                     , (throw "only maps can be bound to refs right now")
+                     :else []))))
+     (->> non-recs
+          (mapcat (fn [item]
+                    (when (contains? pattern (:name item))
+                      (let [expr (get pattern (:name item))]
+                        (if (and (symbol? expr)
+                                 (::ret-var (meta expr)))
+                          (do (swap! ret-type-env assoc expr (second (:type item)))
+                              [[sym (keyword (lower-case (name spec-name))
+                                             (name (:name item)))
+                                expr]])
+                          (let [insym (gensym "?i")]
+                            (swap! in-env assoc insym expr)
+                            [[sym (keyword (lower-case (name spec-name))
+                                           (name (:name item)))
+                              insym]]))))))))))
+
+(defn- analyze-query [rets pattern]
+  (let [ret-env (map (fn [r] [r (with-meta (gensym (str "?" r)) (assoc (meta r) ::ret-var true))]) rets)
+        [_ marked-pattern] ; We mark the symbols bound by the ret binder. We use symbol-macrolet as a lexical-scope-respecting symbol traversal. It wraps output in a (do ..) so we pick out the 2nd pattern.
+        , (m/mexpand `(m/symbol-macrolet
+                       ~(vec (apply concat ret-env))
+                       ~pattern))
+        spec-name (:spark.sparkspec/spec marked-pattern)
+        in-env (atom {})
+        ret-type-env (atom {})
+        pattern (expand-pattern marked-pattern spec-name (gensym "?v") in-env ret-type-env)]
+    {:ret-env ret-env
+     :pattern pattern
+     :ret-type-env @ret-type-env
+     :inputs @in-env}))
+
+(defmacro query [rets db pattern]
+  (let [{:keys [ret-env ret-type-env pattern inputs]} (analyze-query rets pattern)
+        args-types (map (fn [[k v]] [(gensym (name k))
+                                     (:type-symbol (get type-map v))])
+                        ret-type-env)]
+    `(let [check# (t/ann-form
+                   (fn [~(vec (map first args-types))]
+                     ~@(map (fn [[k v]] ; assert each argument is of correct type.
+                              `(assert (instance? ~v ~k)
+                                       (str "Query returned " ~k
+                                            " with type " (type ~k)
+                                            " instead of something of type " ~v
+                                            " Possible spec mismatch?"))) 
+                            args-types)
+                     ~(vec (map first args-types)))
+                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec (map second args-types)))])
+           dbret# (db/q '[:find ~@(map second ret-env)
+                          :in ~'$ ~@(map first inputs)
+                          :where ~@pattern] ~db ~@(map second inputs))]
+       (map check# dbret#))))
 
 (defn- not-all-empty? [m] (not-any? (fn [[k v]] (some? v)) m))
 

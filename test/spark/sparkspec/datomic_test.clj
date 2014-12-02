@@ -4,7 +4,8 @@
         spark.sparkspec.spec
         spark.sparkspec.datomic
         spark.sparkspec.test-utils)
-  (:require [datomic.api :as db]))
+  (:require [datomic.api :as db]
+            [clojure.tools.macro :as m]))
 
 
 
@@ -121,6 +122,12 @@
     :db/cardinality :db.cardinality/many
     :db/doc ""
     :db.install/_attribute :db.part/db}
+   {:db/id (db/tempid :db.part/db)
+    :db/ident :scmparent/scm
+    :db/valueType :db.type/ref
+    :db/cardinality :db.cardinality/one
+    :db/doc ""
+    :db.install/_attribute :db.part/db}
    datomic-spec-schema])
 
 (defspec Scm
@@ -143,6 +150,9 @@
 (defspec ScmM
   [identity :is-a :string :unique :identity]
   [vals :is-many :Scm2])
+
+(defspec ScmParent
+  [scm :is-a :Scm])
 
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
 (def scm-non-nested (scm {:val1 "ho" :val2 56666}))
@@ -610,3 +620,51 @@
                      [?scm2 :scm2/val1 ?v ?e]]
                    (db) 5678 e2)
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
+
+(deftest query-tests
+  (with-test-db simple-schema
+    (is (= [] (query [?a] (db) {:spark.sparkspec/spec :ScmParent
+                                :scm {:val2 ?a}}))
+        "nothing returned on fresh db.")
+    (let [a1 (scmparent {:scm {:val1 "a"
+                               :val2 1}})
+          a2 (scmparent {:scm {:val1 "b"
+                               :val2 2}})]
+      (create-sp! {:conn *conn*} a1)
+      (create-sp! {:conn *conn*} a2)
+      (is (=  #{[1] [2]}
+              (->> (query [a] (db) {:spark.sparkspec/spec :ScmParent
+                                     :scm {:val2 a}})
+                   (into #{})))
+          "simple one-attribute returns (a ?-prefixed symbol isn't needed- just idiomatic cf datomic)")
+      (is (=  #{[1 "a"] [2 "b"]}
+              (->> (query [?a ?b] (db) {:spark.sparkspec/spec :ScmParent
+                                        :scm {:val1 ?b
+                                              :val2 ?a}})
+                   (into #{})))
+          "multiple attribute returns")
+      (is (= #{[1]}
+             (->> (query [?a] (db) {:spark.sparkspec/spec :ScmParent
+                                    :scm {:val1 "a"
+                                          :val2 ?a}})
+                  (into #{})))
+          "Can use literals in the pattern to fix values")
+      (is (= #{["b"]}
+             (->> (let [two 2]
+                    (query [?a] (db) {:spark.sparkspec/spec :ScmParent
+                                      :scm {:val1 ?a
+                                            :val2 two}}))
+                  (into #{})))
+          "can use regular variables to fix values")
+      (is (= #{["b"]}
+             (->> (query [?a] (db) {:spark.sparkspec/spec :ScmParent
+                                    :scm {:val1 ?a
+                                          :val2 (let [?a 2] ?a)}})
+                  (into #{})))
+          "return variables respect lexical scope and don't clobber lets")
+      (is (= #{["b"]}
+             (->> (query [?a] (db) {:spark.sparkspec/spec :ScmParent
+                                    :scm {:val1 ?a
+                                          :val2 ((fn [?a] ?a) 2)}})
+                  (into #{})))
+          "return variables respect lexical scope and don't clobber fns"))))

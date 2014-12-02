@@ -19,28 +19,28 @@
 ;;     - add get-type 
 
 ;;;; There is no existing Java class for a primitive byte array
-(def ^:private Bytes (class (byte-array [1 2])))
+(def Bytes (class (byte-array [1 2])))
 
 (defrecord SpecType [name type coercion])
 
 (def type-map
   (reduce
-   (fn [m [n t c]]
-     (assoc m n (map->SpecType {:name n :type t :coercion c})))
+   (fn [m [n t ts c]]
+     (assoc m n (map->SpecType {:name n :type t :type-symbol ts :coercion c})))
           {}
-          [[:keyword clojure.lang.Keyword keyword]
-           [:string String nil] ; str Q: Do we lean on "str" coercion?
-           [:boolean Boolean boolean]
-           [:long Long long]
-           [:bigint java.math.BigInteger bigint]
-           [:float Float float]
-           [:double Double double]
-           [:bigdec java.math.BigDecimal bigdec]
-           [:instant java.util.Date nil]
-           [:uuid java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
-           [:uri java.net.URI nil]
-           [:bytes Bytes nil]
-           [:ref Object nil]])) ; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
+          [[:keyword clojure.lang.Keyword `clojure.lang.Keyword keyword]
+           [:string String `String nil] ; str Q: Do we lean on "str" coercion?
+           [:boolean Boolean `Boolean boolean]
+           [:long Long `Long long]
+           [:bigint java.math.BigInteger `java.math.BigInteger bigint]
+           [:float Float `Float float]
+           [:double Double `Double double]
+           [:bigdec java.math.BigDecimal `java.math.BigDecimal bigdec]
+           [:instant java.util.Date `java.util.Date nil]
+           [:uuid java.util.UUID `java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
+           [:uri java.net.URI `java.net.URI nil]
+           [:bytes Bytes `Bytes nil]
+           [:ref Object `Object nil]])) ; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
 
 (defn get-item [spec kw] 
   (->> spec :items (filter #(= (keyword (:name %)) kw)) first))
