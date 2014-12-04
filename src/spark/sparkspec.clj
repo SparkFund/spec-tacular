@@ -21,7 +21,7 @@
 ;;;; There is no existing Java class for a primitive byte array
 (def Bytes (class (byte-array [1 2])))
 
-(defrecord SpecType [name type coercion])
+(defrecord SpecType [name type type-symbol coercion])
 
 (def type-map
   (reduce
