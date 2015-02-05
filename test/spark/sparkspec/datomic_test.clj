@@ -435,7 +435,6 @@
       (is (= (count (:enums (db->sp (db) (db/entity (db) eid2))))
              1)
           "can delete enums from a list of enums"))))
-; TODO test ":ref" types adding/enums , eg :user/role
 
 (deftest mask-tests
   (with-test-db simple-schema
@@ -473,7 +472,45 @@
                                    {:scm2 (new-components-mask a2db :Scm2)})
           b1db (get-by-eid (db) b1eid)
           _  (is (= 2 (:val1 (:scm2 b1db)))
-                 "switched back to 2, NOT 666. our mask says we aren't editing the values in from-db values")])))
+                 "switched back to 2, NOT 666. our mask says we aren't editing the values in from-db values")
+          c1eid (create-sp! {:conn *conn*} (scmm {:identity "c1"}))
+          c1db (get-by-eid (db) c1eid)
+          _ (masked-update-sp! {:conn *conn*}
+                               (assoc c1db :vals [a1db])
+                               {:vals true})
+          c1db (get-by-eid (db) c1eid)
+          _ (is (= #{1}
+                   (->> (:vals c1db)
+                        (map :val1)
+                        (into #{})))
+                "Can add an entity by ref when masked as 'true'")
+          _ (masked-update-sp! {:conn *conn*}
+                               (update-in c1db [:vals] conj a2db)
+                               {:vals true})
+          c1db (get-by-eid (db) c1eid)
+          _ (is (= #{1 2}
+                   (->> (:vals c1db)
+                        (map :val1)
+                        (into #{})))
+                "can point to more entities via an :is-many by ref only.")
+          _ (masked-update-sp! {:conn *conn*}
+                               (assoc c1db :vals [a2db])
+                               {:vals true})
+          c1db (get-by-eid (db) c1eid)
+          _ (is (= #{2}
+                   (->> (:vals c1db)
+                        (map :val1)
+                        (into #{})))
+                "can delete entities by ref via an :is-many masked as 'true'")
+          _ (masked-update-sp! {:conn *conn*}
+                               (assoc c1db :vals [(assoc a2db :val1 666)])
+                               {:vals true})
+          c1db (get-by-eid (db) c1eid)
+          _ (is (= #{2}
+                   (->> (:vals c1db)
+                        (map :val1)
+                        (into #{})))
+                "can't edit a sub-thing via an :is-many masked as 'true'")])))
 
 (deftest item-mask-test
   (is (= (item-mask :Scm {:val1 "b" :val2 nil})
