@@ -15,10 +15,6 @@
   "The datomic attribute holding onto a keyword-valued spec type."
   :spec-tacular/spec)
 
-;; TODO: map data definition
-
-;; TODO: integrate db-type->spec-type, recursiveness, and core-types
-;; into sparkspec.clj somehow
 (def db-type->spec-type
   ^:private
   (reduce #(assoc %1 %2 (keyword (name %2))) {}

@@ -42,9 +42,6 @@
            [:bytes Bytes nil]
            [:ref Object nil]])) ; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
 
-;; TODO: reconcile this notion with type-map, also with db-type->spec-type
-(def core-types #{:long :double :instant :bigint :float :string :keyword :bigdec :bytes :uri :uuid :boolean :ref})
-
 (defn get-item [spec kw] 
   (->> spec :items (filter #(= (keyword (:name %)) kw)) first))
 
@@ -167,6 +164,7 @@
          (every? identity (map #(basis= (% a) (% b)) (get-basis a))))
     (= a b)))
 
+(def core-types (into #{} (keys type-map)))
 (defn primitive? [spec-name] (contains? core-types spec-name))
 
 (defn recursiveness [{[_ t] :type}] (if (primitive? t)
