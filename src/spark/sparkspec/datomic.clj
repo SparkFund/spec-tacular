@@ -148,7 +148,9 @@
           (assoc :db-ref {:eid eid})
           (dissoc spark-type-attr)))))
 
-(defn get-by-eid [db eid & [sp-type]]
+(defn get-by-eid
+  "throws IllegalArgumentException when eid isn't found."
+  [db eid & [sp-type]]
   (db->sp db (db/entity db eid) sp-type))
 
 (defn get-all-of-type
