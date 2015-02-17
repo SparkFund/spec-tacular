@@ -1,11 +1,14 @@
 (ns spark.sparkspec
+  {:core.typed {:collect-only true}}
   (:require [n01se.syntax :refer [defsyntax]]
             [n01se.seqex :refer [recap]]
+            [clojure.core.typed :as t]
             [clojure.string :refer [lower-case]]
             [spark.sparkspec.grammar :refer [defspec-rule defenum-rule]]
             [schema.core :as s]
             [schema.macros :as m]
-            [spark.sparkspec.spec :refer :all]))
+            [spark.sparkspec.spec :refer :all])
+  (:import (clojure.lang ASeq)))
 
 ;;;; TODO:
 ;;     - Recursive explosions ??!?!?
@@ -19,31 +22,28 @@
 ;;     - add get-type 
 
 ;;;; There is no existing Java class for a primitive byte array
-(def ^:private Bytes (class (byte-array [1 2])))
+(def Bytes (class (byte-array [1 2])))
 
-(defrecord SpecType [name type coercion])
+(defrecord SpecType [name type type-symbol coercion])
 
 (def type-map
   (reduce
-   (fn [m [n t c]]
-     (assoc m n (map->SpecType {:name n :type t :coercion c})))
+   (fn [m [n t ts c]]
+     (assoc m n (map->SpecType {:name n :type t :type-symbol ts :coercion c})))
           {}
-          [[:keyword clojure.lang.Keyword keyword]
-           [:string String nil] ; str Q: Do we lean on "str" coercion?
-           [:boolean Boolean boolean]
-           [:long Long long]
-           [:bigint java.math.BigInteger bigint]
-           [:float Float float]
-           [:double Double double]
-           [:bigdec java.math.BigDecimal bigdec]
-           [:instant java.util.Date nil]
-           [:uuid java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
-           [:uri java.net.URI nil]
-           [:bytes Bytes nil]
-           [:ref Object nil]])) ; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
-
-;; TODO: reconcile this notion with type-map, also with db-type->spec-type
-(def core-types #{:long :double :instant :bigint :float :string :keyword :bigdec :bytes :uri :uuid :boolean :ref})
+          [[:keyword clojure.lang.Keyword `clojure.lang.Keyword keyword]
+           [:string String `String nil] ; str Q: Do we lean on "str" coercion?
+           [:boolean Boolean `Boolean boolean]
+           [:long Long `Long long]
+           [:bigint java.math.BigInteger `java.math.BigInteger bigint]
+           [:float Float `Float float]
+           [:double Double `Double double]
+           [:bigdec java.math.BigDecimal `java.math.BigDecimal bigdec]
+           [:instant java.util.Date `java.util.Date nil]
+           [:uuid java.util.UUID `java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
+           [:uri java.net.URI `java.net.URI nil]
+           [:bytes Bytes `Bytes nil]
+           [:ref Object `Object nil]])) ; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
 
 (defn get-item [spec kw] 
   (->> spec :items (filter #(= (keyword (:name %)) kw)) first))
@@ -167,6 +167,7 @@
          (every? identity (map #(basis= (% a) (% b)) (get-basis a))))
     (= a b)))
 
+(def core-types (into #{} (keys type-map)))
 (defn primitive? [spec-name] (contains? core-types spec-name))
 
 (defn recursiveness [{[_ t] :type}] (if (primitive? t)
@@ -183,6 +184,29 @@
   ^:private
   [spec]
   `(defrecord ~(symbol (-> spec :name name)) []))
+
+(defn mk-type-alias
+  "would clash with record class name which seems to not work, so we prefix the type
+  alias with 'TC-' " ;  Probably a better way to do this; maybe have a dedicated sub-namespace?
+  ^:private
+  [spec]
+  (let [fieldtypes nil]
+    (list
+     `t/defalias (symbol (str "CT-" (name (:name spec))))
+     (if (:elements spec)
+       (cons `t/U (map #(symbol (str "CT-" (name %))) (:elements spec)))
+       (list
+        `t/HMap
+        :complete? false ;; FIXME: This should be true but waiting on http://dev.clojure.org/jira/browse/CTYP-198
+        :optional
+        , (into {}
+                (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)]
+                  (let [item-type (if (primitive? sub-sp-nm)
+                                    (get-in type-map [sub-sp-nm :type-symbol])
+                                    (symbol (str "CT-" (name sub-sp-nm))))]
+                    [iname (if (= :many cardinality)
+                             (list 'clojure.lang.ASeq item-type)
+                             item-type)]))))))))
 
 (m/defn non-recursive-ctor
   "builds a spark type from a record, checking fields, but children
@@ -247,6 +271,9 @@
   [spec]
   (let [ctor-name (make-name spec #(lower-case %))]
     `(do
+       (t/ann ~ctor-name ~(if (empty? (:items spec))
+                            ['-> (symbol (str "CT-" (name (:name spec))))]
+                            [(symbol (str "CT-" (name (:name spec)))) '-> (symbol (str "CT-" (name (:name spec))))]))
        (defn ~ctor-name ~(str "deep-walks a nested map structure to construct a "
                               (name (:name spec)))
          [& [sp#]] (recursive-ctor ~(:name spec) (if (some? sp#) sp# {})))
@@ -325,6 +352,7 @@
   (recap defspec-rule
          (fn [s]
            `(do
+              ~(mk-type-alias s)
               ~(mk-record s)
               ~(mk-get-map-ctor s)
               ~(mk-huh s)
@@ -337,6 +365,7 @@
          (fn [s]
            `(do
               (def ~(-> s :name name symbol) ~(:name s))
+              ~(mk-type-alias s)
               ~(mk-enum-get-map-ctor s)
               ~(mk-enum-get-spec s)
               ~(mk-enum-huh s)))))

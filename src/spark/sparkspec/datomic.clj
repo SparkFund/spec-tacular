@@ -1,43 +1,69 @@
 (ns spark.sparkspec.datomic
+  (:refer-clojure :exclude [for])
   (:use spark.sparkspec.spec
         spark.sparkspec
         clojure.data
         [clojure.string :only [lower-case]]
         [clojure.set :only [rename-keys difference]])
   (:import clojure.lang.MapEntry)
-  (:require [clojure.data :only diff]
-            [clojure.walk :as walk]
-            [datomic.api :as db]
-            [schema.core :as s]
-            [schema.macros :as m]))
+  (:require [clojure.core.typed :as t :refer [for letfn>]]
+            [clojure.data :only diff]
+            [clojure.tools.macro :as m]
+            [clojure.walk :as walk]))
+
+(require '[datomic.api :as db])
+
+(t/defalias SpecInstance (t/Map t/Any t/Any))
+(t/defalias Pattern (t/Map t/Any t/Any))
+(t/defalias SpecName t/Keyword)
+(t/defalias Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
+(t/defalias Item (t/HMap :mandatory {:name t/Keyword
+                                     :type (t/HVec [(t/U (t/Val :one)
+                                                         (t/Val :many))
+                                                    SpecName])}))
+
+(t/defalias SpecT (t/HMap :mandatory {:name SpecName
+                                      :items (t/Vec Item)}))
+(t/defalias ConnCtx (t/HMap :mandatory {:conn datomic.peer.LocalConnection}))
+
+(t/ann clojure.core/some? [t/Any -> t/Bool :filters {:then (! nil 0) :else (is nil 0)}])
+(t/ann clojure.core/not-empty (t/All [x] [(t/Option (t/Vec x)) -> (t/Option (t/NonEmptyVec x)) :filters {:then (is (t/NonEmptyVec x) 0)}])) ; Can't make Seq work- the polymorphic specialization fails to match.
+(t/ann datomic.api/q [t/Any * -> (t/Vec (t/Vec t/Any))])
+(t/ann datomic.api/tempid [t/Keyword -> datomic.db.DbId])
+(t/ann spark.sparkspec/primitive? [t/Keyword -> t/Bool])
+(t/ann spark.sparkspec/get-ctor [t/Keyword -> [(t/Map t/Any t/Any) -> SpecInstance]])
+(t/ann spark.sparkspec/get-spec [(t/U SpecInstance t/Keyword) -> SpecT])
+(t/ann spark.sparkspec.test-utils/make-db [(t/Vec t/Any) -> datomic.peer.LocalConnection])
+(t/ann spark.sparkspec.test-utils/db [-> datomic.db.Db])
+(t/ann spark.sparkspec.test-utils/*conn* datomic.peer.LocalConnection)
+(t/ann spark.sparkspec.datomic-test/simple-schema (t/Vec t/Any))
 
 (def spark-type-attr 
   "The datomic attribute holding onto a keyword-valued spec type."
   :spec-tacular/spec)
 
-;; TODO: map data definition
-
-;; TODO: integrate db-type->spec-type, recursiveness, and core-types
-;; into sparkspec.clj somehow
 (def db-type->spec-type
   ^:private
-  (reduce #(assoc %1 %2 (keyword (name %2))) {}
+  (reduce (t/ann-form #(assoc %1 %2 (keyword (name %2)))
+                      [(t/Map t/Keyword t/Keyword) t/Keyword -> (t/Map t/Keyword t/Keyword)]) {}
           [:db.type/keyword :db.type/string :db.type/boolean :db.type/long
            :db.type/bigint :db.type/float :db.type/double :db.type/bigdec
            :db.type/instant :db.type/uuid :db.type/uri :db.type/bytes]))
 
+(t/ann datomic-ns [SpecT -> t/Str])
 (defn- datomic-ns
   "Returns a string representation of the db-normalized namespace for
   the given spec."
   [spec]
   (some-> spec :name name lower-case))
 
+(t/ann ^:no-check datomic-schema [SpecT -> (t/ASeq (t/Map t/Keyword t/Any))])
 (defn datomic-schema 
   "generate a list of entries for a datomic schema to represent this spec."
   [spec]
-  (for [{iname :name [cardinality type] :type :as item} (:items spec)]
+  (for [{iname :name [cardinality type] :type :as item} :- Item (:items spec)]  ;; FIXME not sure why this doesn't typecheck?
     (merge
-     {:db/id #db/id [:db.part/db]
+     {:db/id (db/tempid :db.part/db)
       :db/ident (keyword (datomic-ns spec) (name iname))
       :db/valueType (if (primitive? type)
                       (keyword "db.type" (name type))
@@ -53,14 +79,23 @@
          {:db/unique :db.unique/value})
        {}))))
 
+; This one is pretty tricky to annotate
+(t/ann ^:no-check check-schema [(t/ASeq SpecInstance) SpecT -> (t/ASeq t/Str)])
 (defn check-schema
   "Returns a list of errors representing discrepencies between the
   given spec and schema."
   [schema spec]
-  (letfn [(reduce-component [m v] (assoc m (-> v :db/ident name keyword) v))
+  (letfn [;reduce-component :- [(t/Map t/Keyword t/Keyword) (t/Map t/Keyword t/Keyword) -> (t/Map t/Keyword t/Keyword)]
+          (reduce-component [m v] (assoc m (-> v :db/ident name keyword) v))
+;reduce-items :- [(t/Map t/Keyword Item) Item -> (t/Map t/Keyword Item)]
           (reduce-items [m v] (assoc m (:name v) v))
+;check :- [t/Any t/Any -> t/Any]
           (check [v m] (if v nil m))
+;all-errors :- [t/Any * -> t/Any]
           (all-errors [& rest] (filter some? (flatten rest)))
+;diff-uniques :- [(t/HVec [(t/Map t/Keyword t/Keyword)
+;                          Item])
+;                 -> (t/U nil t/Str)]
           (diff-uniques [[{schema-uniq :db/unique}
                           {iname :name item-uniq :unique? item-ident :identity?}]]
             (check (case schema-uniq
@@ -91,38 +126,67 @@
        ;; TODO: Add more checks! Be strict!
        ))))
 
+
+(t/ann get-all-eids [datomic.db.DbId SpecT -> (t/ASeq Long)])
 (defn get-all-eids
   "Retrives all of the eids described by the given spec from the
   database."
   [db spec]
-  (let [names (map #(keyword (datomic-ns spec) (-> % :name name)) (:items spec))
+  (let [names (map (t/ann-form #(keyword (datomic-ns spec) (-> % :name name))
+                               [Item -> t/Keyword]) (:items spec))
         query '[:find ?eid :in $ [?attr ...] :where [?eid ?attr ?val]]]
-    (apply concat (db/q query db names))))
+    (map (t/ann-form (fn [x] 
+                       (let [r (first x)]
+                         (assert (instance? Long r))
+                         r))
+                     [(t/Vec t/Any) -> Long])
+         (db/q query db names))))
 
+
+
+
+(t/ann get-eid (t/IFn 
+                [datomic.db.DbId SpecInstance -> (t/Option Long)]
+                [datomic.db.DbId SpecInstance SpecT -> (t/Option Long)]))
 (defn get-eid
   "Returns an EID associated with the data in the given spark type if
   it exists in the database. Looks up according to identity
   items. Returns nil if not found."
-  ([db sp] (get-eid db sp (get-spec sp)))
+  ([db sp] (when (map? sp) (get-eid db sp (get-spec sp))))
   ([db sp spec]
      (let [eid (or (:eid (meta sp)) (get-in sp [:db-ref :eid]))]
-       (if eid
-         eid
-         (let [sname (datomic-ns spec)
-               idents (filter #(or (:identity? %) (:unique? %)) (:items spec))
-               query '[:find ?eid :in $ ?attr ?val :where [?eid ?attr ?val]]
-               eids
-               , (for [{iname :name [_ type] :type} idents]
-                   (let [sub-val (if (primitive? type)
-                                   (get sp iname)
-                                   (get-eid db (get sp iname)))
-                         eid (when (some? sub-val)
+       (assert (or (nil? eid) (instance? Long eid)))
+       (t/ann-form ; Seems like 'if' isn't typechecked correctly w/o annotation?
+        (if eid
+          eid
+          (let [sname (datomic-ns spec)
+                idents (filter #(or (:identity? %) (:unique? %)) (:items spec))
+                query '[:find ?eid :in $ ?attr ?val :where [?eid ?attr ?val]]
+                eids
+                , (for [{iname :name [_ type] :type} :- Item idents]
+                    :- (t/Option (t/Vec (t/Vec t/Any)))
+                    (let [sub-sp (get sp iname)
+                          sub-val (if (primitive? type)
+                                    sub-sp
+                                    (when (map? sub-sp) (get-eid db sub-sp)))
+                          eid (when (some? sub-val)
                                 (db/q query db
                                       (keyword (name sname) (name iname))
                                       sub-val))]
-                     eid))]
-           (first (map ffirst (filter not-empty eids))))))))
+                      eid))]
+            (->> eids
+                 (filter (t/ann-form 
+                          not-empty
+                          [(t/Option (t/Vec (t/Vec t/Any))) -> (t/Option (t/NonEmptyVec (t/Vec t/Any))) :filters {:then (is (t/NonEmptyVec (t/Vec t/Any)) 0)}]))
+                 (map (t/ann-form
+                       #(let [r (ffirst %)]
+                          (assert (instance? Long r))
+                          r)
+                       [(t/Option (t/NonEmptyVec (t/Vec t/Any))) -> Long]))
+                 (first))))
+        (t/Option Long)))))
 
+(t/ann ^:no-check db->sp [datomic.db.DbId (t/Map t/Any t/Any) -> SpecInstance])
 (defn db->sp
   [db ent & [sp-type]]
   (if-not ent
@@ -152,17 +216,99 @@
           (assoc :db-ref {:eid eid})
           (dissoc spark-type-attr)))))
 
-(defn get-by-eid [db eid & [sp-type]]
+(t/ann ^:no-check get-by-eid (t/IFn [datomic.db.DbId Long -> SpecInstance]
+                                    [datomic.db.DbId Long SpecT -> SpecInstance]))
+(defn get-by-eid
+  "throws IllegalArgumentException when eid isn't found."
+  [db eid & [sp-type]]
   (db->sp db (db/entity db eid) sp-type))
 
+(t/ann ^:no-check get-all-of-type [datomic.db.DbId Long SpecT -> (t/ASeq SpecInstance)])
 (defn get-all-of-type
   "Helper function that returns all items of a single spec"
   [db spec]
   (let [eids (get-all-eids db spec)]
     (map (fn [eid] (db->sp db (db/entity db eid) (:name spec))) eids)))
 
-(defn- not-all-empty? [m] (not-any? (fn [[k v]] (some? v)) m))
 
+(t/ann ^:no-check expand-pattern [Pattern SpecName t/Symbol (t/Atom1 (t/Map t/Symbol t/Any)) (t/Atom1 (t/Map t/Symbol SpecName)) -> Pattern])
+(defn- expand-pattern
+  [pattern spec-name sym in-env ret-type-env]
+  (let [spec (get-spec spec-name)
+        {recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))]
+    (concat
+     (->> recs 
+          (mapcat (fn [{[arity sub-spec-name] :type :as item}]
+                    (cond
+                     (map? (get pattern (:name item)))
+                     , (let [gs (gensym "?v")]
+                         (cons [sym (keyword (lower-case (name spec-name))
+                                             (name (:name item))) gs]
+                               (expand-pattern (get pattern (:name item)) sub-spec-name gs in-env ret-type-env)))
+                     (contains? pattern (:name item))
+                     , (throw "only maps can be bound to refs right now")
+                     :else []))))
+     (->> non-recs
+          (mapcat (fn [item]
+                    (when (contains? pattern (:name item))
+                      (let [expr (get pattern (:name item))]
+                        (if (and (symbol? expr)
+                                 (::ret-var (meta expr)))
+                          (do (swap! ret-type-env assoc expr (second (:type item)))
+                              [[sym (keyword (lower-case (name spec-name))
+                                             (name (:name item)))
+                                expr]])
+                          (let [insym (gensym "?i")]
+                            (swap! in-env assoc insym expr)
+                            [[sym (keyword (lower-case (name spec-name))
+                                           (name (:name item)))
+                              insym]]))))))))))
+
+(t/ann ^:no-check analyze-query [(t/ASeq t/Symbol) Pattern
+                                 -> (t/HMap :mandatory
+                                            {:ret-env (t/ASeq (t/HVec [t/Symbol t/Symbol]))
+                                             :pattern Pattern
+                                             :ret-type-env (t/Map t/Symbol SpecName)
+                                             :inputs (t/Map t/Symbol t/Any)})])
+(defn- analyze-query [rets pattern]
+  (let [ret-env (map (fn [r] [r (with-meta (gensym (str "?" r)) (assoc (meta r) ::ret-var true))]) rets)
+        [_ marked-pattern] ; We mark the symbols bound by the ret binder. We use symbol-macrolet as a lexical-scope-respecting symbol traversal. It wraps output in a (do ..) so we pick out the 2nd pattern.
+        , (m/mexpand `(m/symbol-macrolet
+                       ~(vec (apply concat ret-env))
+                       ~pattern))
+        spec-name (:spark.sparkspec/spec marked-pattern)
+        in-env (atom {})
+        ret-type-env (atom {})
+        pattern (expand-pattern marked-pattern spec-name (gensym "?v") in-env ret-type-env)]
+    {:ret-env ret-env
+     :pattern pattern
+     :ret-type-env @ret-type-env
+     :inputs @in-env}))
+
+(defmacro query [rets db pattern]
+  (let [{:keys [ret-env ret-type-env pattern inputs]} (analyze-query rets pattern)
+        args-types (map (fn [[k v]] [(gensym (name k))
+                                     (:type-symbol (get type-map v))])
+                        ret-type-env)]
+    `(let [check# (t/ann-form
+                   (fn [~(vec (map first args-types))]
+                     ~@(map (fn [[k v]] ; assert each argument is of correct type.
+                              `(assert (instance? ~v ~k)
+                                       (str "Query returned " ~k
+                                            " with type " (type ~k)
+                                            " instead of something of type " ~v
+                                            " Possible spec mismatch?"))) 
+                            args-types)
+                     ~(vec (map first args-types)))
+                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec (map second args-types)))])
+           dbret# (db/q '[:find ~@(map second ret-env)
+                          :in ~'$ ~@(map first inputs)
+                          :where ~@pattern] ~db ~@(map second inputs))]
+       (map check# dbret#))))
+
+(t/ann ^:no-check build-transactions
+       (t/IFn [datomic.db.DbId SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]
+              [datomic.db.DbId SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) SpecT -> (t/Map t/Keyword t/Any)]))
 (defn build-transactions
   "Builds a nested datomic-data datastructure for the sp data, only
   for what's specified in the mask. Adds Datomicy deletion commands to
@@ -238,6 +384,9 @@
          (#(assoc % spark-type-attr (:name spec)))
          (#(with-meta % {:eid eid})))))
 
+(t/ann ^:no-check union-masks (t/IFn [-> (t/Val nil)]
+                                     [(t/Option Mask) -> (t/Option Mask)]
+                                     [(t/Option Mask) (t/Option Mask) -> (t/Option Mask)]))
 (defn union-masks
   "union (join) taken w.r.t. a lattice of 'specificity' eg -- nil < true < {:item ...} 
    (recall 'true' means the mask consisting only of the db-ref)
@@ -253,6 +402,7 @@
       (map? mb) mb
       :else (or ma mb))))
 
+(t/ann ^:no-check item-mask [SpecT SpecInstance -> Mask])
 (defn item-mask
   "Builds a mask-map representing a specific sp value,
    where missing keys represent masked out fields and sp objects
@@ -285,6 +435,8 @@
             (field-mask sp))))
       true)))
 
+
+(t/ann ^:no-check shallow-mask [SpecT -> Mask])
 (defn shallow-mask
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Only lets top-level and is-component fields
@@ -302,6 +454,7 @@
               true)])
          (into {}))))
 
+(t/ann ^:no-check shallow-plus-enums-mask [SpecT -> Mask])
 (defn shallow-plus-enums-mask
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Only lets top-level and is-component fields
@@ -330,6 +483,7 @@
                   true)]))
            (into {})))))
 
+(t/ann ^:no-check new-components-mask [SpecInstance SpecT -> Mask])
 (defn new-components-mask
   "Builds a mask that specifies only adding entities that don't already
   have eids. Any value with an eid will be treaded as an association and 
@@ -348,6 +502,7 @@
              (into {}))
         true)))) ;primitive
 
+(t/ann ^:no-check depth-n-mask [SpecT t/AnyInteger -> Mask])
 (defn depth-n-mask
   [spec n]
   (if (= n 0)
@@ -365,8 +520,11 @@
                 true)]) 
            (into {})))))
 
+
 (declare complete-mask)
 
+(t/ann-datatype CompleteMask [spec :- SpecT])
+(t/tc-ignore
 (deftype CompleteMask [spec]
   clojure.lang.IPersistentMap
   (assoc [_ k v]
@@ -393,13 +551,18 @@
   clojure.lang.ILookup
   (valAt [t k] (when-let [e (.entryAt t k)] (.val e)))
   (valAt [t k default] (if-let [e (.entryAt t k)] (.val e) default)))
+)
 
+(t/ann ^:no-check complete-mask [SpecT -> Mask])
 (defn complete-mask [spec]
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Recurs down specs to add everything in
   time."
   (CompleteMask. spec))
 
+(t/ann ^:no-check sp->transactions 
+       (t/IFn [datomic.db.DbId SpecInstance -> (t/ASeq t/Any)]
+              [datomic.db.DbId SpecInstance t/Bool -> (t/ASeq t/Any)]))
 (defn sp->transactions
   "Returns a vectors for datomic.api/transact that persist the given
   specced value sp to the database, according to the given db. If
@@ -414,6 +577,8 @@
       (cons datomic-data @deletions)
       (meta datomic-data))))
 
+(t/ann ^:no-check commit-sp-transactions 
+       [ConnCtx(t/ASeq t/Any) -> Long])
 (defn commit-sp-transactions
   "if :transaction-log is specified in conn-ctx (a regular sp object),
    we attach its attributes to the transaction."
@@ -427,6 +592,8 @@
         entid (db/resolve-tempid (db/db (:conn conn-ctx)) (:tempids tx) eid)]
     (or entid eid)))
 
+(t/ann ^:no-check create-sp!
+       [ConnCtx SpecInstance -> Long])
 (defn create-sp!
   "aborts if sp is already in db.
    if successful, returns the eid of the newly-added entity."
@@ -438,6 +605,8 @@
     (check-complete! spec new-sp)
     (commit-sp-transactions conn-ctx (sp->transactions db new-sp))))
 
+(t/ann ^:no-check masked-create-sp!
+       [ConnCtx SpecInstance Mask -> Long])
 (defn masked-create-sp!
   "Ensures sp is not in the db prior to creating. aborts if so."
   [conn-ctx sp mask]
@@ -453,6 +622,8 @@
                (meta datomic-data))]
     (commit-sp-transactions conn-ctx txns)))
 
+(t/ann ^:no-check sp-filter-with-mask
+       [Mask SpecT SpecInstance -> (t/Option SpecInstance)])
 (defn sp-filter-with-mask
   "applies a mask to a sp instance, keeping only the keys mentioned, 
   (including any relevant :db-id keys)"
@@ -493,6 +664,8 @@
         sp
         nil))))
 
+(t/ann ^:no-check update-sp!
+       [ConnCtx SpecInstance SpecInstance -> Long])
 (defn update-sp!
   "old-sp and new-sp need {:db-ref {:eid eid}} defined.
   Uses the semantics of item-mask, so keys that are not present in
@@ -521,6 +694,8 @@
       (commit-sp-transactions conn-ctx txns))))
 
 ; TODO consider replocing the old "update-sp" etc with something more explicitly masked like this?
+(t/ann ^:no-check masked-update-sp!
+       [ConnCtx SpecInstance Mask -> Long])
 (defn masked-update-sp!
   "Ensures sp is in the db prior to updating. aborts if not."
   [conn-ctx sp mask]
@@ -533,6 +708,7 @@
                (meta datomic-data))]
     (commit-sp-transactions conn-ctx txns)))
 
+(t/ann ^:no-check remove-eids [SpecInstance -> SpecInstance])
 (defn remove-eids
   "recursively strip all entries of :db-ref {:eid ...} from sp.
    can be used for checking equality with a non-db value."
@@ -542,6 +718,7 @@
                            m))
                  sp))
 
+(t/ann ^:no-check remove-identity-items [SpecT SpecInstance -> SpecInstance])
 (defn remove-identity-items
   "recursively walks a sp and removes any :unique? or :identity?
   items (as those are harder to test.) We do want to come up with some
@@ -578,6 +755,7 @@
 
 ; TODO we could make it actually remove the keys instead of nil them, need a helper with some sentinal probably easiest?
 ; also we probably want to only strip these on nested things, not the toplevel thing. (i.e. THIS is the helper already.)
+(t/ann ^:no-check remove-items-with-required [SpecInstance -> SpecInstance])
 (defn remove-items-with-required
   "recursively walks a sp and removes any sub things that have
   required fields in the spec. Another tricky-to-test updates helper. (including top-level)"
@@ -601,6 +779,7 @@
            sp sp))
         sp))))
 
+(t/ann ^:no-check remove-sub-items-with-required [SpecInstance -> SpecInstance])
 (defn remove-sub-items-with-required
   "recursively walks a single (map) sp and removes any sub-sps that
   have required fields in the spec (but not the toplevel one, only
