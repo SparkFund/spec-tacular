@@ -1,11 +1,14 @@
 (ns spark.sparkspec
+  {:core.typed {:collect-only true}}
   (:require [n01se.syntax :refer [defsyntax]]
             [n01se.seqex :refer [recap]]
+            [clojure.core.typed :as t]
             [clojure.string :refer [lower-case]]
             [spark.sparkspec.grammar :refer [defspec-rule defenum-rule]]
             [schema.core :as s]
             [schema.macros :as m]
-            [spark.sparkspec.spec :refer :all]))
+            [spark.sparkspec.spec :refer :all])
+  (:import (clojure.lang ASeq)))
 
 ;;;; TODO:
 ;;     - Recursive explosions ??!?!?
@@ -182,6 +185,29 @@
   [spec]
   `(defrecord ~(symbol (-> spec :name name)) []))
 
+(defn mk-type-alias
+  "would clash with record class name which seems to not work, so we prefix the type
+  alias with 'TC-' " ;  Probably a better way to do this; maybe have a dedicated sub-namespace?
+  ^:private
+  [spec]
+  (let [fieldtypes nil]
+    (list
+     `t/defalias (symbol (str "CT-" (name (:name spec))))
+     (if (:elements spec)
+       (cons `t/U (map #(symbol (str "CT-" (name %))) (:elements spec)))
+       (list
+        `t/HMap
+        :complete? false ;; FIXME: This should be true but waiting on http://dev.clojure.org/jira/browse/CTYP-198
+        :optional
+        , (into {}
+                (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)]
+                  (let [item-type (if (primitive? sub-sp-nm)
+                                    (get-in type-map [sub-sp-nm :type-symbol])
+                                    (symbol (str "CT-" (name sub-sp-nm))))]
+                    [iname (if (= :many cardinality)
+                             (list 'clojure.lang.ASeq item-type)
+                             item-type)]))))))))
+
 (m/defn non-recursive-ctor
   "builds a spark type from a record, checking fields, but children
    must all be primitive, non-recursive values or already spark types"
@@ -245,6 +271,9 @@
   [spec]
   (let [ctor-name (make-name spec #(lower-case %))]
     `(do
+       (t/ann ~ctor-name ~(if (empty? (:items spec))
+                            ['-> (symbol (str "CT-" (name (:name spec))))]
+                            [(symbol (str "CT-" (name (:name spec)))) '-> (symbol (str "CT-" (name (:name spec))))]))
        (defn ~ctor-name ~(str "deep-walks a nested map structure to construct a "
                               (name (:name spec)))
          [& [sp#]] (recursive-ctor ~(:name spec) (if (some? sp#) sp# {})))
@@ -323,6 +352,7 @@
   (recap defspec-rule
          (fn [s]
            `(do
+              ~(mk-type-alias s)
               ~(mk-record s)
               ~(mk-get-map-ctor s)
               ~(mk-huh s)
@@ -335,6 +365,7 @@
          (fn [s]
            `(do
               (def ~(-> s :name name symbol) ~(:name s))
+              ~(mk-type-alias s)
               ~(mk-enum-get-map-ctor s)
               ~(mk-enum-get-spec s)
               ~(mk-enum-huh s)))))

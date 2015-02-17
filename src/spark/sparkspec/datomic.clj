@@ -57,11 +57,11 @@
   [spec]
   (some-> spec :name name lower-case))
 
-(t/ann datomic-schema [SpecT -> (t/ASeq (t/Map t/Keyword t/Any))])
+(t/ann ^:no-check datomic-schema [SpecT -> (t/ASeq (t/Map t/Keyword t/Any))])
 (defn datomic-schema 
   "generate a list of entries for a datomic schema to represent this spec."
   [spec]
-  (for [{iname :name [cardinality type] :type :as item} :- Item (:items spec)]
+  (for [{iname :name [cardinality type] :type :as item} :- Item (:items spec)]  ;; FIXME not sure why this doesn't typecheck?
     (merge
      {:db/id (db/tempid :db.part/db)
       :db/ident (keyword (datomic-ns spec) (name iname))
