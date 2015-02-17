@@ -14,5 +14,5 @@
                  [clj-http "0.9.1"]
                  [clojure-csv/clojure-csv "2.0.1"]
                  [org.clojure/tools.macro "0.1.2"]
-                 [org.clojure/core.typed "0.2.72"]
+                 [org.clojure/core.typed "0.2.77"]
                  [org.immutant/immutant "1.1.3"]])
