@@ -1,6 +1,10 @@
 (ns spark.sparkspec-test
+  {:core.typed {:collect-only true}}
+  (:require [clojure.core.typed :as t])
   (:use spark.sparkspec
         clojure.test))
+
+(declare CT-TestSpec2)
 
 (defspec TestSpec1
   [val1 :is-a :long :required]
