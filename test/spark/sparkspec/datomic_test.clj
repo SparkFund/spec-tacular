@@ -130,14 +130,14 @@
     :db.install/_attribute :db.part/db}
    datomic-spec-schema])
 
+(defspec Scm2
+  [val1 :is-a :long :unique :identity])
+
 (defspec Scm
   [val1 :is-a :string :unique :identity]
   [val2 :is-a :long]
   [multi :is-many :string]
   [scm2 :is-a :Scm2])
-
-(defspec Scm2
-  [val1 :is-a :long :unique :identity])
 
 (defspec Scm3)
 
