@@ -236,33 +236,27 @@
   [pattern spec-name sym in-env ret-type-env]
   (let [spec (get-spec spec-name)
         {recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))]
-    (concat
-     (->> recs 
-          (mapcat (fn [{[arity sub-spec-name] :type :as item}]
-                    (cond
-                     (map? (get pattern (:name item)))
-                     , (let [gs (gensym "?v")]
-                         (cons [sym (keyword (lower-case (name spec-name))
-                                             (name (:name item))) gs]
-                               (expand-pattern (get pattern (:name item)) sub-spec-name gs in-env ret-type-env)))
-                     (contains? pattern (:name item))
-                     , (throw "only maps can be bound to refs right now")
-                     :else []))))
-     (->> non-recs
-          (mapcat (fn [item]
-                    (when (contains? pattern (:name item))
-                      (let [expr (get pattern (:name item))]
-                        (if (and (symbol? expr)
-                                 (::ret-var (meta expr)))
-                          (do (swap! ret-type-env assoc expr (second (:type item)))
-                              [[sym (keyword (lower-case (name spec-name))
-                                             (name (:name item)))
-                                expr]])
-                          (let [insym (gensym "?i")]
-                            (swap! in-env assoc insym expr)
-                            [[sym (keyword (lower-case (name spec-name))
-                                           (name (:name item)))
-                              insym]]))))))))))
+    (mapcat 
+     (fn [item]
+       (let [expr (get pattern (:name item))
+             kw   (keyword (lower-case (name spec-name)) (name (:name item)))]
+         (cond
+           (map? expr)
+           (let [{[arity sub-spec-name] :type :as item} item
+                 gs (gensym "?v")]
+             (cons [sym kw gs]
+                   (expand-pattern expr sub-spec-name gs in-env ret-type-env)))
+
+           (contains? pattern (:name item))
+           (let [expr (get pattern (:name item))]
+             (if (and (symbol? expr)
+                      (::ret-var (meta expr)))
+               (do (swap! ret-type-env assoc expr (second (:type item)))
+                   [[sym kw expr]])
+               (let [insym (gensym "?i")]
+                 (swap! in-env assoc insym expr)
+                 [[sym kw insym]]))))))
+     (:items spec))))
 
 (t/ann ^:no-check analyze-query [(t/ASeq t/Symbol) Pattern
                                  -> (t/HMap :mandatory
@@ -285,26 +279,52 @@
      :ret-type-env @ret-type-env
      :inputs @in-env}))
 
+(defn spec-kw->entity-kw [kw name]
+  (str (lower-case name) "/" (subs (str kw) 1)))
+
+(deftype SpecEntityMap [ident spec em db]
+  clojure.lang.Associative
+  (assoc [this k v]
+    (throw (ex-info "update not supported"
+                    {:entity this :keyword k :value v})))
+  (containsKey [this k])
+  (entryAt [this k]
+    (.entryAt em (spec-kw->entity-kw k ident)))
+
+  clojure.lang.ILookup
+  (valAt [this k not-found]
+    (.valAt em (spec-kw->entity-kw k ident) not-found))
+  (valAt [this k] 
+    (.valAt this k nil)))
+
+(defn- wrap-prim [k t]
+  `(if (instance? ~t ~k) ~k
+       (throw (ex-info "possible spec mismatch")
+              {:query-result ~k :actual-type ~(type k) :expected-type ~t})))
+
+(defn- wrap-spec [db k v]
+  `(let [e# (db/entity ~db ~k)]
+     (SpecEntityMap. (:name ~v) (get-spec (:name ~v)) e# ~db)))
+
+(defn- wrap [db [k v]]
+  (let [t (:type-symbol v)]
+    `(if (class? ~t) ~(wrap-prim k t) ~(wrap-spec db k v))))
+
 (defmacro query [rets db pattern]
   (let [{:keys [ret-env ret-type-env pattern inputs]} (analyze-query rets pattern)
-        args-types (map (fn [[k v]] [(gensym (name k))
-                                     (:type-symbol (get type-map v))])
+        args-types (map (fn [[k v]] [(gensym (name k)) (get-type v)])
                         ret-type-env)]
     `(let [check# (t/ann-form
                    (fn [~(vec (map first args-types))]
-                     ~@(map (fn [[k v]] ; assert each argument is of correct type.
-                              `(assert (instance? ~v ~k)
-                                       (str "Query returned " ~k
-                                            " with type " (type ~k)
-                                            " instead of something of type " ~v
-                                            " Possible spec mismatch?"))) 
-                            args-types)
-                     ~(vec (map first args-types)))
-                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec (map second args-types)))])
+                     [~@(map #(wrap db %) args-types)])
+                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec (map (comp :type-symbol second) 
+                                                          args-types)))])
            dbret# (db/q '[:find ~@(map second ret-env)
                           :in ~'$ ~@(map first inputs)
-                          :where ~@pattern] ~db ~@(map second inputs))]
+                          :where ~@pattern] 
+                        ~db ~@(map second inputs))]
        (map check# dbret#))))
+
 
 (t/ann ^:no-check build-transactions
        (t/IFn [datomic.db.DbId SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]

@@ -72,6 +72,9 @@
 
 (defmethod get-spec :default [_] nil)
 
+(defmulti get-type resolve-fn)
+(defmethod get-type :default [x] (get type-map x))
+
 (defmulti get-ctor identity)
 
 (defmulti get-map-ctor
@@ -187,26 +190,30 @@
 
 (defn mk-type-alias
   "would clash with record class name which seems to not work, so we prefix the type
-  alias with 'TC-' " ;  Probably a better way to do this; maybe have a dedicated sub-namespace?
+  alias with 'CT-' " ;  Probably a better way to do this; maybe have a dedicated sub-namespace?
   ^:private
   [spec]
-  (let [fieldtypes nil]
-    (list
-     `t/defalias (symbol (str "CT-" (name (:name spec))))
-     (if (:elements spec)
-       (cons `t/U (map #(symbol (str "CT-" (name %))) (:elements spec)))
-       (list
-        `t/HMap
-        :complete? false ;; FIXME: This should be true but waiting on http://dev.clojure.org/jira/browse/CTYP-198
-        :optional
-        , (into {}
-                (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)]
-                  (let [item-type (if (primitive? sub-sp-nm)
-                                    (get-in type-map [sub-sp-nm :type-symbol])
-                                    (symbol (str "CT-" (name sub-sp-nm))))]
-                    [iname (if (= :many cardinality)
-                             (list 'clojure.lang.ASeq item-type)
-                             item-type)]))))))))
+  (let [fieldtypes nil
+        alias (symbol (str "CT-" (name (:name spec))))]
+    `(do ~(list
+           `t/defalias alias
+           (if (:elements spec)
+             (cons `t/U (map #(symbol (str "CT-" (name %))) (:elements spec)))
+             (list
+              `t/HMap
+              :complete? false ;; FIXME: This should be true but waiting on http://dev.clojure.org/jira/browse/CTYP-198
+              :optional
+              (into {}
+                    (for [{iname :name [cardinality sub-sp-nm] :type :as item} 
+                          (:items spec)]
+                      (let [item-type (if (primitive? sub-sp-nm)
+                                        (get-in type-map [sub-sp-nm :type-symbol])
+                                        (symbol (str "CT-" (name sub-sp-nm))))]
+                        [iname (if (= :many cardinality)
+                                 (list 'clojure.lang.ASeq item-type)
+                                 item-type)]))))))
+         (defmethod get-type ~(:name spec) [_#] 
+           {:name ~(:name spec) :type-symbol '~alias}))))
 
 (m/defn non-recursive-ctor
   "builds a spark type from a record, checking fields, but children

@@ -626,15 +626,16 @@
     (is (= [] (query [?a] (db) {:spark.sparkspec/spec :ScmParent
                                 :scm {:val2 ?a}}))
         "nothing returned on fresh db.")
-    (let [a1 (scmparent {:scm {:val1 "a"
-                               :val2 1}})
-          a2 (scmparent {:scm {:val1 "b"
-                               :val2 2}})]
+
+    (let [a1 (scmparent {:scm (scm {:val1 "a" :val2 1})})
+          a2 (scmparent {:scm (scm {:val1 "b" :val2 2})})]
       (create-sp! {:conn *conn*} a1)
-      (create-sp! {:conn *conn*} a2)
+      (create-sp! {:conn *conn*} a2))
+
+    (testing "primitive data"
       (is (=  #{[1] [2]}
               (->> (query [a] (db) {:spark.sparkspec/spec :ScmParent
-                                     :scm {:val2 a}})
+                                    :scm {:val2 a}})
                    (into #{})))
           "simple one-attribute returns (a ?-prefixed symbol isn't needed- just idiomatic cf datomic)")
       (is (=  #{[1 "a"] [2 "b"]}
@@ -667,4 +668,15 @@
                                     :scm {:val1 ?a
                                           :val2 ((fn [?a] ?a) 2)}})
                   (into #{})))
-          "return variables respect lexical scope and don't clobber fns"))))
+          "return variables respect lexical scope and don't clobber fns"))
+
+    (testing "compound data"
+      (let [e-scm2 (scm2 {:val1 5})
+            e-scm  (scm {:val1 "c" :val2 4 :scm2 e-scm2})
+            scm3    (scmparent {:scm e-scm})]
+        (create-sp! {:conn *conn*} scm3)
+        
+        (let [a-scm2 (->> (query [?scm2] (db)
+                                 {:spark.sparkspec/spec :ScmParent :scm {:scm2 ?scm2}})
+                          first first)]
+          (is (= (:val1 a-scm2) (:val1 e-scm2))))))))
