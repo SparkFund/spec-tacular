@@ -1,13 +1,14 @@
 (ns spark.sparkspec.datomic-test
+  (:refer-clojure :exclude [remove])
   (:use clojure.test
         spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic
         spark.sparkspec.test-utils)
   (:require [datomic.api :as db]
+            [spark.sparkspec.datomic :as sd]
+            [clojure.core.typed :as t]
             [clojure.tools.macro :as m]))
-
-
 
 ;;;; check-schema tests
 
@@ -623,8 +624,10 @@
 
 (deftest query-tests
   (with-test-db simple-schema
-    (is (= [] (query [?a] (db) {:spark.sparkspec/spec :ScmParent
-                                :scm {:val2 ?a}}))
+    (with-out-str (t/check-ns 'spark.sparkspec.datomic-test :collect-only true))
+
+    (is (= #{} (->> (q :find ?a :in (db) :where
+                       [:ScmParent {:scm {:val2 ?a}}])))
         "nothing returned on fresh db.")
 
     (let [a1 (scmparent {:scm (scm {:val1 "a" :val2 1})})
@@ -633,50 +636,107 @@
       (create-sp! {:conn *conn*} a2))
 
     (testing "primitive data"
-      (is (=  #{[1] [2]}
-              (->> (query [a] (db) {:spark.sparkspec/spec :ScmParent
-                                    :scm {:val2 a}})
-                   (into #{})))
+      (is (= #{[1] [2]}
+             (q :find [?a] :in (db) :where
+                [:ScmParent {:scm {:val2 ?a}}]))
           "simple one-attribute returns (a ?-prefixed symbol isn't needed- just idiomatic cf datomic)")
-      (is (=  #{[1 "a"] [2 "b"]}
-              (->> (query [?a ?b] (db) {:spark.sparkspec/spec :ScmParent
-                                        :scm {:val1 ?b
-                                              :val2 ?a}})
-                   (into #{})))
+      (is (= #{[1 "a"] [2 "b"]}
+             (q :find [?a ?b] :in (db) :where
+                [:ScmParent {:scm {:val1 ?b :val2 ?a}}]))
           "multiple attribute returns")
       (is (= #{[1]}
-             (->> (query [?a] (db) {:spark.sparkspec/spec :ScmParent
-                                    :scm {:val1 "a"
-                                          :val2 ?a}})
-                  (into #{})))
-          "Can use literals in the pattern to fix values")
+             (q :find [?a] :in (db) :where
+                [:ScmParent {:scm {:val1 "a" :val2 ?a}}]))
+          "can use literals in the pattern to fix values")
       (is (= #{["b"]}
-             (->> (let [two 2]
-                    (query [?a] (db) {:spark.sparkspec/spec :ScmParent
-                                      :scm {:val1 ?a
-                                            :val2 two}}))
-                  (into #{})))
+             (let [two 2]
+               (q :find [?a] :in (db) :where 
+                  [:ScmParent {:scm {:val1 ?a :val2 two}}])))
           "can use regular variables to fix values")
       (is (= #{["b"]}
-             (->> (query [?a] (db) {:spark.sparkspec/spec :ScmParent
-                                    :scm {:val1 ?a
-                                          :val2 (let [?a 2] ?a)}})
-                  (into #{})))
+             (q :find [?a] :in (db) :where
+                [:ScmParent {:scm {:val1 ?a :val2 (let [?a 2] ?a)}}]))
           "return variables respect lexical scope and don't clobber lets")
       (is (= #{["b"]}
-             (->> (query [?a] (db) {:spark.sparkspec/spec :ScmParent
-                                    :scm {:val1 ?a
-                                          :val2 ((fn [?a] ?a) 2)}})
-                  (into #{})))
+             (q :find [?a] :in (db) :where
+                [:ScmParent {:scm {:val1 ?a :val2 ((fn [?a] ?a) 2)}}]))
           "return variables respect lexical scope and don't clobber fns"))
 
     (testing "compound data"
       (let [e-scm2 (scm2 {:val1 5})
-            e-scm  (scm {:val1 "c" :val2 4 :scm2 e-scm2})
-            scm3    (scmparent {:scm e-scm})]
-        (create-sp! {:conn *conn*} scm3)
+            e-scm  (scm {:val2 5 :scm2 e-scm2})
+            e-scmp (scmparent {:scm e-scm})]
+        (create-sp! {:conn *conn*} e-scmp)
+
+        (let [a-scm2 (->> (q :find :Scm2 :in (db) :where
+                             [:Scm {:scm2 %}])
+                          first)]
+          (is (= (:val1 a-scm2) 5)
+              "can use keywords on returned entities"))
         
-        (let [a-scm2 (->> (query [?scm2] (db)
-                                 {:spark.sparkspec/spec :ScmParent :scm {:scm2 ?scm2}})
-                          first first)]
-          (is (= (:val1 a-scm2) (:val1 e-scm2))))))))
+        (let [[a-scm a-scm2]
+              ,(->> (q :find [:Scm :Scm2] :in (db) :where
+                       [%1 {:scm2 %2}])
+                    first)]
+          (is (= (:scm2 a-scm) a-scm2)
+              "can use equality on returned entities"))
+
+        (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
+          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))))
+
+    (testing "bad syntax" ; fully qualify for command line
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"invalid map"
+           (->> '(spark.sparkspec.datomic/q :find :Scm2 :in (db) :where [:Scm :scm2])
+                clojure.core/macroexpand prn)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"could not infer type"
+           (->> '(spark.sparkspec.datomic/q :find ?x :in (db) :where [?x {:y 5}])
+                clojure.core/macroexpand prn)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"unsupported ident"
+           (->> '(spark.sparkspec.datomic/q :find ?x :in (db) :where ["?x" {:y 5}])
+                clojure.core/macroexpand prn)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"could not find sub-spec"
+           (->> '(spark.sparkspec.datomic/q :find :Scm :in (db) :where [% {:y 5}])
+                clojure.core/macroexpand prn))))
+
+    (testing "types" ; fully qualify for command line
+      (t/cf (spark.sparkspec.datomic/q :find [:Scm :Scm2] 
+                                       :in (spark.sparkspec.datomic-test/db)
+                                       :where [%1 {:scm2 %2}])
+            (clojure.core.typed/Set 
+             (clojure.core.typed/HVec 
+              [spark.sparkspec.datomic-test/Scm 
+               spark.sparkspec.datomic-test/Scm2]))))
+
+    (testing "bad data" ; db goes to shit after this -- should be last test
+      (let [id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/val2 5]] (db)))]
+        (assert @(db/transact *conn* [[':db/add id :scm/scm2 123]]))
+        (is (= id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/scm2 123]] (db))))
+            "insertion of bad scm2 ref should work")
+
+        (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
+                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+          (is (= :Scm2 (:expected-spec data))
+              "should be an error to use bad scm2 ref as an :Scm2"))
+
+        (assert @(db/transact *conn*
+                              [{:db/id (db/tempid :db.part/user -100)
+                                :spec-tacular/spec :Scm2
+                                :scm/val1 "5"}
+                               [:db/add id :scm/scm2 (db/tempid :db.part/user -100)]]))
+        
+        (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
+                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+          (is (= [:spec-tacular/spec :scm/val1] (:actual-keys data))
+              "should be an error to have an :Scm2 with :scm/val1 key"))))))
+
+(deftest transaction!-tests
+  (with-test-db simple-schema
+    #_(sd/new :Scm2 {:val1 5})
+    #_(sd/retract (sd/new :Scm2 {:val1 5}) [:val1])))
+
+(deftest type-tests
+  (with-out-str (t/check-ns 'spark.sparkspec.datomic)))
