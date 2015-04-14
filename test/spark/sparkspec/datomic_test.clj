@@ -733,10 +733,5 @@
           (is (= [:spec-tacular/spec :scm/val1] (:actual-keys data))
               "should be an error to have an :Scm2 with :scm/val1 key"))))))
 
-(deftest transaction!-tests
-  (with-test-db simple-schema
-    #_(sd/new :Scm2 {:val1 5})
-    #_(sd/retract (sd/new :Scm2 {:val1 5}) [:val1])))
-
 (deftest type-tests
   (with-out-str (t/check-ns 'spark.sparkspec.datomic)))
