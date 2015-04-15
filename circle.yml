@@ -1,6 +1,8 @@
 machine:
   timezone:
     America/New_York
+  java:
+    version: oraclejdk8
 
 test:
   override:
