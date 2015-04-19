@@ -4,8 +4,6 @@
   (:use spark.sparkspec
         clojure.test))
 
-(declare CT-TestSpec2)
-
 (defspec TestSpec1
   [val1 :is-a :long :required]
   [val2 :is-a :string]
@@ -17,6 +15,9 @@
   [sillyval :is-a :TestSpec1])
 
 (defspec TestSpec3)
+
+(defspec TestSpec4
+  [val1 :is-a :bool])
 
 (def good-spec (testspec1 {:val1 3 :val2 "hi"}))
 
@@ -42,8 +43,11 @@
 
   (testing "get-spec"
     (is (= (get-basis :TestSpec1) [:val1 :val2 :val3 :val4 :val5]))
-    (is (= (get-basis good-spec) [:val1 :val2 :val3 :val4 :val5]))
-    (is (= (get-basis TestSpec1) [:val1 :val2 :val3 :val4 :val5]))))
+    (is (= (get-basis good-spec) [:val1 :val2 :val3 :val4 :val5])))
+
+  (testing "false"
+    (is (some? (check-component! (get-spec :TestSpec4) :val1 false)))
+    (is (testspec4? (testspec4 {:val1 false})))))
 
 (deftest recursive-tests
   (testing "order of spec definition does not matter"
@@ -57,18 +61,24 @@
 (deftest defenum-tests
   (is (testenum? (testspec2 {})))
   (is (instance? spark.sparkspec.spec.EnumSpec (get-spec testenum)))
-  (is (true? (check-component! (get-spec ES) :foo (testspec2 {}))))
-  (is (thrown? java.lang.AssertionError (check-component! (get-spec ES) :foo :nope)))
+  (is (check-component! (get-spec :ES) :foo (testspec2 {})))
+  (is (thrown? java.lang.AssertionError (check-component! (get-spec :ES) :foo :nope)))
   (is (= (es {:foo (testspec3)})
-         #spark.sparkspec_test.ES{:foo #spark.sparkspec_test.TestSpec3{}}))
+         #spark.sparkspec_test.s-ES{:foo #spark.sparkspec_test.s-TestSpec3{}}))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
   (is (= (esparent {:es {:foo (testspec3)}})
-         #spark.sparkspec_test.ESParent{:es #spark.sparkspec_test.ES{:foo #spark.sparkspec_test.TestSpec3{}}})
+         #spark.sparkspec_test.s-ESParent{:es #spark.sparkspec_test.s-ES{:foo #spark.sparkspec_test.s-TestSpec3{}}})
       "nested ctor works with enums")
   (is (thrown? clojure.lang.ExceptionInfo
                (esparent {:es {:foo (testspec1 {:val1 1})}}))
       "nested ctor fails properly with enums"))
 
-(defrecord FakeContact [phones])
+(deftest lazy-tests
+  (let [bad-test1 {:val1 3 :val2 2}
+        ts2 ((get-lazy-ctor :TestSpec2) {:sillyval bad-test1})]
+    (is (testspec2? ts2))
+    (is (testspec1? (:sillyval ts2)))
+    (is (thrown-with-msg? java.lang.AssertionError #"invalid type" (:val2 (:sillyval ts2))))
+    (is (= 3 (:val1 (:sillyval ts2))))))
 
 ;; TODO: Test recursive construction
