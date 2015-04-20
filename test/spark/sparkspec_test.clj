@@ -24,7 +24,8 @@
 (deftest defspec-tests
   (testing "Valid specs"
     (is (testspec1? good-spec)
-        "Valid specs should conform to huh-forms"))
+        "Valid specs should conform to huh-forms")
+    (is (instance? TestSpec1 good-spec)))
 
   (testing "Invalid specs"
     (is (not (testspec1? {:val1 3 :val2 "hi"}))
@@ -77,6 +78,7 @@
   (let [bad-test1 {:val1 3 :val2 2}
         ts2 ((get-lazy-ctor :TestSpec2) {:sillyval bad-test1})]
     (is (testspec2? ts2))
+    (is (instance? TestSpec2 ts2))
     (is (testspec1? (:sillyval ts2)))
     (is (thrown-with-msg? java.lang.AssertionError #"invalid type" (:val2 (:sillyval ts2))))
     (is (= 3 (:val1 (:sillyval ts2))))))
