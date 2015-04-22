@@ -122,7 +122,7 @@
            :one  (is-type? v))
          (format "invalid type (%s %s) for %s in %s. value %s has class %s."
                  cardinality typ iname sname v (class v))))))
-  v)
+  true)
 
 (defn check-complete! 
   "checks all fields of a record-sp (not enum), 
@@ -180,13 +180,13 @@
   (let [item     (first (filter #(= (:name %) k) (:items spec)))
         sub-spec (second (:type item))]
     (if (primitive? sub-spec)
-      (check-component! spec k v)
+      (do (check-component! spec k v) v)
       ((get-lazy-ctor sub-spec) v))))
 
 (defn- mk-record [spec]
   "defines a record type for spec, and a lazy type for spec"
-  `(do (defrecord ~(symbol (str "s-" (-> spec :name name))) [])
-       (deftype ~(symbol (str "l-" (-> spec :name name))) [~'atmap ~'cache]
+  `(do (defrecord ~(symbol (str "s_" (-> spec :name name))) [])
+       (deftype ~(symbol (str "l_" (-> spec :name name))) [~'atmap ~'cache]
          clojure.lang.ILookup
          (valAt ~'[this k not-found]
            (or (~'k (deref ~'cache))
@@ -304,7 +304,7 @@
   `(let [l-ctor# (fn [atmap#]
                    (when-not (instance? clojure.lang.IPersistentCollection atmap#)
                      (throw (ex-info "cannot construct " (name (:name ~spec)) " from " atmap#)))
-                   (~(symbol (str *ns*) (str "l-" (name (:name spec)) ".")) atmap# (atom {})))]
+                   (~(symbol (str *ns*) (str "l_" (name (:name spec)) ".")) atmap# (atom {})))]
      (do (defmethod get-lazy-ctor ~(:name spec) [_#] l-ctor#)
          (defmethod get-lazy-ctor ~spec [_#] l-ctor#))))
 
@@ -320,25 +320,25 @@
 (defn- mk-get-spec [spec]
   `(let [spec-sym# (eval-default-values ~spec)] ; want eval to happen after this is expanded, so the two methods share the resulting value.
      (defmethod get-spec ~(:name spec) [_#] spec-sym#)
-     (defmethod get-spec ~(symbol (str "s-" (name (:name spec)))) [_#] spec-sym#)))
+     (defmethod get-spec ~(symbol (str "s_" (name (:name spec)))) [_#] spec-sym#)))
 
 (defn- mk-get-spec-class [spec]
-  (let [class-name (symbol (str "s-" (name (:name spec))))]
+  (let [class-name (symbol (str "s_" (name (:name spec))))]
     `(defmethod get-spec-class ~(:name spec) [_#] ~class-name)))
 
 (defn- mk-get-map-ctor [spec]
-  (let [builtin-sym (symbol (str "map->s-" (name (:name spec))))
+  (let [builtin-sym (symbol (str "map->s_" (name (:name spec))))
         fac-sym     (symbol (str builtin-sym "-fixed"))]
     `(do
        (defn ~fac-sym [o#] (~builtin-sym (into {} o#))) ; avoid CLJ-1388 until Clojure 1.7 comes out.
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
-       (defmethod get-map-ctor ~(symbol (str "s-" (name (:name spec)))) [_#] ~fac-sym))))
+       (defmethod get-map-ctor ~(symbol (str "s_" (name (:name spec)))) [_#] ~fac-sym))))
 
 (defn- mk-enum-get-spec [spec]
   `(defmethod get-spec ~(:name spec) [_#] ~spec))
 
 (defn- mk-enum-get-map-ctor [spec]
-  (let [fac-sym (symbol (str "map->s-" (name (:name spec))))]
+  (let [fac-sym (symbol (str "map->s_" (name (:name spec))))]
     `(do
        ;; the "map ctor" for an enum means it's arg needs to 
        ;; be a tagged map or a record type of one of the enum's ctors.
@@ -354,8 +354,8 @@
 
 (defn- mk-huh [spec]
   (let [huh (make-name spec #(str (lower-case %) "?"))
-        strict-class (symbol (str "s-" (name (:name spec))))
-        lazy-class   (symbol (str "l-" (name (:name spec))))]
+        strict-class (symbol (str (namespace-munge *ns*) ".s_" (name (:name spec))))
+        lazy-class   (symbol (str (namespace-munge *ns*) ".l_" (name (:name spec))))]
     `(defn ~huh [o#] 
        (or (instance? ~strict-class o#)
            (instance? ~lazy-class o#)))))
