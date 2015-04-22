@@ -122,7 +122,7 @@
            :one  (is-type? v))
          (format "invalid type (%s %s) for %s in %s. value %s has class %s."
                  cardinality typ iname sname v (class v))))))
-  v)
+  true)
 
 (defn check-complete! 
   "checks all fields of a record-sp (not enum), 
