@@ -180,7 +180,7 @@
   (let [item     (first (filter #(= (:name %) k) (:items spec)))
         sub-spec (second (:type item))]
     (if (primitive? sub-spec)
-      (check-component! spec k v)
+      (do (check-component! spec k v) v)
       ((get-lazy-ctor sub-spec) v))))
 
 (defn- mk-record [spec]
