@@ -831,6 +831,8 @@
        {:var var :spec spec})
     :else (throw (ex-info (str (type ident) " unsupported ident") {:syntax ident}))))
 
+(declare expand-clause)
+
 ;; map = {:kw (ident | clause | map | value),+}
 (t/ann expand-map [QueryMap t/Sym SpecT QueryUEnv QueryTEnv ->
                    (t/ASeq (t/HVec [t/Any t/Keyword t/Any]))])
@@ -865,8 +867,12 @@
                  (cons (mk-where-clause `'~y)
                        (expand-map sub-atmap y (get-spec sub-item) uenv tenv)))
               (vector? rhs)
-              ,(throw (ex-info "clauses as maps not supported yet"
-                               {:syntax atmap}))
+              ,(t/let [y (gensym "?tmp")]
+                 (cond
+                   (keyword? (first rhs))
+                   ,(cons (mk-where-clause `'~y)
+                          (expand-clause [[y (first rhs)] (second rhs)] uenv tenv))
+                   :else (throw (ex-info "syntax not supported" {:syntax atmap}))))
               :else ,[(mk-where-clause rhs)])))
         (mapcat atmap))))
 

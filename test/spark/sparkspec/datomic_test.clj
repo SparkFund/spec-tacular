@@ -670,7 +670,12 @@
             (is (= a-scm  e-scm))))
 
         (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
-          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))))
+          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))
+
+        (let [a-scm ,(->> (q :find :Scm :in (db) :where 
+                             [% {:scm2 [:Scm2 {:val1 5}]}])
+                          first)]
+          (is (= a-scm e-scm)))))
 
     (testing "bad syntax" ; fully qualify for command line
       (is (thrown-with-msg?
