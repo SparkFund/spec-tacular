@@ -4,7 +4,8 @@
         spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic
-        spark.sparkspec.test-utils)
+        spark.sparkspec.test-utils
+        spark.sparkspec.test-specs)
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :as sd]
             [clojure.core.typed :as t]
@@ -130,30 +131,6 @@
     :db/doc ""
     :db.install/_attribute :db.part/db}
    datomic-spec-schema])
-
-(defspec Scm2
-  [val1 :is-a :long :unique :identity])
-
-(defspec Scm
-  [val1 :is-a :string :unique :identity]
-  [val2 :is-a :long]
-  [multi :is-many :string]
-  [scm2 :is-a :Scm2])
-
-(defspec Scm3)
-
-(defenum ScmEnum :Scm2 :Scm3)
-
-(defspec ScmOwnsEnum
-  [enum :is-a :ScmEnum]
-  [enums :is-many :ScmEnum])
-
-(defspec ScmM
-  [identity :is-a :string :unique :identity]
-  [vals :is-many :Scm2])
-
-(defspec ScmParent
-  [scm :is-a :Scm])
 
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
 (def scm-non-nested (scm {:val1 "ho" :val2 56666}))
@@ -624,8 +601,6 @@
 
 (deftest query-tests
   (with-test-db simple-schema
-    (with-out-str (t/check-ns 'spark.sparkspec.datomic-test :collect-only true))
-
     (is (= #{} (->> (q :find ?a :in (db) :where
                        [:ScmParent {:scm {:val2 ?a}}])))
         "nothing returned on fresh db.")
@@ -702,15 +677,6 @@
            (->> '(spark.sparkspec.datomic/q :find :Scm :in (db) :where [% {:y 5}])
                 clojure.core/macroexpand prn))))
 
-    (testing "types" ; fully qualify for command line
-      (t/cf (spark.sparkspec.datomic/q :find [:Scm :Scm2] 
-                                       :in (spark.sparkspec.datomic-test/db)
-                                       :where [%1 {:scm2 %2}])
-            (clojure.core.typed/Set 
-             (clojure.core.typed/HVec 
-              [spark.sparkspec.datomic-test/Scm 
-               spark.sparkspec.datomic-test/Scm2]))))
-
     (testing "bad data" ; db goes to shit after this -- should be last test
       (let [id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/val2 5]] (db)))]
         (assert @(db/transact *conn* [[':db/add id :scm/scm2 123]]))
@@ -734,4 +700,16 @@
               "should be an error to have an :Scm2 with :scm/val1 key"))))))
 
 (deftest type-tests
-  (with-out-str (t/check-ns 'spark.sparkspec.datomic)))
+  (with-out-str 
+    (do (t/check-ns 'spark.sparkspec.datomic)
+        (t/check-ns 'spark.sparkspec.datomic-test :collect-only true)
+        (t/check-ns 'spark.sparkspec.test-specs :collect-only true)))
+  (testing "types" ; fully qualify for command line
+    (t/cf (spark.sparkspec.datomic/q :find [:Scm :Scm2] 
+                                     :in (spark.sparkspec.datomic-test/db)
+                                     :where [%1 {:scm2 %2}])
+          (clojure.core.typed/Set 
+           (clojure.core.typed/HVec 
+            [spark.sparkspec.test-specs/Scm
+             spark.sparkspec.test-specs/Scm2])))))
+

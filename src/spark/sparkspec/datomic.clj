@@ -955,7 +955,7 @@
                                 :actual-type   ~(type result)
                                 :expected-type '~t-s})))
         wrap (fn [result t-kw t-m t-s]
-               (if (:type t-m)
+               (if (primitive? t-kw)
                  `(if (instance? ~t-s ~result) ~result
                       ~(err result t-s))
                  `(if (instance? java.lang.Long ~result)
@@ -966,9 +966,9 @@
                        ~t-s))
                     ~(err result t-s))))]
     `(let [check# (t/ann-form
-                     (fn [~(vec args)] 
-                       [~@(map wrap args type-kws type-maps type-syms)])
-                     [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))])]
+                   (fn [~(vec args)] 
+                     [~@(map wrap args type-kws type-maps type-syms)])
+                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))])]
        (->> (db/q {:find '~args :in '~['$] :where ~(vec clauses)} ~db)
             (map check#)
             ~(if (vector? f) `identity `(map first))
@@ -985,19 +985,17 @@
                                 :actual-type   ~(type result)
                                 :expected-type '~t-s})))
         wrap (fn [result t-kw t-m t-s]
-               (if (:type t-m)
+               (if (primitive? t-kw)
                  `(if (instance? ~t-s ~result) ~result
                       ~(err result t-s))
                  `(if (instance? java.lang.Long ~result) ~result
                       ~(err result t-s))))]
     `(let [check# (t/ann-form
-                     (fn [~(vec args)] 
-                       [~@(map wrap args type-kws type-maps type-syms)])
-                     [(t/Vec t/Any) ~'-> (t/HVec ~(vec (map (fn [t-m t-s]
-                                                              (if (:type t-m)
-                                                                java.lang.Long
-                                                                t-s))
-                                                            type-maps type-syms)))])]
+                   (fn [~(vec args)] 
+                     [~@(map wrap args type-kws type-maps type-syms)])
+                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec (map (fn [t-m t-s]
+                                                            (if (:type t-m) java.lang.Long t-s))
+                                                          type-maps type-syms)))])]
        (->> (db/q {:find '~args :in '~['$] :where ~(vec clauses)} ~db)
             (map check#)
             ~(if (vector? f) `identity `(map first))
