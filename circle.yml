@@ -6,4 +6,5 @@ machine:
 
 test:
   override:
+    - lein typed check
     - lein test
