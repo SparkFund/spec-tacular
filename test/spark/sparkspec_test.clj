@@ -64,10 +64,10 @@
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
   (is (thrown? java.lang.AssertionError (check-component! (get-spec :ES) :foo :nope)))
   (is (= (es {:foo (testspec3)})
-         #spark.sparkspec_test.s-ES{:foo #spark.sparkspec_test.s-TestSpec3{}}))
+         #spark.sparkspec_test.s_ES{:foo #spark.sparkspec_test.s_TestSpec3{}}))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
   (is (= (esparent {:es {:foo (testspec3)}})
-         #spark.sparkspec_test.s-ESParent{:es #spark.sparkspec_test.s-ES{:foo #spark.sparkspec_test.s-TestSpec3{}}})
+         #spark.sparkspec_test.s_ESParent{:es #spark.sparkspec_test.s_ES{:foo #spark.sparkspec_test.s_TestSpec3{}}})
       "nested ctor works with enums")
   (is (thrown? clojure.lang.ExceptionInfo
                (esparent {:es {:foo (testspec1 {:val1 1})}}))
