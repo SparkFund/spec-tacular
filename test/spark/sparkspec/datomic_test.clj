@@ -653,8 +653,10 @@
               ,(->> (q :find [:Scm :Scm2] :in (db) :where
                        [%1 {:scm2 %2}])
                     first)]
-          (is (= (:scm2 a-scm) a-scm2)
-              "can use equality on returned entities"))
+          (testing "equality on returned entities"
+            (is (= (:scm2 a-scm) a-scm2))
+            (is (= a-scm2 e-scm2))
+            (is (= a-scm  e-scm))))
 
         (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
           (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))))
