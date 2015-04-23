@@ -256,7 +256,11 @@
         eid (get-eid db sp)
         db-value (and eid (get-by-eid db eid (:name spec)))
         eid (or eid (db/tempid :db.part/user))]
-    (->> (for [{iname :name [cardinality type] :type :as item} (:items spec)
+    (->> (for [{iname :name 
+                [cardinality type] :type 
+                required? :required?
+                :as item}
+               (:items spec)
                :when (iname mask)
                :let [is-nested (= (recursiveness item) :rec)
                      is-many (= cardinality :many)
@@ -265,8 +269,12 @@
                      mask (iname mask)
                      ival-db (iname db-value)
                      datomic-key (keyword (datomic-ns spec) (name iname))
-                     retract (fn [r] [:db/retract eid datomic-key
-                                      (or (get-in r [:db-ref :eid]) r)])]]
+                     retract (fn [r] 
+                               (if required?
+                                 (throw (ex-info "attempt to delete a required field"
+                                                 {:item item :field datomic-key :spec spec}))
+                                 [:db/retract eid datomic-key
+                                  (or (get-in r [:db-ref :eid]) r)]))]]
            (do
              [datomic-key
               (if is-nested

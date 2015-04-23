@@ -130,6 +130,12 @@
     :db/cardinality :db.cardinality/one
     :db/doc ""
     :db.install/_attribute :db.part/db}
+   {:db/id (db/tempid :db.part/db)
+    :db/ident :scmreq/name
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/doc ""
+    :db.install/_attribute :db.part/db}
    datomic-spec-schema])
 
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
@@ -375,7 +381,12 @@
           b3db (get-by-eid (db) b2eid)
           _ (is (= [] (:vals b3db))
                 "Can delete non-primitive is-manys via nil too")
-          ])))
+          scmreq-eid (create-sp! {:conn *conn*} (scmreq {:name "blah"}))
+          scmreq-db (get-by-eid (db) scmreq-eid)
+          _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"attempt to delete a required field"
+                                  (update-sp! {:conn *conn*}
+                                              scmreq-db
+                                              (assoc scmreq-db :name nil))))])))
 
 (deftest enum-tests
   (with-test-db simple-schema

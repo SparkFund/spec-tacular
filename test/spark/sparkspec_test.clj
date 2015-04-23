@@ -19,6 +19,9 @@
 (defspec TestSpec4
   [val1 :is-a :boolean])
 
+(defspec TestSpec5
+  [name :is-a :string :required])
+
 (def good-spec (testspec1 {:val1 3 :val2 "hi"}))
 
 (deftest defspec-tests
@@ -50,7 +53,12 @@
 
   (testing "false"
     (is (some? (check-component! (get-spec :TestSpec4) :val1 false)))
-    (is (testspec4? (testspec4 {:val1 false})))))
+    (is (testspec4? (testspec4 {:val1 false}))))
+
+  (testing "required"
+    (is (thrown-with-msg? java.lang.AssertionError #"is required"
+                          (check-component! (get-spec :TestSpec5) :name nil)))
+    (is (some? (check-component! (get-spec :TestSpec5) :name "")))))
 
 (deftest recursive-tests
   (testing "order of spec definition does not matter"

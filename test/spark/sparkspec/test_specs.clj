@@ -27,3 +27,6 @@
 
 (defspec ScmParent
   [scm :is-a :Scm])
+
+(defspec ScmReq
+  [name :is-a :string :required])
