@@ -17,7 +17,7 @@
 (defspec TestSpec3)
 
 (defspec TestSpec4
-  [val1 :is-a :bool])
+  [val1 :is-a :boolean])
 
 (def good-spec (testspec1 {:val1 3 :val2 "hi"}))
 
@@ -29,9 +29,12 @@
   (testing "Invalid specs"
     (is (not (testspec1? {:val1 3 :val2 "hi"}))
         "Specs only care about types.")
-    (is (thrown? java.lang.AssertionError (testspec1 {:val1 nil})))
-    (is (thrown? java.lang.AssertionError (testspec1 {:val2 1})))
-    (is (thrown? java.lang.AssertionError (testspec1 {:val1 0 :val2 1}))))
+    (is (thrown-with-msg? java.lang.AssertionError #"is required" 
+                          (testspec1 {:val1 nil})))
+    (is (thrown-with-msg? java.lang.AssertionError #"is required"
+                          (testspec1 {:val2 1})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
+                          (testspec1 {:val1 0 :val2 1}))))
 
   (testing "Default values"
     (is (= 3 (:val3 good-spec)))
@@ -62,7 +65,7 @@
   (is (testenum? (testspec2 {})))
   (is (instance? spark.sparkspec.spec.EnumSpec (get-spec testenum)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
-  (is (thrown? java.lang.AssertionError (check-component! (get-spec :ES) :foo :nope)))
+  (is (thrown? clojure.lang.ExceptionInfo (check-component! (get-spec :ES) :foo :nope)))
   (is (= (es {:foo (testspec3)})
          #spark.sparkspec_test.s_ES{:foo #spark.sparkspec_test.s_TestSpec3{}}))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
@@ -78,8 +81,11 @@
         ts2 ((get-lazy-ctor :TestSpec2) {:sillyval bad-test1})]
     (is (testspec2? ts2))
     (is (testspec1? (:sillyval ts2)))
-    (is (thrown-with-msg? java.lang.AssertionError #"invalid type" (:val2 (:sillyval ts2))))
-    (is (= 3 (:val1 (:sillyval ts2))))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" (:val2 (:sillyval ts2))))
+    (is (= 3 (:val1 (:sillyval ts2)))))
+  (let [l-ts4 ((get-lazy-ctor :TestSpec4) {:val1 true})]
+    (is (= (testspec4 l-ts4)
+           (testspec4 {:val1 true})))))
 
 
 ;; recursive and forward-references

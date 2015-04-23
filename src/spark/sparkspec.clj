@@ -116,12 +116,14 @@
                          (instance? spec-class v)
                          (contains? (set (:elements (get-spec typ)))
                                     (:name (get-spec v)))))]
-        (assert
-         (case cardinality
-           :many (every? is-type? v)
-           :one  (is-type? v))
-         (format "invalid type (%s %s) for %s in %s. value %s has class %s."
-                 cardinality typ iname sname v (class v))))))
+        (when-not (case cardinality
+                    :many (every? is-type? v)
+                    :one  (is-type? v))
+          (throw (ex-info "invalid type"
+                          {:expected-type typ
+                           :actual-type (class v)
+                           :sub-spec-name iname
+                           :spec-name sname}))))))
   true)
 
 (defn check-complete! 
@@ -185,19 +187,48 @@
 
 (defn- mk-record [spec]
   "defines a record type for spec, and a lazy type for spec"
-  `(do (defrecord ~(symbol (str "s_" (-> spec :name name))) [])
-       (deftype ~(symbol (str "l_" (-> spec :name name))) [~'atmap ~'cache]
-         clojure.lang.ILookup
-         (valAt ~'[this k not-found]
-           (or (~'k (deref ~'cache))
-               (let [val# (.valAt ~'atmap ~'k ~'not-found)
-                     lsp# (checked-lazy-access ~spec ~'atmap ~'k val#)]
-                 (do (swap! ~'cache assoc ~'k lsp#) lsp#))))
-         (valAt [~'this ~'k]
-           (.valAt ~'this ~'k nil))
-         clojure.lang.IPersistentCollection
-         (equiv ~'[this o]
-           (.equiv ~'atmap (.atmap ~'o))))))
+  (let [strict-class (symbol (str "s_" (-> spec :name name)))
+        lazy-class (symbol (str "l_" (-> spec :name name)))
+        gs (gensym)]
+    `(do (defrecord ~strict-class [])
+         (deftype ~lazy-class [~'atmap ~'cache]
+           clojure.lang.ILookup
+           (valAt ~'[this k not-found]
+             (or (~'k (deref ~'cache))
+                 (let [val# (.valAt ~'atmap ~'k ~'not-found)]
+                   (if (identical? val# ~'not-found) ~'not-found
+                       (let [lsp# (checked-lazy-access ~spec ~'atmap ~'k val#)]
+                         (if (some? lsp#) (do (swap! ~'cache assoc ~'k lsp#) lsp#)
+                             ~'not-found))))))
+           (valAt [~'this ~'k]
+             (.valAt ~'this ~'k nil))
+           clojure.lang.IPersistentMap
+           (equiv ~'[this o]
+             (or (and (instance? ~lazy-class ~'o)
+                      (.equiv ~'atmap (.atmap ~'o)))
+                 (and (or (instance? ~strict-class ~'o)
+                          (instance? clojure.lang.APersistentMap ~'o))
+                      (.equiv (filter (fn [[k# v#]] (some? v#)) ~'this) 
+                              (filter (fn [[k# v#]] (some? v#)) ~'o)))))
+           (seq [~gs]
+             (seq [~@(for [{iname :name [cardinality sub-sp-nm] :type :as item}
+                           (:items spec)]
+                       (do (assert (keyword? iname))
+                           `(new clojure.lang.MapEntry ~iname (~iname ~gs))))]))
+           (assoc [this# k# v#]
+             (do (swap! ~'cache assoc k# v#) this#))
+           (containsKey [this# k#] 
+             (not (identical? this# (.valAt this# k# this#))))
+           (iterator [this#]
+             (.iterator (apply hash-map (mapcat #(list (:name %) ((:name %) ~'atmap)) 
+                                                (:items ~spec)))))
+           (cons [this# e#]
+             (do (swap! ~'cache assoc (first e#) (second e#)) this#)))
+         ;; TODO writing things this way makes them easier to read,
+         ;; but it is deceiving in that you can't actually use the record reader syntax
+         (defmethod print-method ~lazy-class [v# ^java.io.Writer w#]
+           (.write w# (str "#" ~(namespace-munge *ns*) "." '~lazy-class))
+           (print-method (.atmap v#) w#)))))
 
 (defn spec->enum-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
@@ -235,27 +266,15 @@
    spec :- spark.sparkspec.spec.Spec,
    sp :- {s/Keyword s/Any}]
   (let [items (:items spec)
-        defaults
-        (reduce
-         (fn [m {name :name dv :default-value}]
-           (if (some? dv)
-             (assoc m (keyword name) (if (ifn? dv) (dv) dv))
-             m))
-         ;; We have to write over the provided so we don't lose the type. 
-         ;; It may be the only way to choose the right constructor if the spec is an enum.
-         sp items)
-        sp-map (reduce (fn [m k] 
-                         (let [coerced (coerce spec k (get sp k))]
-                           (if (some? coerced) (assoc m k coerced) m)))
-                       sp
-                       (keys sp))
-        sp-map (merge defaults sp-map)]
-    (doall (map
-            (fn [i]
-              (check-component! spec (:name i) (get sp-map (:name i))))
-            (filter
-             #(contains? sp-map (:name %))
-             items)))
+        defaults (-> (fn [m {name :name dv :default-value}]
+                       (if (some? dv) (assoc m (keyword name) (if (ifn? dv) (dv) dv)) m))
+                     (reduce sp items))
+        sp-map (-> (fn [m k]
+                     (let [coerced (coerce spec k (get sp k))]
+                       (if (some? coerced) (assoc m k coerced) m)))
+                   (reduce defaults (keys sp)))]
+    (doseq [i (filter #(or (contains? sp-map (:name %)) (:required? %)) items)]
+      (check-component! spec (:name i) (get sp-map (:name i))))
     (dissoc (with-meta (map-ctor sp-map) {:spec spec})
             :spec-tacular/spec)))
 
@@ -303,7 +322,8 @@
 (defn- mk-lazy-ctor [spec]
   `(let [l-ctor# (fn [atmap#]
                    (when-not (instance? clojure.lang.IPersistentCollection atmap#)
-                     (throw (ex-info "cannot construct " (name (:name ~spec)) " from " atmap#)))
+                     (throw (ex-info (str "cannot construct " (name (:name ~spec)))
+                                     {:atmap atmap#})))
                    (~(symbol (str *ns*) (str "l_" (name (:name spec)) ".")) atmap# (atom {})))]
      (do (defmethod get-lazy-ctor ~(:name spec) [_#] l-ctor#)
          (defmethod get-lazy-ctor ~spec [_#] l-ctor#))))
@@ -343,9 +363,10 @@
        ;; the "map ctor" for an enum means it's arg needs to 
        ;; be a tagged map or a record type of one of the enum's ctors.
        (defn ~fac-sym [o#] 
-         (let [subspec-name# (if (:spec-tacular/spec o#)
-                               (:spec-tacular/spec o#)
-                               (:name (get-spec o#)))]
+         (let [subspec-name# (or (:spec-tacular/spec o#)
+                                 (:name (get-spec o#)))]
+           (assert subspec-name#
+                   (str "could not find spec for "o#))
            (assert (contains? ~(:elements spec) subspec-name#) 
                    (str subspec-name#" is not an element of "~(:name spec)))
            ((get-map-ctor subspec-name#) o#)))
