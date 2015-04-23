@@ -116,12 +116,14 @@
                          (instance? spec-class v)
                          (contains? (set (:elements (get-spec typ)))
                                     (:name (get-spec v)))))]
-        (assert
-         (case cardinality
-           :many (every? is-type? v)
-           :one  (is-type? v))
-         (format "invalid type (%s %s) for %s in %s. value %s has class %s."
-                 cardinality typ iname sname v (class v))))))
+        (when-not (case cardinality
+                    :many (every? is-type? v)
+                    :one  (is-type? v))
+          (throw (ex-info "invalid type"
+                          {:expected-type typ
+                           :actual-type (class v)
+                           :sub-spec-name iname
+                           :spec-name sname}))))))
   true)
 
 (defn check-complete! 
