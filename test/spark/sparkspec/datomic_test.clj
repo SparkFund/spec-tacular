@@ -703,7 +703,7 @@
 
 (deftest type-tests
   (with-out-str 
-    (do (t/check-ns 'spark.sparkspec.datomic)
+    (do (t/check-ns 'spark.sparkspec.datomic :collect-only true)
         (t/check-ns 'spark.sparkspec.datomic-test :collect-only true)
         (t/check-ns 'spark.sparkspec.test-specs :collect-only true)))
   (testing "types" ; fully qualify for command line
