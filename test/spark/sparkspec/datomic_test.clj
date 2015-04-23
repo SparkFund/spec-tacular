@@ -512,7 +512,7 @@
                                                        (scm3 {:db-ref {:eid 4}})]}))
          {:enums {:Scm3 true, :Scm2 true}})
       "we collapse the is-many items properly")
-  (is (= (item-mask :ScmM (scmm {:vals [] :identity nil}))
+  (is (= (item-mask :ScmM {:vals [] :identity nil})
          {:identity true, :vals true})
       "empty lists result in a 'true' mask value.")
   (is (= (item-mask :ScmOwnsEnum (scmownsenum {:enums []}))

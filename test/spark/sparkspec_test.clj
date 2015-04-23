@@ -83,6 +83,9 @@
     (is (testspec1? (:sillyval ts2)))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" (:val2 (:sillyval ts2))))
     (is (= 3 (:val1 (:sillyval ts2)))))
+  (let [l-ts4 ((get-lazy-ctor :TestSpec4) {:val1 true})]
+    (is (= (testspec4 l-ts4)
+           (testspec4 {:val1 true})))))
 
 
 ;; recursive and forward-references
