@@ -658,7 +658,8 @@
                              [:Scm {:scm2 %}])
                           first)]
           (is (= (:val1 a-scm2) 5)
-              "can use keywords on returned entities"))
+              "can use keywords on returned entities")
+          (is (not (:bad-kw a-scm2))))
         
         (let [[a-scm a-scm2]
               ,(->> (q :find [:Scm :Scm2] :in (db) :where
@@ -667,10 +668,24 @@
           (testing "equality on returned entities"
             (is (= (:scm2 a-scm) a-scm2))
             (is (= a-scm2 e-scm2))
-            (is (= a-scm  e-scm))))
+            (is (= a-scm  e-scm)))
+          (is (not (:val1 a-scm))))
 
         (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
-          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))))
+          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))
+
+        (let [a-scm ,(->> (q :find :Scm :in (db) :where 
+                             [% {:scm2 [:Scm2 {:val1 5}]}])
+                          first)]
+          (is (= a-scm e-scm))))
+
+      (testing "absent field access"
+        (let [eid (create-sp! {:conn *conn*} (scm2))
+              a-scm2 ((get-lazy-ctor :Scm2) 
+                      (spec-entity-map (get-spec :Scm2) (db/entity (db) eid)))]
+          (let [b (not (:val1 (scm2 a-scm2)))] ;; lol printing it out draws an early error
+            (is b))
+          #_(is (not (:val1 (scm2 a-scm2)))))))
 
     (testing "bad syntax" ; fully qualify for command line
       (is (thrown-with-msg?
@@ -726,3 +741,6 @@
             [spark.sparkspec.test-specs/Scm
              spark.sparkspec.test-specs/Scm2])))))
 
+
+#_(sd/q :find :Transfer :in db :where
+        [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
