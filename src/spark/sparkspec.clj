@@ -181,9 +181,10 @@
    that the value v adheres to the spec if we can, and return it"
   (let [item     (first (filter #(= (:name %) k) (:items spec)))
         sub-spec (second (:type item))]
-    (if (primitive? sub-spec)
-      (do (check-component! spec k v) v)
-      ((get-lazy-ctor sub-spec) v))))
+    (if (and item sub-spec) ; should just ignore keyword accesses to things not in the spec
+      (if (primitive? sub-spec)
+        (do (check-component! spec k v) v)
+        ((get-lazy-ctor sub-spec) v)))))
 
 (defn- mk-record [spec]
   "defines a record type for spec, and a lazy type for spec"
@@ -194,12 +195,12 @@
          (deftype ~lazy-class [~'atmap ~'cache]
            clojure.lang.ILookup
            (valAt ~'[this k not-found]
-             (or (~'k (deref ~'cache))
+             (or (let [maybe# (~'k (deref ~'cache))]
+                   (if (some? maybe#) maybe# nil))
                  (let [val# (.valAt ~'atmap ~'k ~'not-found)]
                    (if (identical? val# ~'not-found) ~'not-found
                        (let [lsp# (checked-lazy-access ~spec ~'atmap ~'k val#)]
-                         (if (some? lsp#) (do (swap! ~'cache assoc ~'k lsp#) lsp#)
-                             ~'not-found))))))
+                         (do (swap! ~'cache assoc ~'k lsp#) lsp#))))))
            (valAt [~'this ~'k]
              (.valAt ~'this ~'k nil))
            clojure.lang.IPersistentMap
@@ -227,8 +228,9 @@
          ;; TODO writing things this way makes them easier to read,
          ;; but it is deceiving in that you can't actually use the record reader syntax
          (defmethod print-method ~lazy-class [v# ^java.io.Writer w#]
-           (.write w# (str "#" ~(namespace-munge *ns*) "." '~lazy-class))
-           (print-method (.atmap v#) w#)))))
+           (.write w# (str "#<" ~(namespace-munge *ns*) "." '~lazy-class))
+           (print-method (.atmap v#) w#)
+           (.write w# ">")))))
 
 (defn spec->enum-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
@@ -340,7 +342,8 @@
 (defn- mk-get-spec [spec]
   `(let [spec-sym# (eval-default-values ~spec)] ; want eval to happen after this is expanded, so the two methods share the resulting value.
      (defmethod get-spec ~(:name spec) [_#] spec-sym#)
-     (defmethod get-spec ~(symbol (str "s_" (name (:name spec)))) [_#] spec-sym#)))
+     (defmethod get-spec ~(symbol (str "s_" (name (:name spec)))) [_#] spec-sym#)
+     (defmethod get-spec ~(symbol (str "l_" (name (:name spec)))) [_#] spec-sym#)))
 
 (defn- mk-get-spec-class [spec]
   (let [class-name (symbol (str "s_" (name (:name spec))))]

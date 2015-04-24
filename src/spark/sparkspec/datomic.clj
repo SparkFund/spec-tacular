@@ -762,24 +762,25 @@
    (assoc [this k v]
      (throw (ex-info "update not supported" {:entity this :keyword k :value v})))
    (containsKey [this k]
-     (.containsKey em (db-keyword spec k)))
+     (not (not (.containsKey em (db-keyword spec k)))))
    (entryAt [this k]
      (.entryAt em (db-keyword spec k)))
 
    clojure.lang.ILookup
    (valAt [this k not-found]
-     (or (k @cache)
-         (let [result (let [v (if (contains? em k)
-                                (.valAt em k not-found)
-                                (.valAt em (db-keyword spec k) not-found))]
-                        (cond
-                          (instance? datomic.query.EntityMap v)
-                          ,(let [item (first (filter #(= (:name %) k) (:items spec)))
-                                 sub-spec (some-> (second (:type item)) get-spec)]
-                             (spec-entity-map sub-spec v))
-                          :else v))]
-           (swap! cache assoc k result)
-           result)))
+     (or (let [maybe (k @cache)]
+           (if (some? maybe) maybe nil))
+         (let [v (if (contains? em k)
+                   (.valAt em k not-found)
+                   (.valAt em (db-keyword spec k) not-found))]
+           (if (identical? v not-found) not-found
+               (let [result (cond
+                              (instance? datomic.query.EntityMap v)
+                              ,(let [item (first (filter #(= (:name %) k) (:items spec)))
+                                     sub-spec (some-> (second (:type item)) get-spec)]
+                                 (spec-entity-map sub-spec v))
+                              :else v)]
+                 (do (swap! cache assoc k result) result))))))
    (valAt [this k]
      (.valAt this k nil))
 
@@ -873,7 +874,7 @@
                    ,(cons (mk-where-clause `'~y)
                           (expand-clause [[y (first rhs)] (second rhs)] uenv tenv))
                    :else (throw (ex-info "syntax not supported" {:syntax atmap}))))
-              :else ,[(mk-where-clause rhs)])))
+              :else [(mk-where-clause rhs)])))
         (mapcat atmap))))
 
 (t/ann expand-clause [QueryClause QueryUEnv QueryTEnv 
@@ -970,16 +971,17 @@
                                 :actual-type   ~(type result)
                                 :expected-type '~t-s})))
         wrap (fn [result t-kw t-m t-s]
-               (if (primitive? t-kw)
-                 `(if (instance? ~t-s ~result) ~result
-                      ~(err result t-s))
-                 `(if (instance? java.lang.Long ~result)
-                    (let [e# (db/entity ~db ~result)]
-                      (clojure.core.typed.unsafe/ignore-with-unchecked-cast
-                       (~(get-lazy-ctor t-kw)
-                        (spec-entity-map ~(get-spec t-kw) e#))
-                       ~t-s))
-                    ~(err result t-s))))]
+               `(do (assert ~t-kw)
+                    ~(if (primitive? t-kw)
+                       `(if (instance? ~t-s ~result) ~result
+                            ~(err result t-s))
+                       `(if (instance? java.lang.Long ~result)
+                          (let [e# (db/entity ~db ~result)]
+                            (clojure.core.typed.unsafe/ignore-with-unchecked-cast
+                             (~(get-lazy-ctor t-kw)
+                              (spec-entity-map ~(get-spec t-kw) e#))
+                             ~t-s))
+                          ~(err result t-s)))))]
     `(let [check# (t/ann-form
                    (fn [~(vec args)] 
                      [~@(map wrap args type-kws type-maps type-syms)])
