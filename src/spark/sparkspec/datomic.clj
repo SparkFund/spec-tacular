@@ -272,7 +272,7 @@
                      retract (fn [r] 
                                (if required?
                                  (throw (ex-info "attempt to delete a required field"
-                                                 {:item item :field datomic-key :spec spec}))
+                                                 {:item item :field iname :spec spec}))
                                  [:db/retract eid datomic-key
                                   (or (get-in r [:db-ref :eid]) r)]))]]
            (do
@@ -711,6 +711,7 @@
            sp sp))
         sp))))
 
+;; TODO probably shouldnt live here
 (t/ann ^:no-check remove-sub-items-with-required [SpecInstance -> SpecInstance])
 (defn remove-sub-items-with-required
   "recursively walks a single (map) sp and removes any sub-sps that
