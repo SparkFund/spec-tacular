@@ -130,6 +130,12 @@
     :db/cardinality :db.cardinality/one
     :db/doc ""
     :db.install/_attribute :db.part/db}
+   {:db/id (db/tempid :db.part/db)
+    :db/ident :scmreq/name
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/doc ""
+    :db.install/_attribute :db.part/db}
    datomic-spec-schema])
 
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
@@ -375,7 +381,12 @@
           b3db (get-by-eid (db) b2eid)
           _ (is (= [] (:vals b3db))
                 "Can delete non-primitive is-manys via nil too")
-          ])))
+          scmreq-eid (create-sp! {:conn *conn*} (scmreq {:name "blah"}))
+          scmreq-db (get-by-eid (db) scmreq-eid)
+          _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"attempt to delete a required field"
+                                  (update-sp! {:conn *conn*}
+                                              scmreq-db
+                                              (assoc scmreq-db :name nil))))])))
 
 (deftest enum-tests
   (with-test-db simple-schema
@@ -512,7 +523,7 @@
                                                        (scm3 {:db-ref {:eid 4}})]}))
          {:enums {:Scm3 true, :Scm2 true}})
       "we collapse the is-many items properly")
-  (is (= (item-mask :ScmM (scmm {:vals [] :identity nil}))
+  (is (= (item-mask :ScmM {:vals [] :identity nil})
          {:identity true, :vals true})
       "empty lists result in a 'true' mask value.")
   (is (= (item-mask :ScmOwnsEnum (scmownsenum {:enums []}))
@@ -647,17 +658,34 @@
                              [:Scm {:scm2 %}])
                           first)]
           (is (= (:val1 a-scm2) 5)
-              "can use keywords on returned entities"))
+              "can use keywords on returned entities")
+          (is (not (:bad-kw a-scm2))))
         
         (let [[a-scm a-scm2]
               ,(->> (q :find [:Scm :Scm2] :in (db) :where
                        [%1 {:scm2 %2}])
                     first)]
-          (is (= (:scm2 a-scm) a-scm2)
-              "can use equality on returned entities"))
+          (testing "equality on returned entities"
+            (is (= (:scm2 a-scm) a-scm2))
+            (is (= a-scm2 e-scm2))
+            (is (= a-scm  e-scm)))
+          (is (not (:val1 a-scm))))
 
         (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
-          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))))
+          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))
+
+        (let [a-scm ,(->> (q :find :Scm :in (db) :where 
+                             [% {:scm2 [:Scm2 {:val1 5}]}])
+                          first)]
+          (is (= a-scm e-scm))))
+
+      (testing "absent field access"
+        (let [eid (create-sp! {:conn *conn*} (scm2))
+              a-scm2 ((get-lazy-ctor :Scm2) 
+                      (spec-entity-map (get-spec :Scm2) (db/entity (db) eid)))]
+          (let [b (not (:val1 (scm2 a-scm2)))] ;; lol printing it out draws an early error
+            (is b))
+          #_(is (not (:val1 (scm2 a-scm2)))))))
 
     (testing "bad syntax" ; fully qualify for command line
       (is (thrown-with-msg?
@@ -701,7 +729,7 @@
 
 (deftest type-tests
   (with-out-str 
-    (do (t/check-ns 'spark.sparkspec.datomic)
+    (do (t/check-ns 'spark.sparkspec.datomic :collect-only true)
         (t/check-ns 'spark.sparkspec.datomic-test :collect-only true)
         (t/check-ns 'spark.sparkspec.test-specs :collect-only true)))
   (testing "types" ; fully qualify for command line
@@ -713,3 +741,6 @@
             [spark.sparkspec.test-specs/Scm
              spark.sparkspec.test-specs/Scm2])))))
 
+
+#_(sd/q :find :Transfer :in db :where
+        [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
