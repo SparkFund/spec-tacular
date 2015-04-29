@@ -5,67 +5,14 @@
         spark.sparkspec.spec
         spark.sparkspec.datomic
         spark.sparkspec.test-utils
-        spark.sparkspec.test-specs)
+        spark.sparkspec.test-specs
+        spark.sparkspec.schema)
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :as sd]
             [clojure.core.typed :as t]
             [clojure.tools.macro :as m]))
 
-;;;; check-schema tests
-
-(def schema
-  [{:db/id 123124
-    :db/ident :spec/var1
-    :db/unique :db.unique/identity
-    :db/valueType :db.type/string}
-   datomic-spec-schema])
-
-(def schema-by-value
-  [{:db/id 123124
-    :db/ident :spec/var1
-    :db/unique :db.unique/value
-    :db/valueType :db.type/string}
-   datomic-spec-schema])
-
-(def schema-alt-keys
-  [{:db/id 123124
-    :db/ident :spec/var2
-    :db/valueType :db.type/string}
-   datomic-spec-schema])
-
-(def matching-spec
-  (map->Spec
-   {:name 'spec
-    :items
-    (map map->Item
-         [{:name :var1 :type [:one String] :identity? true :unique? true}])}))
-
-(def not-matching-spec
-  (map->Spec
-   {:name 'spec
-    :items
-    (map map->Item
-         [{:name :var1 :type [:one String]}])}))
-
-(deftest matching-spec-test
-  (is (empty? (check-schema schema matching-spec))))
-
-(deftest not-matching-spec-test
-  (is (= '("uniqueness for field :var1 in spec is inconsistant")
-         (check-schema schema not-matching-spec))))
-
-(deftest value-consistent-test
-  (is (= '("uniqueness for field :var1 in spec is inconsistant")
-         (check-schema schema-by-value matching-spec))))
-
-(deftest value-consistent-test-2
-  (is (= '("inconsistent keys between schema and spec. Diff: [#{:var2} #{:var1} nil]")
-         (check-schema schema-alt-keys matching-spec))))
-
-
 ;;;; sp->transactions tests
-
-;; TODO: make datomic utilities from these
 
 (def simple-schema
   [{:db/id (db/tempid :db.part/db)
@@ -136,7 +83,7 @@
     :db/cardinality :db.cardinality/one
     :db/doc ""
     :db.install/_attribute :db.part/db}
-   datomic-spec-schema])
+   spec-schema-map])
 
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
 (def scm-non-nested (scm {:val1 "ho" :val2 56666}))

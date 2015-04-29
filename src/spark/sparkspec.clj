@@ -16,6 +16,21 @@
 ;;     - append grammar to docstring ;)
 ;;     - coerce everything to :is-a
 
+(t/defalias SpecInstance (t/Map t/Any t/Any))
+(t/defalias SpecName t/Keyword)
+(t/defalias Item (t/HMap :mandatory {:name t/Keyword
+                                     :type (t/HVec [(t/U (t/Val :one) (t/Val :many))
+                                                    SpecName])}))
+
+(t/defalias SpecT (t/HMap :mandatory {:name SpecName
+                                      :items (t/Vec Item)}
+                          :optional {:elements (t/Map t/Keyword SpecT)}))
+
+(t/ann ^:no-check spark.sparkspec/primitive? [t/Keyword -> t/Bool])
+(t/ann ^:no-check spark.sparkspec/get-spec [(t/U SpecInstance t/Keyword) -> SpecT])
+(t/ann ^:no-check spark.sparkspec/get-ctor [t/Keyword -> [(t/Map t/Any t/Any) -> SpecInstance]])
+(t/ann ^:no-check spark.sparkspec/get-type [(t/U SpecInstance t/Keyword) -> (t/Map t/Keyword t/Any)])
+
 ;;;; There is no existing Java class for a primitive byte array
 (def Bytes (class (byte-array [1 2])))
 
@@ -322,8 +337,9 @@
                             ['-> (symbol (str *ns*) (name (:name spec)))]
                             [(symbol (str *ns*) (name (:name spec)))
                              '-> (symbol (str *ns*) (name (:name spec)))]))
-       (defn ~ctor-name ~(str "deep-walks a nested map structure to construct a "
-                              (name (:name spec)))
+       (defn ~(with-meta ctor-name (assoc (meta ctor-name) :spec-tacular/spec (:name spec)))
+         ~(str "deep-walks a nested map structure to construct a "
+               (name (:name spec)))
          [& [sp#]] (recursive-ctor ~(:name spec) (if (some? sp#) sp# {})))
        (defmethod get-ctor ~(:name spec) [_#] ~ctor-name)
        (defmethod get-ctor ~spec [_#] ~ctor-name))))
@@ -372,7 +388,7 @@
     `(do
        ;; the "map ctor" for an enum means it's arg needs to 
        ;; be a tagged map or a record type of one of the enum's ctors.
-       (defn ~fac-sym [o#] 
+       (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tactular/spec (:name spec))) [o#]
          (let [subspec-name# (or (:spec-tacular/spec o#)
                                  (:name (get-spec o#)))]
            (assert subspec-name#
@@ -414,7 +430,11 @@
   (recap defenum-rule
          (fn [s]
            `(do
-              (def ~(-> s :name name symbol) ~(:name s))
+              ~(let [spec-name (:name s)
+                     spec-sym  (-> s :name name symbol)]
+                 `(def ~(with-meta spec-sym 
+                          (assoc (meta spec-sym) :spec-tactular/spec spec-name))
+                    ~spec-name))
               ~(mk-type-alias s)
               ~(mk-enum-get-map-ctor s)
               ~(mk-enum-get-spec s)
@@ -463,7 +483,11 @@
            {:expanded true}
            {:expanded false}))))))
 
-
-
-
-
+(t/ann ^:no-check namespace->specs [clojure.lang.Namespace -> (t/Seq SpecT)])
+(t/defn namespace->specs 
+  [namespace :- clojure.lang.Namespace] :- (t/Seq SpecT)
+  (->> (ns-publics namespace)
+       (map (fn [[sym v]]
+              (if-let [spec-name (:spec-tacular/spec (meta v))]
+                (get-spec spec-name))))
+       (into {})))
