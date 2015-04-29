@@ -610,6 +610,24 @@
                    (db) 5678 e2)
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
+(deftest test-lazy-ctor
+  (with-test-db simple-schema
+    (let [e-scm2 (scm2 {:val1 42})
+          e-soe  (scmownsenum {:enum e-scm2})]
+      (create-sp! {:conn *conn*} e-soe)
+
+      (let [a-soe  (first (q :find :ScmOwnsEnum :in (db) :where [% {:enum [:Scm2 {:val1 42}]}]))
+            a-scm2 (:enum a-soe)]
+        (testing "enum lazy-ctor"
+          (is (= a-scm2 e-scm2)
+              "equality")
+          (is (= (checked-lazy-access (get-spec :ScmOwnsEnum) a-soe
+                                      :enum a-scm2)
+                 e-scm2)
+              "checked access")
+          (is (= 42 (:val1 (:enum a-soe)))
+              "deep access"))))))
+
 (deftest query-tests
   (with-test-db simple-schema
     (is (= #{} (->> (q :find ?a :in (db) :where
@@ -713,7 +731,7 @@
 
         (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
                         (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-          (is (= :Scm2 (:expected-spec data))
+          (is (= (get-spec :Scm2) (:expected-spec data))
               "should be an error to use bad scm2 ref as an :Scm2"))
 
         (assert @(db/transact *conn*
@@ -721,11 +739,14 @@
                                 :spec-tacular/spec :Scm2
                                 :scm/val1 "5"}
                                [:db/add id :scm/scm2 (db/tempid :db.part/user -100)]]))
-        
+
         (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
                         (catch clojure.lang.ExceptionInfo e (ex-data e)))]
           (is (= [:spec-tacular/spec :scm/val1] (:actual-keys data))
-              "should be an error to have an :Scm2 with :scm/val1 key"))))))
+              "should be an error to have an :Scm2 with :scm/val1 key"))
+
+        ;; TODO: add enum tests here
+        ))))
 
 (deftest type-tests
   (with-out-str 

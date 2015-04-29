@@ -180,11 +180,18 @@
    the value of that field has not been cached yet, so we check
    that the value v adheres to the spec if we can, and return it"
   (let [item     (first (filter #(= (:name %) k) (:items spec)))
-        sub-spec (second (:type item))]
-    (if (and item sub-spec) ; should just ignore keyword accesses to things not in the spec
-      (if (primitive? sub-spec)
+        sub-spec-name (second (:type item))]
+    (if (and item sub-spec-name) ; should just ignore keyword accesses to things not in the spec
+      (if (primitive? sub-spec-name)
         (do (check-component! spec k v) v)
-        ((get-lazy-ctor sub-spec) v)))))
+        (if-let [possible-specs (:elements (get-spec sub-spec-name))]
+          (if-let [sub-spec (or (get-spec (:spec-tacular/spec v)) (get-spec v))]
+            (if (contains? possible-specs (:name sub-spec))
+              ((get-lazy-ctor sub-spec) v)
+              (throw (ex-info "enum spec does not contain sub-spec" 
+                              {:sub-spec sub-spec :elements possible-specs :field k})))
+            (throw (ex-info "sub-term does not have a spec" {:spec spec :atmap atmap :field k})))
+          ((get-lazy-ctor sub-spec-name) v))))))
 
 (defn- mk-record [spec]
   "defines a record type for spec, and a lazy type for spec"

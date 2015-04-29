@@ -24,15 +24,18 @@
                                                     SpecName])}))
 
 (t/defalias SpecT (t/HMap :mandatory {:name SpecName
-                                      :items (t/Vec Item)}))
+                                      :items (t/Vec Item)}
+                          :optional {:elements (t/Map t/Keyword SpecT)}))
 (t/defalias ConnCtx (t/HMap :mandatory {:conn datomic.peer.LocalConnection}))
+(t/defalias DatomicEntity (t/HMap :mandatory {:db/id t/Num
+                                              :spec-tacular/spec t/Keyword}))
 
 (t/ann ^:no-check clojure.core/some? [t/Any -> t/Bool :filters {:then (! nil 0) :else (is nil 0)}])
 (t/ann ^:no-check clojure.core/not-empty (t/All [x] [(t/Option (t/Vec x)) -> (t/Option (t/NonEmptyVec x)) :filters {:then (is (t/NonEmptyVec x) 0)}])) ; Can't make Seq work- the polymorphic specialization fails to match.
 (t/ann ^:no-check datomic.api/q [t/Any * -> (t/Vec (t/Vec t/Any))])
 (t/ann ^:no-check datomic.api/tempid [t/Keyword -> datomic.db.DbId])
-(t/ann datomic.api/entity [datomic.db.Db t/Num -> datomic.query.EntityMap])
-(t/ann-datatype ^:no-check datomic.query.EntityMap)
+(t/ann datomic.api/entity [datomic.db.Db t/Num -> DatomicEntity])
+#_(t/ann-datatype ^:no-check datomic.query.EntityMap)
 (t/ann ^:no-check spark.sparkspec/primitive? [t/Keyword -> t/Bool])
 (t/ann spark.sparkspec/get-ctor [t/Keyword -> [(t/Map t/Any t/Any) -> SpecInstance]])
 (t/ann ^:no-check spark.sparkspec/get-spec [(t/U SpecInstance t/Keyword) -> SpecT])
@@ -754,7 +757,7 @@
 (declare spec-entity-map)
 
 (t/ann-datatype SpecEntityMap [spec :- SpecT, 
-                               em :- datomic.query.EntityMap
+                               em :- DatomicEntity,
                                cache :- (t/Atom1 (t/Map t/Keyword SpecEntityMap))])
 (t/tc-ignore
  (deftype SpecEntityMap [spec em cache]
@@ -777,8 +780,18 @@
                (let [result (cond
                               (instance? datomic.query.EntityMap v)
                               ,(let [item (first (filter #(= (:name %) k) (:items spec)))
-                                     sub-spec (some-> (second (:type item)) get-spec)]
-                                 (spec-entity-map sub-spec v))
+                                     sub-spec-name (second (:type item))]
+                                 ;; TODO: abstraction w/ checked-lazy-access
+                                 (if-let [possible-specs (:elements (get-spec sub-spec-name))]
+                                   (if-let [sub-spec (get-spec (:spec-tacular/spec v))]
+                                     (if (contains? possible-specs (:name sub-spec))
+                                       (spec-entity-map sub-spec v)
+                                       (throw (ex-info "enum spec does not contain sub-spec" 
+                                                       {:sub-spec sub-spec :elements possible-specs :field k})))
+                                     (throw (ex-info "sub-term does not have a spec" 
+                                                     {:spec spec :em em :field k})))
+                                   
+                                   (spec-entity-map (get-spec sub-spec-name) v)))
                               :else v)]
                  (do (swap! cache assoc k result) result))))))
    (valAt [this k]
@@ -789,21 +802,28 @@
      (and (instance? SpecEntityMap o)
           (.equiv em (.em o))))))
 
-(t/ann spec-entity-map [SpecT datomic.query.EntityMap -> SpecEntityMap])
+(t/ann spec-entity-map [SpecT DatomicEntity -> SpecEntityMap])
 (defn spec-entity-map [spec em]
-  (t/let [a-spec (:spec-tacular/spec em)
-          e-spec (:name spec)
+  (t/let [a-spec (get-spec (t/ann-form (:spec-tacular/spec em) t/Keyword))
+          e-spec (if (:elements spec) a-spec spec) ; add tests for this
+          _ (when-not (and a-spec e-spec)
+              (throw (ex-info "entity spec missing" 
+                              {:entity em
+                               :expected-spec e-spec
+                               :actual-spec a-spec})))
           cache :- (t/Atom1 (t/Map t/Keyword SpecEntityMap)) (atom {})
-          valid-kws (->> (:items spec) 
+          valid-kws (->> (:items e-spec) 
                          (map (t/ann-form :name [Item -> t/Keyword])) ; srs types
-                         (map (t/ann-form #(db-keyword spec %) [t/Keyword -> t/Keyword]))
+                         (map (t/ann-form #(db-keyword e-spec %) [t/Keyword -> t/Keyword]))
                          (cons :spec-tacular/spec)
                          (into #{}))
           actual-kws (keys (into {} em))] ; types, sigh
     (cond
-      (not (= a-spec e-spec))
+      (not (if (:elements spec)
+             (contains? (:elements spec) (:name a-spec))
+             (= a-spec spec)))
       (throw (ex-info "possible spec mismatch"
-                      {:expected-spec e-spec :actual-spec a-spec}))
+                      {:expected-spec spec :actual-spec a-spec}))
       (not (every? #(contains? valid-kws %) actual-kws))
       (throw (ex-info "possible spec mismatch"
                       {:expected-keys valid-kws :actual-keys actual-kws}))
