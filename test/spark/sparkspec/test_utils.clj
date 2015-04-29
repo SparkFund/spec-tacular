@@ -16,13 +16,3 @@
 (defmacro with-test-db [schema & body]
   `(binding [*conn* (make-db ~schema)]
      ~@body))
-
-;;;; Datomic schema attribute for datomic.clj
-
-(def datomic-spec-schema
-  {:db/id #db/id [:db.part/db]
-   :db/ident spark-type-attr
-   :db/valueType :db.type/keyword
-   :db/cardinality :db.cardinality/one
-   :db/doc ""
-   :db.install/_attribute :db.part/db})
