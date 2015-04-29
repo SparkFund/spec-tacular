@@ -14,36 +14,35 @@
 
 (require '[datomic.api :as db])
 
-(t/defalias SpecInstance (t/Map t/Any t/Any))
 (t/defalias Pattern (t/Map t/Any t/Any))
-(t/defalias SpecName t/Keyword)
 (t/defalias Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
-(t/defalias Item (t/HMap :mandatory {:name t/Keyword
-                                     :type (t/HVec [(t/U (t/Val :one)
-                                                         (t/Val :many))
-                                                    SpecName])}))
-
-(t/defalias SpecT (t/HMap :mandatory {:name SpecName
-                                      :items (t/Vec Item)}
-                          :optional {:elements (t/Map t/Keyword SpecT)}))
 (t/defalias ConnCtx (t/HMap :mandatory {:conn datomic.peer.LocalConnection}))
 (t/defalias DatomicEntity (t/HMap :mandatory {:db/id t/Num
                                               :spec-tacular/spec t/Keyword}))
 
-(t/ann ^:no-check clojure.core/some? [t/Any -> t/Bool :filters {:then (! nil 0) :else (is nil 0)}])
-(t/ann ^:no-check clojure.core/not-empty (t/All [x] [(t/Option (t/Vec x)) -> (t/Option (t/NonEmptyVec x)) :filters {:then (is (t/NonEmptyVec x) 0)}])) ; Can't make Seq work- the polymorphic specialization fails to match.
-(t/ann ^:no-check datomic.api/q [t/Any * -> (t/Vec (t/Vec t/Any))])
-(t/ann ^:no-check datomic.api/tempid [t/Keyword -> datomic.db.DbId])
-(t/ann datomic.api/entity [datomic.db.Db t/Num -> DatomicEntity])
-#_(t/ann-datatype ^:no-check datomic.query.EntityMap)
-(t/ann ^:no-check spark.sparkspec/primitive? [t/Keyword -> t/Bool])
-(t/ann spark.sparkspec/get-ctor [t/Keyword -> [(t/Map t/Any t/Any) -> SpecInstance]])
-(t/ann ^:no-check spark.sparkspec/get-spec [(t/U SpecInstance t/Keyword) -> SpecT])
-(t/ann spark.sparkspec/get-type [(t/U SpecInstance t/Keyword) -> (t/Map t/Keyword t/Any)])
+;; core types
+(t/ann ^:no-check clojure.core/some? 
+       [t/Any -> t/Bool :filters {:then (! nil 0) :else (is nil 0)}])
+(t/ann ^:no-check clojure.core/not-empty 
+       (t/All [x] [(t/Option (t/Vec x)) -> (t/Option (t/NonEmptyVec x)) 
+                   ;; Can't make Seq work- the polymorphic specialization fails to match.
+                   :filters {:then (is (t/NonEmptyVec x) 0)}]))
+
+;; datomic types
+(t/defalias Database datomic.db.Db)
+(t/defalias Connection datomic.peer.LocalConnection)
+(t/ann ^:no-check datomic.api/q 
+       [t/Any * -> (t/Vec (t/Vec t/Any))])
+(t/ann ^:no-check datomic.api/tempid 
+       [t/Keyword -> datomic.db.DbId])
+(t/ann ^:no-check datomic.api/entity 
+       [datomic.db.Db t/Num -> DatomicEntity])
+(t/ann ^:no-check datomic.api/transact
+       [Connection t/Any -> (t/Future t/Any)])
+
 (t/ann spark.sparkspec.test-utils/make-db [(t/Vec t/Any) -> datomic.peer.LocalConnection])
 (t/ann spark.sparkspec.test-utils/db [-> datomic.db.Db])
 (t/ann spark.sparkspec.test-utils/*conn* datomic.peer.LocalConnection)
-(t/ann spark.sparkspec.datomic-test/simple-schema (t/Vec t/Any))
 
 (def spark-type-attr 
   "The datomic attribute holding onto a keyword-valued spec type."
@@ -53,12 +52,12 @@
   ^:private
   (reduce (t/ann-form #(assoc %1 %2 (keyword (name %2)))
                       [(t/Map t/Keyword t/Keyword) t/Keyword -> (t/Map t/Keyword t/Keyword)]) {}
-          [:db.type/keyword :db.type/string :db.type/boolean :db.type/long
-           :db.type/bigint :db.type/float :db.type/double :db.type/bigdec
-           :db.type/instant :db.type/uuid :db.type/uri :db.type/bytes]))
+                      [:db.type/keyword :db.type/string :db.type/boolean :db.type/long
+                       :db.type/bigint :db.type/float :db.type/double :db.type/bigdec
+                       :db.type/instant :db.type/uuid :db.type/uri :db.type/bytes]))
 
 (t/ann datomic-ns [SpecT -> t/Str])
-(defn- datomic-ns
+(defn datomic-ns
   "Returns a string representation of the db-normalized namespace for the given spec."
   [spec]
   (some-> spec :name name lower-case))
@@ -74,70 +73,6 @@
       (contains? a :name)
       ,(make-keyword (name (:name a)))
       :else (throw (ex-info "cannot make db-keyword" {:spec spec :attr a})))))
-
-(t/ann datomic-schema [SpecT -> (t/Seq (t/Map t/Keyword t/Any))])
-(defn datomic-schema 
-  "Generates a list of entries for a datomic schema to represent this spec."
-  [spec]
-  (t/for [{iname :name [cardinality type] :type :as item} :- Item (:items spec)]
-    :- (t/Map t/Keyword t/Any)
-    (merge
-     {:db/id (db/tempid :db.part/db)
-      :db/ident (db-keyword spec iname)
-      :db/valueType (if (primitive? type)
-                      (keyword "db.type" (name type))
-                      :db.type/ref)
-      :db/cardinality (if (= cardinality :many)
-                        :db.cardinality/many
-                        :db.cardinality/one)
-      :db/doc ""
-      :db.install/_attribute :db.part/db}
-     (if (:unique? item)
-       (if (:identity? item)
-         {:db/unique :db.unique/identity}
-         {:db/unique :db.unique/value})
-       {}))))
-
-; This one is pretty tricky to annotate
-(t/ann ^:no-check check-schema [(t/ASeq SpecInstance) SpecT -> (t/ASeq t/Str)])
-(defn check-schema
-  "Returns a list of errors representing discrepencies between the
-  given spec and schema."
-  [schema spec]
-  (letfn [(reduce-component [m v] (assoc m (-> v :db/ident name keyword) v))
-          (reduce-items [m v] (assoc m (:name v) v))
-          (check [v m] (if v nil m))
-          (all-errors [& rest] (filter some? (flatten rest)))
-          (diff-uniques [[{schema-uniq :db/unique}
-                          {iname :name item-uniq :unique? item-ident :identity?}]]
-            (check (case schema-uniq
-                     nil (not (or item-uniq item-ident))
-                     :db.unique/value (and item-uniq (not item-ident))
-                     :db.unique/identity (and item-uniq item-ident))
-                   (format "uniqueness for field %s in %s is inconsistant"
-                           iname (:name spec))))]
-    (let [{sname :name
-           opts :opts
-           items :items} spec
-           spec-name (-> sname name lower-case)
-           relevant-schema (filter
-                            #(= spec-name (namespace (:db/ident %)))
-                            schema)
-           component-by-name (reduce reduce-component {} relevant-schema)
-           item-by-name (reduce reduce-items {} (:items spec))
-           schema-keys (set (keys component-by-name))
-           name-keys (set (keys item-by-name))
-           component->item (map
-                            #(vector (% component-by-name) (% item-by-name))
-                            schema-keys)]
-      (all-errors
-       (check (= schema-keys name-keys)
-              (format "inconsistent keys between schema and spec. Diff: %s"
-                      (diff schema-keys name-keys)))
-       (map diff-uniques component->item)
-       ;; TODO: Add more checks! Be strict!
-       ))))
-
 
 (t/ann get-all-eids [datomic.db.DbId SpecT -> (t/ASeq Long)])
 (defn get-all-eids
@@ -1003,36 +938,9 @@
                              ~t-s))
                           ~(err result t-s)))))]
     `(let [check# (t/ann-form
-                   (fn [~(vec args)] 
+                   (fn [~(vec args)]
                      [~@(map wrap args type-kws type-maps type-syms)])
                    [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))])]
-       (->> (db/q {:find '~args :in '~['$] :where ~(vec clauses)} ~db)
-            (map check#)
-            ~(if (vector? f) `identity `(map first))
-            (into #{})))))
-
-(defmacro qref [_ f _ db _ & wc]
-  (let [{:keys [args env clauses]} (expand-query (if (vector? f) f [f]) wc)
-        type-kws  (map #(get @env %) args)
-        type-maps (map get-type type-kws)
-        type-syms (map :type-symbol type-maps)
-        err (fn [result t-s]
-              `(throw (ex-info "possible spec mismatch"
-                               {:query-result  ~result
-                                :actual-type   ~(type result)
-                                :expected-type '~t-s})))
-        wrap (fn [result t-kw t-m t-s]
-               (if (primitive? t-kw)
-                 `(if (instance? ~t-s ~result) ~result
-                      ~(err result t-s))
-                 `(if (instance? java.lang.Long ~result) ~result
-                      ~(err result t-s))))]
-    `(let [check# (t/ann-form
-                   (fn [~(vec args)] 
-                     [~@(map wrap args type-kws type-maps type-syms)])
-                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec (map (fn [t-m t-s]
-                                                            (if (:type t-m) java.lang.Long t-s))
-                                                          type-maps type-syms)))])]
        (->> (db/q {:find '~args :in '~['$] :where ~(vec clauses)} ~db)
             (map check#)
             ~(if (vector? f) `identity `(map first))
