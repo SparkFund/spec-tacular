@@ -228,10 +228,10 @@
 
 (t/defn to-database!
   "Creates a fresh db with schema installed; returns db"
-  ([schema :- Schema] :- Database
+  ([schema :- Schema] :- Connection
    (let [connection (fresh-db!)]
      (do @(d/transact connection schema) connection)))
-  ([schema :- Schema, uri :- URI] :- Database
+  ([schema :- Schema, uri :- URI] :- Connection
    (let [connection (fresh-db! uri)]
      (do @(d/transact connection schema) connection))))
 
