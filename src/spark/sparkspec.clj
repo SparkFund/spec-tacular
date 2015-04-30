@@ -81,7 +81,7 @@
   Spec/EnumSpec, returns the Spec/EnumSpec, otherwise nil."
   resolve-fn)
 
-(defmethod get-spec :default [_] nil)
+(defmethod get-spec :default [_] nil) ;; TODO
 
 (defmulti get-type resolve-fn)
 (defmethod get-type :default [x] (get type-map x))
@@ -388,7 +388,7 @@
     `(do
        ;; the "map ctor" for an enum means it's arg needs to 
        ;; be a tagged map or a record type of one of the enum's ctors.
-       (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tactular/spec (:name spec))) [o#]
+       (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tacular/spec (:name spec))) [o#]
          (let [subspec-name# (or (:spec-tacular/spec o#)
                                  (:name (get-spec o#)))]
            (assert subspec-name#
@@ -433,7 +433,7 @@
               ~(let [spec-name (:name s)
                      spec-sym  (-> s :name name symbol)]
                  `(def ~(with-meta spec-sym 
-                          (assoc (meta spec-sym) :spec-tactular/spec spec-name))
+                          (assoc (meta spec-sym) :spec-tacular/spec spec-name))
                     ~spec-name))
               ~(mk-type-alias s)
               ~(mk-enum-get-map-ctor s)
@@ -487,7 +487,7 @@
 (t/defn namespace->specs 
   [namespace :- clojure.lang.Namespace] :- (t/Seq SpecT)
   (->> (ns-publics namespace)
-       (map (fn [[sym v]]
-              (if-let [spec-name (:spec-tacular/spec (meta v))]
-                (get-spec spec-name))))
-       (into {})))
+       (map (fn [[sym v]] 
+              (some-> (meta v) :spec-tacular/spec get-spec)))
+       (filter identity)
+       (into #{})))

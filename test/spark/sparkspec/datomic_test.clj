@@ -1,5 +1,5 @@
 (ns spark.sparkspec.datomic-test
-  (:refer-clojure :exclude [remove])
+  (:refer-clojure :exclude [remove read-string read])
   (:use clojure.test
         spark.sparkspec
         spark.sparkspec.spec
@@ -83,7 +83,7 @@
     :db/cardinality :db.cardinality/one
     :db/doc ""
     :db.install/_attribute :db.part/db}
-   spec-schema-map])
+   spec-tactular-map])
 
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
 (def scm-non-nested (scm {:val1 "ho" :val2 56666}))
