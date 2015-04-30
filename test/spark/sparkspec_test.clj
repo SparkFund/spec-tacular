@@ -102,3 +102,12 @@
 
 (defspec A [b :is-a :B])
 (defspec B [a :is-a :A])
+
+(def ns-specs (namespace->specs *ns*))
+(deftest test-namespace->specs
+  (let [[a b both] (clojure.data/diff 
+                    (into #{} (map :name ns-specs))
+                    #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
+                      :testenum :ES :ESParent :EnumFoo :EnumForward :A :B})]
+    (is (nil? b) "no missing specs")
+    (is (nil? a) "no extra specs")))

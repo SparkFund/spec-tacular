@@ -1,4 +1,5 @@
 (ns spark.sparkspec.schema
+  (:refer-clojure :exclude [read-string read])
   (:use spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic
@@ -61,7 +62,7 @@
     :db/fn :db/isComponent :db/code :db/unique :db.excise/beforeT :db.excise/before
     :db/valueType :fressian/tag :db/doc :db.install/attribute :db/fulltext})
 
-(t/def spec-schema-map :- InstallableEntityMap
+(t/def spec-tactular-map :- InstallableEntityMap
   {:db/id (d/tempid :db.part/db),
    :db/ident :spec-tacular/spec,
    :db/valueType :db.type/keyword,
@@ -115,8 +116,18 @@
 
 (t/defn from-file
   "returns the Schema inside the given file"
-  [schema-file :- t/Str] :- Schema
+  [schema-file :- java.io.File] :- Schema
   (edn/read-string {:readers *data-readers*} (slurp schema-file)))
+
+(t/defn read-string
+  "returns the Schema inside the given stream"
+  [s :- t/Str] :- Schema
+  (edn/read-string {:readers *data-readers*} s))
+
+(t/defn read
+  "returns the Schema inside the given stream"
+  [stream :- java.io.PushbackReader] :- Schema
+  (edn/read {:readers *data-readers*} stream))
 
 (t/defn write
   "writes a Schema to w"
@@ -124,7 +135,7 @@
   (t/let [write :- [java.lang.String -> nil]
           ,#(.write ^java.io.Writer w ^java.lang.String %)]
     (write "[")
-    (t/doseq [m :- EntityMap schema]
+    (t/doseq [m :- EntityMap (cons spec-tactular-map schema)]
       (write "\n")
       ;; regexp: #db/id[:db.part/db -1003792] ==> #db/id[:db.part/db]
       ;; TODO: is that regexp qualified enough?

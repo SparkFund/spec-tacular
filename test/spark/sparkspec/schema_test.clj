@@ -1,4 +1,5 @@
 (ns spark.sparkspec.schema-test
+  (:refer-clojure :exclude [read-string read])
   (:use clojure.test
         spark.sparkspec
         spark.sparkspec.spec
@@ -14,20 +15,20 @@
     :db/ident :exspec/var1
     :db/unique :db.unique/identity
     :db/valueType :db.type/string}
-   spec-schema-map])
+   spec-tactular-map])
 
 (def schema-by-value
   [{:db/id 123124
     :db/ident :exspec/var1
     :db/unique :db.unique/value
     :db/valueType :db.type/string}
-   spec-schema-map])
+   spec-tactular-map])
 
 (def schema-alt-keys
   [{:db/id 123124
     :db/ident :exspec/var2
     :db/valueType :db.type/string}
-   spec-schema-map])
+   spec-tactular-map])
 
 (def matching-spec
   (map->Spec
@@ -65,12 +66,16 @@
   (let [schema (from-specs [:Person])]
     (check schema (get-spec :Person))
     (let [s (with-out-str (write schema *out*))]
+      (prn s)
       (is (= (re-seq #":db/ident [^,}]*" s)
-             [":db/ident :person/name"]))
+             [":db/ident :spec-tacular/spec"
+              ":db/ident :person/name"]))
       (is (= (re-seq #":db/cardinality :db.cardinality/[^,}]*" s)
-             [":db/cardinality :db.cardinality/one"]))
+             [":db/cardinality :db.cardinality/one"
+              ":db/cardinality :db.cardinality/one"]))
       (is (= (re-seq #":db/valueType :db.type/[^,}]*" s)
-             [":db/valueType :db.type/string"])))))
+             [":db/valueType :db.type/keyword"
+              ":db/valueType :db.type/string"])))))
 
 (deftest test-normalize
   (let [schema (from-specs [:Person :House])
@@ -100,3 +105,25 @@
                           (delta old new))
         "removing an entry from schema")))
 
+(def ns-schema (from-namespace *ns*))
+
+(deftest test-from-namespace
+  (let [[a b both] (diff [{:db/ident :person/name,
+                           :db/valueType :db.type/string,
+                           :db/cardinality :db.cardinality/one,
+                           :db/doc "",
+                           :db.install/_attribute :db.part/db}
+                          {:db/unique :db.unique/value,
+                           :db/ident :exspec/var1,
+                           :db/valueType :db.type/string,
+                           :db/cardinality :db.cardinality/one,
+                           :db/doc "",
+                           :db.install/_attribute :db.part/db}
+                          {:db/ident :house/occupants,
+                           :db/valueType :db.type/ref,
+                           :db/cardinality :db.cardinality/many,
+                           :db/doc "",
+                           :db.install/_attribute :db.part/db}]
+                         ns-schema)]
+    (is (nil? a) "no missing entries")
+    (is (nil? b) "no extra entries")))
