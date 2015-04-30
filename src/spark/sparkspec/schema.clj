@@ -11,9 +11,11 @@
 (t/typed-deps spark.sparkspec
               spark.sparkspec.datomic)
 
-(t/ann ^:no-check clojure.core/slurp [t/Str -> t/Str])
+(t/ann ^:no-check clojure.core/slurp [(t/U t/Str java.io.File) -> t/Str])
 (t/ann ^:no-check clojure.edn/read-string 
        [(t/HMap :optional {:readers t/Any}) t/Str -> (t/Seq EntityMap)])
+(t/ann ^:no-check clojure.edn/read
+       [(t/HMap :optional {:readers t/Any}) java.io.PushbackReader -> (t/Seq EntityMap)])
 (t/ann ^:no-check clojure.data/diff 
        (t/All [a b] [(t/Set a) (t/Set b) -> (t/HVec [(t/Set a) (t/Set b) (t/Set (t/I a b))])]))
 (t/ann ^:no-check clojure.java.io/writer
