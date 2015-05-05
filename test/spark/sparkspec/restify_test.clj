@@ -64,14 +64,14 @@
     @(d/transact *conn* seed)
     ~@body))
 
-(deftest get-collection
+(deftest ^:loud get-collection
   (with-new-db
     (let [{:keys [body status] :as res} (response-for server :get "/testspec")
           body (json/parse-string body true)]
       (is (= 200 status))
       (is (= 1 (count body))))))
 
-(deftest post-collection
+(deftest ^:loud post-collection
   (with-new-db
     (let [{status :status {loc "Location"} :headers}
           (response-for server :post "/testspec"
@@ -86,7 +86,7 @@
         resource we created.")
       (is (= "woah" (:testspec/val1 (d/entity (db) eid)))))))
 
-(deftest get-element
+(deftest ^:loud get-element
   (with-new-db
     (let [query '[:find ?eid :where [?eid :testspec/val1 "hi"]]
           seed-eid (ffirst (d/q query (db)))
@@ -94,7 +94,7 @@
                                               (str "/testspec/" seed-eid))]
       (is (-> body (json/parse-string true) testspec testspec?)))))
 
-(deftest put-element
+(deftest ^:loud put-element
   (testing "when :old matches the DB, we commit the data"
     (with-new-db
       (let [query '[:find ?eid :where [?eid :testspec/val1 "hi"]]
@@ -125,7 +125,7 @@
         (is (= (set (:testspec/val2 (d/entity (db) (ffirst (d/q query (db))))))
                (set (:val2 orig))))))))
 
-(deftest delete-element
+(deftest ^:loud delete-element
   (with-new-db
     (let [query '[:find ?eid :where [?eid :testspec/val1 "hi"]]
           seed-eid (ffirst (d/q query (db)))
@@ -134,6 +134,6 @@
       (is (= status 200) "DELETE expects a 200")
       (is (= (into {} (d/entity (db) seed-eid)) {}) "The entity we delete should go away"))))
 
-(deftest test-json
+(deftest ^:loud test-json
   (let [sp (testspec {:val1 "atest" :val2 [111 222] :val3 (testspec {})})]
     (is (= sp (from-json-friendly :TestSpec (to-json-friendly sp))))))

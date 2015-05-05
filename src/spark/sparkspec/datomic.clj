@@ -696,49 +696,39 @@
                                cache :- (t/Atom1 (t/Map t/Keyword SpecEntityMap))])
 (t/tc-ignore
  (deftype SpecEntityMap [spec em cache]
-   clojure.lang.Associative
-   (assoc [this k v]
-     (throw (ex-info "update not supported" {:entity this :keyword k :value v})))
-   (containsKey [this k]
-     (not (not (.containsKey em (db-keyword spec k)))))
-   (entryAt [this k]
-     (.entryAt em (db-keyword spec k)))
-
    clojure.lang.ILookup
    (valAt [this k not-found]
      (or (let [maybe (k @cache)]
            (if (some? maybe) maybe nil))
-         (let [v (if (contains? em k)
-                   (.valAt em k not-found)
-                   (.valAt em (db-keyword spec k) not-found))]
-           (if (identical? v not-found) not-found
-               (let [result (cond
-                              (instance? datomic.query.EntityMap v)
-                              ,(let [item (first (filter #(= (:name %) k) (:items spec)))
-                                     sub-spec-name (second (:type item))]
-                                 ;; TODO: abstraction w/ checked-lazy-access
-                                 (if-let [possible-specs (:elements (get-spec sub-spec-name))]
-                                   (if-let [sub-spec (get-spec (:spec-tacular/spec v))]
-                                     (if (contains? possible-specs (:name sub-spec))
-                                       (spec-entity-map sub-spec v)
-                                       (throw (ex-info "enum spec does not contain sub-spec" 
-                                                       {:sub-spec sub-spec :elements possible-specs :field k})))
-                                     (throw (ex-info "sub-term does not have a spec" 
-                                                     {:spec spec :em em :field k})))
-                                   
-                                   (spec-entity-map (get-spec sub-spec-name) v)))
-                              :else v)]
-                 (do (swap! cache assoc k result) result))))))
+         (if (contains? em k)
+           (.valAt em k not-found)
+           (let [v (.valAt em (db-keyword spec k) not-found)]
+             (if (identical? v not-found) not-found
+                 (let [f #(checked-lazy-access spec k %)
+                       g #(if (instance? datomic.query.EntityMap %)
+                            (let [spec (:spec-tacular/spec %)]
+                              (assoc ((get-lazy-ctor spec) (spec-entity-map (get-spec spec) %))
+                                     :db-ref {:eid (:db/id %)}))
+                            %)
+                       [arity sub-spec-name] (:type (get-item spec k))
+                       result (case arity :one (g v) :many (set (map g v)))
+                       result (checked-lazy-access spec k result)
+                       result (if (instance? datomic.query.EntityMap v)
+                                (assoc result :db-ref {:eid (:db/id v)}) result)]
+                   (do (swap! cache assoc k result) result)))))))
    (valAt [this k]
      (.valAt this k nil))
 
-   clojure.lang.IPersistentCollection
+   clojure.lang.IPersistentMap
    (equiv [this o]
      (and (instance? SpecEntityMap o)
           (.equiv em (.em o))))))
 
 (t/ann spec-entity-map [SpecT DatomicEntity -> SpecEntityMap])
 (defn spec-entity-map [spec em]
+  (when-not (instance? datomic.query.EntityMap em)
+    (throw (ex-info (str "cannot create SpecEntityMap from given entity")
+                    {:type (type em) :entity em})))
   (t/let [a-spec (get-spec (t/ann-form (:spec-tacular/spec em) t/Keyword))
           e-spec (if (:elements spec) a-spec spec) ; add tests for this
           _ (when-not (and a-spec e-spec)
@@ -933,8 +923,9 @@
                        `(if (instance? java.lang.Long ~result)
                           (let [e# (db/entity ~db ~result)]
                             (clojure.core.typed.unsafe/ignore-with-unchecked-cast
-                             (~(get-lazy-ctor t-kw)
-                              (spec-entity-map ~(get-spec t-kw) e#))
+                             (assoc (~(get-lazy-ctor t-kw)
+                                     (spec-entity-map ~(get-spec t-kw) e#))
+                                    :db-ref {:eid (:db/id e#)})
                              ~t-s))
                           ~(err result t-s)))))]
     `(let [check# (t/ann-form

@@ -66,7 +66,6 @@
   (let [schema (from-specs [:Person])]
     (check schema (get-spec :Person))
     (let [s (with-out-str (write schema *out*))]
-      (prn s)
       (is (= (re-seq #":db/ident [^,}]*" s)
              [":db/ident :spec-tacular/spec"
               ":db/ident :person/name"]))

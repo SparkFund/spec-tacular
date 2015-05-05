@@ -5,85 +5,18 @@
         spark.sparkspec.spec
         spark.sparkspec.datomic
         spark.sparkspec.test-utils
-        spark.sparkspec.test-specs
-        spark.sparkspec.schema)
+        spark.sparkspec.test-specs)
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :as sd]
+            [spark.sparkspec.schema :as schema]
             [clojure.core.typed :as t]
             [clojure.tools.macro :as m]))
 
 ;;;; sp->transactions tests
 
 (def simple-schema
-  [{:db/id (db/tempid :db.part/db)
-    :db/ident :scm/val1
-    :db/unique :db.unique/identity
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scm/val2
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scm/scm2
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scm/multi
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/many
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scm2/val1
-    :db/valueType :db.type/long
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scmm/identity
-    :db/unique :db.unique/identity
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scmownsenum/enum
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scmownsenum/enums
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/many
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scmm/vals
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/many
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scmparent/scm
-    :db/valueType :db.type/ref
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   {:db/id (db/tempid :db.part/db)
-    :db/ident :scmreq/name
-    :db/valueType :db.type/string
-    :db/cardinality :db.cardinality/one
-    :db/doc ""
-    :db.install/_attribute :db.part/db}
-   spec-tactular-map])
+  (cons schema/spec-tactular-map
+        (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
 
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
 (def scm-non-nested (scm {:val1 "ho" :val2 56666}))
@@ -568,8 +501,7 @@
         (testing "enum lazy-ctor"
           (is (= a-scm2 e-scm2)
               "equality")
-          (is (= (checked-lazy-access (get-spec :ScmOwnsEnum) a-soe
-                                      :enum a-scm2)
+          (is (= (checked-lazy-access (get-spec :ScmOwnsEnum) :enum a-scm2)
                  e-scm2)
               "checked access")
           (is (= 42 (:val1 (:enum a-soe)))
@@ -624,25 +556,56 @@
                           first)]
           (is (= (:val1 a-scm2) 5)
               "can use keywords on returned entities")
-          (is (not (:bad-kw a-scm2))))
+          (is (not (:bad-kw a-scm2)))
+          (is (and (map? (:db-ref a-scm2))
+                   (instance? java.lang.Long (:eid (:db-ref a-scm2))))
+              "allow :db-ref keyword access"))
+        
+        (let [a-scm (first (q :find :Scm :in (db) :where [% {:scm2 [:Scm2 {:val1 5}]}]))]
+          (testing "equality on returned entities"
+            (is (.equiv (filter (fn [[k v]] (some? v)) a-scm)
+                        (filter (fn [[k v]] (some? v)) e-scm)))
+            (is (= a-scm e-scm))
+            #_(is (= e-scm a-scm))))
         
         (let [[a-scm a-scm2]
               ,(->> (q :find [:Scm :Scm2] :in (db) :where
                        [%1 {:scm2 %2}])
                     first)]
-          (testing "equality on returned entities"
+          (testing "equality on returned sub-entities"
             (is (= (:scm2 a-scm) a-scm2))
             (is (= a-scm2 e-scm2))
             (is (= a-scm  e-scm)))
-          (is (not (:val1 a-scm))))
+          (is (not (:val1 a-scm)))
+          (is (map? (:db-ref (:scm2 a-scm)))
+              "allow :db-ref keyword access on sub-entities"))
 
         (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
           (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))
 
-        (let [a-scm ,(->> (q :find :Scm :in (db) :where 
-                             [% {:scm2 [:Scm2 {:val1 5}]}])
-                          first)]
-          (is (= a-scm e-scm))))
+        (testing "is-many"
+          (let [e-scmm (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})
+                scmm-eid (create-sp! {:conn *conn*} e-scmm)
+                a-scmm1 (first (q :find :ScmM :in (db) :where [% {:identity "hi"}]))
+                a-scmm2 ((get-lazy-ctor :ScmM)
+                         (spec-entity-map (get-spec :ScmM) (db/entity (db) scmm-eid)))]
+            (is (= a-scmm1 e-scmm))
+            (is (= a-scmm2 e-scmm)))
+
+          (let [esw (scmmwrap 
+                     {:name "scmwrap"
+                      :val (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})})
+                esw-id (create-sp! {:conn *conn*} esw)
+                asw1 (first (q :find :ScmM :in (db) :where [:ScmMWrap {:name "scmwrap" :val %}]))
+                asw2 (:val ((get-lazy-ctor :ScmMWrap) 
+                            (spec-entity-map (get-spec :ScmMWrap) (db/entity (db) esw-id))))]
+            ;; (is (= asw1 esw) "returned from query equality")
+            (testing "lazy-ctor"
+              #_(is (instance? spark.sparkspec.test_specs.l_ScmM asw2) "type") ;; TODO
+              (is (:identity asw2) "keyword access")
+              (is (= (type (:vals asw2)) clojure.lang.PersistentVector) "keyword access")
+              ;; (is (= asw2 esw) "equality")
+              ))))
 
       (testing "absent field access"
         (let [eid (create-sp! {:conn *conn*} (scm2))
@@ -689,7 +652,7 @@
 
         (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
                         (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-          (is (= [:spec-tacular/spec :scm/val1] (:actual-keys data))
+          (is (= [:scm/val1 :spec-tacular/spec] (:actual-keys data))
               "should be an error to have an :Scm2 with :scm/val1 key"))
 
         ;; TODO: add enum tests here
@@ -709,6 +672,7 @@
             [spark.sparkspec.test-specs/Scm
              spark.sparkspec.test-specs/Scm2])))))
 
-
+;; TODO bad syntax
 #_(sd/q :find :Transfer :in db :where
         [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
+#_(first (q :find :ScmM :in (db) :where [% {}]))
