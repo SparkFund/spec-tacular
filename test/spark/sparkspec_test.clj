@@ -131,3 +131,16 @@
       (is (= (:enum (f {:enum [(enumforward) (enumforward)]}))
              (:enum (testspec6 {:enum [(enumforward) (enumforward)]})))
           "equality"))))
+
+(defspec Link
+  (:link
+   [ts1 :is-a :TestSpec1]
+   [ts2 :is-many :TestSpec2])
+  [ts3 :is-a :TestSpec3]
+  [ts4 :is-many :TestSpec4])
+
+(deftest test-link
+  (is (link? (link {:ts1 (testspec1 {:val1 42})
+                    :ts2 [(testspec2) (testspec2 {:ts1 (testspec1 {:val1 42})})]
+                    :ts3 (testspec3)
+                    :ts4 [(testspec4 {:val1 false})]}))))
