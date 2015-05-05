@@ -676,3 +676,43 @@
 #_(sd/q :find :Transfer :in db :where
         [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
 #_(first (q :find :ScmM :in (db) :where [% {}]))
+
+(deftest test-link
+  (with-test-db simple-schema
+    (let [;; set up a ScmLink
+          sl (scmlink {:link1 (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
+                       :link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]
+                       :val1 (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})
+          sl-eid (create-sp! {:conn *conn*} sl)
+          refresh-sl (fn [] (get-by-eid (db) sl-eid))
+          sl-db (refresh-sl)
+
+          ;; set up an ScmParent
+          scmp (scmparent {:scm (scm {:val1 "3" :scm2 {:val1 5}})})
+          scmp-eid (create-sp! {:conn *conn*} scmp)
+          scmp-db (get-by-eid (db) scmp-eid)
+
+          ;; update the :val1 field of the ScmLink -- should be different than scmp
+          _ (update-sp! {:conn *conn*} sl-db (assoc sl-db :val1 scmp-db))
+          sl-db (refresh-sl)
+          _ (is (not (= (:db-ref (:val1 sl-db)) 
+                        (:db-ref scmp-db))))
+
+          ;; check that the Scms are no longer linked
+          _ (update-sp! {:conn *conn*}
+                        scmp-db
+                        (assoc scmp-db :scm
+                               (assoc (:scm scmp-db) :val1 "4")))
+          scmp-db (get-by-eid (db) scmp-eid)
+          sl-db (refresh-sl)
+          _ (is (= (-> scmp-db :scm :val1) "4"))
+          _ (is (= (-> sl-db :scmparent :scm :val1)) "3")
+
+          ;; link a new Scm into :link1 -- should be passed by ref
+          s (scm {:val1 "5" :scm2 {:val1 5}})
+          s-eid (create-sp! {:conn *conn*} s)
+          s-db (get-by-eid (db) s-eid)
+          _ (update-sp! {:conn *conn*} sl-db (assoc sl-db :link1 s-db))
+          sl-db (refresh-sl)
+          _ (is (= (:db-ref (:link1 sl-db))
+                   (:db-ref s-db)))])))

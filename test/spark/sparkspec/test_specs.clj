@@ -42,5 +42,6 @@
   [val1 :is-a :ScmParent])
 
 (defspec ScmMWrap
-  [name :is-a :string]
-  [val :is-a :ScmM])
+  (:link
+   [name :is-a :string]
+   [val :is-a :ScmM]))

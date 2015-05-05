@@ -197,12 +197,14 @@
     (->> (for [{iname :name 
                 [cardinality type] :type 
                 required? :required?
+                link? :link?
                 :as item}
                (:items spec)
                :when (iname mask)
                :let [is-nested (= (recursiveness item) :rec)
                      is-many (= cardinality :many)
                      ival (iname sp)
+                     ival (if (or link? (not (:db-ref ival))) ival (dissoc ival :db-ref))
                      sub-spec (get-spec type) ; Not necessarily ival's spec: could be an enum.
                      mask (iname mask)
                      ival-db (iname db-value)
