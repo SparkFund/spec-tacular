@@ -943,7 +943,9 @@
                    [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))])]
        (->> (db/q {:find '~args :in '~['$] :where ~(vec clauses)} ~db)
             (map check#)
-            ~(if (vector? f) `identity `(map first))
+            ~(if (vector? f)
+               `identity
+               `(map (t/ann-form first [(t/HVec ~(vec type-syms)) ~'-> ~(first type-syms)])))
             (into #{})))))
 
 ;; =============================================================================

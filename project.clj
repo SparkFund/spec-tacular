@@ -18,4 +18,5 @@
                  [org.immutant/immutant "1.1.3"]]
   :plugins [[lein-typed "0.3.5"]]
   :core.typed {:check [spark.sparkspec.datomic
-                       spark.sparkspec.schema]})
+                       spark.sparkspec.schema
+                       spark.sparkspec.typecheck-test]})
