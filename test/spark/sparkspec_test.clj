@@ -1,5 +1,4 @@
 (ns spark.sparkspec-test
-  {:core.typed {:collect-only true}}
   (:require [clojure.core.typed :as t])
   (:use spark.sparkspec
         clojure.test))
@@ -12,7 +11,7 @@
   [val5 :is-a :TestSpec2])
 
 (defspec TestSpec2
-  [sillyval :is-a :TestSpec1])
+  [ts1 :is-a :TestSpec1])
 
 (defspec TestSpec3)
 
@@ -22,43 +21,45 @@
 (defspec TestSpec5
   [name :is-a :string :required])
 
-(def good-spec (testspec1 {:val1 3 :val2 "hi"}))
+(deftest test-defspec
+  (let [good (testspec1 {:val1 3 :val2 "hi"})]
+    (testing "valid specs"
+      (is (testspec1? good)
+          "should conform to huh-forms"))
 
-(deftest defspec-tests
-  (testing "Valid specs"
-    (is (testspec1? good-spec)
-        "Valid specs should conform to huh-forms"))
+    (testing "invalid specs"
+      (is (not (testspec1? {:val1 3 :val2 "hi"}))
+          "not a record")
+      (is (thrown-with-msg? java.lang.AssertionError #"is required" 
+                            (testspec1 {:val1 nil}))
+          "missing required field")
+      (is (thrown-with-msg? java.lang.AssertionError #"is required"
+                            (testspec1 {:val2 1}))
+          "missing required field")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
+                            (testspec1 {:val1 0 :val2 1}))
+          "wrong type"))
 
-  (testing "Invalid specs"
-    (is (not (testspec1? {:val1 3 :val2 "hi"}))
-        "Specs only care about types.")
-    (is (thrown-with-msg? java.lang.AssertionError #"is required" 
-                          (testspec1 {:val1 nil})))
-    (is (thrown-with-msg? java.lang.AssertionError #"is required"
-                          (testspec1 {:val2 1})))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
-                          (testspec1 {:val1 0 :val2 1}))))
+    (testing "default values"
+      (is (= 3 (:val3 good)))
+      (is (= :val (:val4 good))))
 
-  (testing "Default values"
-    (is (= 3 (:val3 good-spec)))
-    (is (= :val (:val4 good-spec))))
+    (testing "has-spec?"
+      (is (has-spec? good))
+      (is (not (has-spec? 5))))
 
-  (testing "has-spec?"
-    (is (has-spec? good-spec))
-    (is (not (has-spec? 5))))
+    (testing "get-basis"
+      (is (= (get-basis :TestSpec1) 
+             [:val1 :val2 :val3 :val4 :val5]))
+      (is (= (get-basis good)
+             [:val1 :val2 :val3 :val4 :val5])))
 
-  (testing "get-spec"
-    (is (= (get-basis :TestSpec1) [:val1 :val2 :val3 :val4 :val5]))
-    (is (= (get-basis good-spec) [:val1 :val2 :val3 :val4 :val5])))
+    (testing "false"
+      (is (some? (check-component! (get-spec :TestSpec4) :val1 false)))
+      (is (testspec4? (testspec4 {:val1 false})))) ;; TODO: more false tests
 
-  (testing "false"
-    (is (some? (check-component! (get-spec :TestSpec4) :val1 false)))
-    (is (testspec4? (testspec4 {:val1 false}))))
-
-  (testing "required"
-    (is (thrown-with-msg? java.lang.AssertionError #"is required"
-                          (check-component! (get-spec :TestSpec5) :name nil)))
-    (is (some? (check-component! (get-spec :TestSpec5) :name "")))))
+    (testing "empty string"
+      (is (some? (check-component! (get-spec :TestSpec5) :name ""))))))
 
 (deftest recursive-tests
   (testing "order of spec definition does not matter"
@@ -69,7 +70,7 @@
 (defspec ES [foo :is-a :testenum])
 (defspec ESParent [es :is-a :ES])
 
-(deftest defenum-tests
+(deftest test-defenum
   (is (testenum? (testspec2 {})))
   (is (instance? spark.sparkspec.spec.EnumSpec (get-spec testenum)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
@@ -84,24 +85,27 @@
                (esparent {:es {:foo (testspec1 {:val1 1})}}))
       "nested ctor fails properly with enums"))
 
-(deftest lazy-tests
-  (let [bad-test1 {:val1 3 :val2 2}
-        ts2 ((get-lazy-ctor :TestSpec2) {:sillyval bad-test1})]
-    (is (testspec2? ts2))
-    (is (testspec1? (:sillyval ts2)))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" (:val2 (:sillyval ts2))))
-    (is (= 3 (:val1 (:sillyval ts2)))))
-  (let [l-ts4 ((get-lazy-ctor :TestSpec4) {:val1 true})]
-    (is (= (testspec4 l-ts4)
-           (testspec4 {:val1 true})))))
-
-
 ;; recursive and forward-references
 (defenum EnumFoo :EnumForward)
 (defspec EnumForward)
 
 (defspec A [b :is-a :B])
 (defspec B [a :is-a :A])
+
+(deftest test-lazy-ctor
+  (let [bad-test1 {:val1 3 :val2 2}
+        ts2 ((get-lazy-ctor :TestSpec2) {:ts1 bad-test1})]
+    (is (testspec2? ts2))
+    (is (testspec1? (:ts1 ts2)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" (:val2 (:ts1 ts2))))
+    (is (= 3 (:val1 (:ts1 ts2)))))
+  (let [l-ts4 ((get-lazy-ctor :TestSpec4) {:val1 true})]
+    (is (= (testspec4 l-ts4)
+           (testspec4 {:val1 true}))))
+
+  (testing "enum equality"
+    (is (= ((get-lazy-ctor :EnumForward) {})
+           ((get-ctor :EnumForward) {})))))
 
 (def ns-specs (namespace->specs *ns*))
 (deftest test-namespace->specs
@@ -111,3 +115,19 @@
                       :testenum :ES :ESParent :EnumFoo :EnumForward :A :B})]
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))
+
+(defspec TestSpec6
+  [enum :is-many :EnumFoo])
+
+(deftest test-is-many
+  (let [f (get-lazy-ctor :TestSpec6)]
+    (testing "is-many"
+      (is (checked-lazy-access
+           (get-spec :TestSpec6)
+           :enum [(enumforward) (enumforward)])
+          "checked-lazy-access")
+      (is (= [(enumforward) (enumforward)]
+             [(enumforward) (enumforward)]))
+      (is (= (:enum (f {:enum [(enumforward) (enumforward)]}))
+             (:enum (testspec6 {:enum [(enumforward) (enumforward)]})))
+          "equality"))))

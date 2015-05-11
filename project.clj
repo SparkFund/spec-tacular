@@ -5,7 +5,6 @@
             :url "http://www.apache.org/licenses/LICENSE-2.0.html"}
   :dependencies [[org.clojure/clojure "1.6.0"]
                  [com.datomic/datomic-free "0.9.4556"]
-                 [n01se/seqex "2.0.1"]
                  [prismatic/schema "0.2.4"]
                  [io.pedestal/pedestal.jetty "0.3.0"]
                  [io.pedestal/pedestal.service "0.3.0"]
@@ -15,7 +14,12 @@
                  [clojure-csv/clojure-csv "2.0.1"]
                  [org.clojure/tools.macro "0.1.2"]
                  [org.clojure/core.typed "0.2.77"]
-                 [org.immutant/immutant "1.1.3"]]
+                 [org.immutant/immutant "1.1.3"]
+                 [org.clojure/core.match "0.3.0-alpha4"]]
   :plugins [[lein-typed "0.3.5"]]
+  :test-selectors {:default (complement :loud)
+                   :loud :loud
+                   :all (constantly true)}
   :core.typed {:check [spark.sparkspec.datomic
-                       spark.sparkspec.schema]})
+                       spark.sparkspec.schema
+                       spark.sparkspec.typecheck-test]})
