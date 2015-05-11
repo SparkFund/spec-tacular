@@ -1,63 +1,55 @@
 (ns spark.sparkspec.grammar
-  (:use [n01se.syntax]
-        [spark.sparkspec.spec])
-  (:require [n01se.seqex :refer [cap recap]])
+  (:use [spark.sparkspec.spec])
+  (:require [clojure.core.match :refer [match]])
   (:refer-clojure :exclude [name type]))
 
-;;;; Macro Syntax Definitions
+(declare parse-spec parse-item parse-type parse-opts)
 
-(declare item type-rule item-args)
+;; SPEC 
 
-(defterminal name symbol?)
-(defterminal type keyword?)
-(defterminal func symbol?)
-(defterminal lambda list?)
-(defterminal funcs vector?)
-(defterminal data (fn [_] true))
+(defn parse-spec [stx & [loc]]
+  (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
+    (match stx
+      ([name & items] :seq)
+      (let [name  (keyword name)
+            items (mapcat #(parse-item % loc) items)]
+        (map->Spec {:name name :items items}))
+      :else (throw (ex-info "expecting name followed by sequence of items" 
+                            (merge loc {:syntax stx}))))))
 
-(defrule func (alt name lambda funcs))
+(defn parse-item [stx & [loc]]
+  (match stx
+    ([:link & items*] :seq)
+    ,(mapcat parse-item (map #(conj % :link) items*))
 
-(defrule defspec-rule
-  (recap (cat (cap name)
-              (cap (rep* (vec-form (delay item)))))
-         (fn [[name] & items] 
-           (map->Spec {:name (keyword name) :items (rest items)}))))
+    (([name card type & opts] :seq) :guard vector?)
+    ,(let [cardinality (case card (:is-a :is-an) :one (:is-many) :many)
+           item-info (parse-opts opts loc) 
+           item-name (keyword name)]
+       [(map->Item (merge {:name item-name :type [cardinality type]} item-info))])
+    
+    :else (throw (ex-info "expecting item [item-name cardinality type opts*] or (:link item*)"
+                          (merge loc {:syntax stx})))))
 
-(defrule item
-  (recap (cat (cap name)
-              (cap (opt (delay type-rule))
-                   (fn [[cardinality type]]
-                     [(case cardinality
-                        (:is-a :is-an) :one
-                        (:is-many) :many
-                        nil)
-                      type]))
-              (cap (rep* (delay item-args))))
-         (fn [[name] type & args]
-           (let [arg-info (if args (apply merge (rest args)) {})]
-             (map->Item 
-              (merge {:name (keyword name) :type type} arg-info))))))
+(defn parse-opts [stx & [loc]]
+  (let [k (fn [m rest] (merge m (parse-opts rest)))]
+    (match stx
+      (_ :guard empty?) {}
+      ([:precondition func & rest] :seq) (k {:precondition func} rest)
+      ([:required & rest] :seq)          (k {:required? true}    rest)
+      ([:identity & rest] :seq)          (k {:identity? true}    rest)
+      ([:unique & rest] :seq)            (k {:unique? true}      rest)
+      ([:link & rest] :seq)              (k {:link? true}        rest)
+      ([:default-value v & rest] :seq)   (k {:default-value v}   rest)
+      :else (throw (ex-info "invalid options" (merge loc {:syntax stx}))))))
 
-(defrule type-rule (cat (alt :is-a :is-an :is-many) type))
+;; ENUM
 
-(defrule item-args 
-  (recap (alt (cap (cat :precondition func))
-              (cap :required)
-              (cap :identity)
-              (cap :unique)
-              (cap :optional)
-              (cap (cat :default-value (alt func data))))
-         (fn [[v p]]
-           (cond (= v :precondition) {v p}
-                 (= v :required) {:required? true}
-                 (= v :unique) {:unique? true}
-                 (= v :identity) {:identity? true}
-                 (= v :default-value) {:default-value p}
-                 :else {v true}))))
-
-(defrule defenum-rule 
-  (recap (cat (cap name) (cap (rep* type)))
-         (fn [[name] elements]
-           (map->EnumSpec
-            {:name (keyword name)
-             :elements (into #{} elements)}))))
+(defn parse-enum [stx & [loc]]
+  (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
+    (match stx
+      ([name & specs] :seq)
+      (let [name (keyword name)]
+        (map->EnumSpec {:name name :elements (into #{} specs)}))
+      :else (throw (ex-info "expecting name followed by sequence of specs" 
+                            (merge loc {:syntax stx}))))))
