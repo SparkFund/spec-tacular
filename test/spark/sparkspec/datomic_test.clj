@@ -715,4 +715,9 @@
           _ (update-sp! {:conn *conn*} sl-db (assoc sl-db :link1 s-db))
           sl-db (refresh-sl)
           _ (is (= (:db-ref (:link1 sl-db))
-                   (:db-ref s-db)))])))
+                   (:db-ref s-db)))
+
+          ;; changing the Scm also changes the Scm in :link1
+          _ (update-sp! {:conn *conn*} s-db (assoc s-db :val1 "6"))
+          sl-db (refresh-sl)
+          _ (is (= (:val1 (:link1 sl-db)) "6"))])))

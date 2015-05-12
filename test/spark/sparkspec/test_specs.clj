@@ -5,13 +5,13 @@
         spark.sparkspec.datomic))
 
 (defspec Scm2
-  (:link [val1 :is-a :long :unique :identity]))
+  [val1 :is-a :long :unique :identity])
 
 (defspec Scm
+  [val1 :is-a :string :unique :identity]
+  [val2 :is-a :long]
+  [multi :is-many :string]
   (:link
-   [val1 :is-a :string :unique :identity]
-   [val2 :is-a :long]
-   [multi :is-many :string]
    [scm2 :is-a :Scm2]))
 
 (defspec Scm3)
@@ -29,19 +29,17 @@
    [vals :is-many :Scm2]))
 
 (defspec ScmParent
-  (:link 
-   [scm :is-a :Scm]))
+  (:link [scm :is-a :Scm]))
 
 (defspec ScmReq
-  (:link
-   [name :is-a :string :required]))
+  [name :is-a :string :required])
 
 (defspec ScmLink
-  (:link [link1 :is-a :Scm]
-         [link2 :is-many :Scm2])
+  (:link 
+   [link1 :is-a :Scm]
+   [link2 :is-many :Scm2])
   [val1 :is-a :ScmParent])
 
 (defspec ScmMWrap
-  (:link
-   [name :is-a :string]
-   [val :is-a :ScmM]))
+  [name :is-a :string]
+  (:link [val :is-a :ScmM]))
