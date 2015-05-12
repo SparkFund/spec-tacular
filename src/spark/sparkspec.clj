@@ -270,7 +270,7 @@
                                  (symbol (str *ns*) (name sub-sp-nm)))]
                  [iname (case cardinality
                           :one  item-type
-                          :many (list 'clojure.lang.ASeq item-type))]))]
+                          :many (list `t/SequentialSeqable item-type))]))]
     `(t/HMap
       ;; FIXME: This should be true but waiting on 
       ;; http://dev.clojure.org/jira/browse/CTYP-198
