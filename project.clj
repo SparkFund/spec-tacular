@@ -22,4 +22,5 @@
                    :all (constantly true)}
   :core.typed {:check [spark.sparkspec.datomic
                        spark.sparkspec.schema
+                       spark.sparkspec.test-specs
                        spark.sparkspec.typecheck-test]})
