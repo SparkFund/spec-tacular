@@ -264,13 +264,16 @@
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
 
 (defn spec->record-type [spec]
-  (let [opts (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)]
+  (let [opts (for [{iname :name required? :required? [cardinality sub-sp-nm] :type :as item} (:items spec)]
                (let [item-type (if (primitive? sub-sp-nm)
                                  (get-in type-map [sub-sp-nm :type-symbol])
                                  (symbol (str *ns*) (name sub-sp-nm)))]
-                 [iname (case cardinality
-                          :one  item-type
-                          :many (list `t/SequentialSeqable item-type))]))]
+                 [iname (let [t (case cardinality
+                                  :one  item-type
+                                  :many (list `t/SequentialSeqable item-type))]
+                          (if required?
+                            t
+                            (list `t/Option t)))]))]
     `(t/HMap
       ;; FIXME: This should be true but waiting on 
       ;; http://dev.clojure.org/jira/browse/CTYP-198
