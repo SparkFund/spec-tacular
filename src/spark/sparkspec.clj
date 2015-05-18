@@ -107,8 +107,9 @@
 (defn check-component!
   "checks the key and its value against the given spec"
   [spec k v]
-  (assert (some #(= k (-> % :name keyword)) (:items spec))
-          (format "%s is not in the spec of %s" k (:name spec)))
+  (when-not (some #(= k (-> % :name keyword)) (:items spec))
+    (throw (ex-info (format "%s is not in the spec of %s" k (:name spec))
+                    {:keyword k :value v :spec spec})))
   (let [{iname :name
          [cardinality typ] :type
          required? :required?
@@ -253,8 +254,6 @@
            (cons [this# e#]
              (let [c# (deref ~'cache)]
                (new ~lazy-class ~'atmap (atom (assoc c# (first e#) (second e#)))))))
-         ;; TODO writing things this way makes them easier to read,
-         ;; but it is deceiving in that you can't actually use the record reader syntax
          (defmethod print-method ~lazy-class [v# ^java.io.Writer w#]
            (.write w# (str "#<" ~(namespace-munge *ns*) "." '~lazy-class))
            (print-method (.cache v#) w#)

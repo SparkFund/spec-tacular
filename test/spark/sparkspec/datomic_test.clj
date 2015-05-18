@@ -1,5 +1,5 @@
 (ns spark.sparkspec.datomic-test
-  (:refer-clojure :exclude [remove read-string read])
+  (:refer-clojure :exclude [remove read-string read assoc!])
   (:use clojure.test
         spark.sparkspec
         spark.sparkspec.spec
@@ -12,12 +12,101 @@
             [clojure.core.typed :as t]
             [clojure.tools.macro :as m]))
 
-;;;; sp->transactions tests
 
 (def simple-schema
   (cons schema/spec-tactular-map
         (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
 
+(deftest test-transaction-data
+  (testing "Scm2"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :Scm2)
+          td #(transaction-data spec %1 %2)]
+      (testing "valid"
+        (is (= (td si {:val1 125})
+               [[:db/add gs :scm2/val1 125]]))
+        (is (= (td si {:val1 nil})
+               []))
+        (is (= (td (assoc si :val1 1) {:val1 125})
+               [[:db/add gs :scm2/val1 125]]))
+        (is (= (td (assoc si :val1 1) {:val1 nil})
+               [[:db/retract gs :scm2/val1 1]])))
+      (testing "invalid")))
+
+  (testing "Scm"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :Scm)
+          td #(transaction-data spec %1 %2)]
+      (testing "valid"
+        (is (= (td si {:val1 "125" :val2 125})
+               [[:db/add gs :scm/val1 "125"]
+                [:db/add gs :scm/val2 125]]))
+        (is (= (td si {:multi ["125" "1"]})
+               [[:db/add gs :scm/multi "125"]
+                [:db/add gs :scm/multi "1"]]))
+        (is (= (td si {:val1 nil})
+               []))
+        (is (= (td (assoc si :multi ["1"]) {:multi ["125"]})
+               [[:db/retract gs :scm/multi "1"]
+                [:db/add gs :scm/multi "125"]]))
+        (is (= (td si {:scm2 {:db-ref {:eid 120} :val1 42}})
+               [[:db/add gs :scm/scm2 120]])))
+      (testing "invalid")))
+
+  (testing "ScmOwnsEnum"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :ScmOwnsEnum)
+          td #(transaction-data spec %1 %2)
+          a-scm3 (assoc (scm3) :db-ref {:eid 5})
+          a-scm2 (assoc (scm2) :db-ref {:eid 120})]
+      (testing "valid"
+        (is (= (td si {:enum a-scm2})
+               [[:db/add gs :scmownsenum/enum 120]]))
+        (is (= (td si {:enums [a-scm3 a-scm2]})
+               [[:db/add gs :scmownsenum/enums 5]
+                [:db/add gs :scmownsenum/enums 120]]))
+        (is (= (td si {:enum nil})
+               []))
+        (is (= (td si {:enums nil})
+               []))
+        (is (= (td (assoc si :enum a-scm2)
+                   (assoc si :enum (assoc (scm2) :db-ref {:eid 121})))
+               [[:db/add gs :scmownsenum/enum 121]]))
+        (is (= (td (assoc si :enums [a-scm2])
+                   (assoc si :enums [a-scm3]))
+               [[:db/retract gs :scmownsenum/enums 120]
+                [:db/add gs :scmownsenum/enums 5]]))
+        (is (= (td (assoc si :enum a-scm2) {:enum nil})
+               [[:db/retract gs :scmownsenum/enum 120]]))
+        (is (= (td (assoc si :enums [a-scm2])
+                   (assoc si :enums [(assoc a-scm2 :val1 6)]))
+               [])
+            "does not update links"))
+      (testing "invalid")))
+
+  (testing "ScmLink"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :ScmLink)
+          td #(transaction-data spec %1 %2)
+          a-scm  (assoc (scm {:val1 "hi"}) :db-ref {:eid 1})
+          a-scmp (assoc (scmparent {:scm a-scm}) :db-ref {:eid 2})
+          a-scml (assoc (scmlink {:val1 a-scmp}) :db-ref {:eid 3})]
+      (testing "valid"
+        (let [res (td si a-scml)]
+          (is (= true (clojure.core.match/match [res]
+                        [([[:db/add eid1 :scmlink/val1 eid2]
+                           _
+                           [:db/add eid3 :scmparent/scm 1]] :seq)]
+                        (and (= eid1 gs) (= eid2 eid3) true)
+                        :else res)))))
+      (testing "invalid"))))
+
+;;;; sp->transactions tests
+;; TODO CLEANUP
 (def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
 (def scm-non-nested (scm {:val1 "ho" :val2 56666}))
 
@@ -641,7 +730,7 @@
 
         (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
                         (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-          (is (= (get-spec :Scm2) (:expected-spec data))
+          (is (= :Scm2 (:expected-spec data))
               "should be an error to use bad scm2 ref as an :Scm2"))
 
         (assert @(db/transact *conn*
@@ -683,41 +772,40 @@
           sl (scmlink {:link1 (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
                        :link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]
                        :val1 (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})
-          sl-eid (create-sp! {:conn *conn*} sl)
-          refresh-sl (fn [] (get-by-eid (db) sl-eid))
-          sl-db (refresh-sl)
+          sl-db (create! {:conn *conn*} sl)
+          refresh-sl (fn [] (refresh {:conn *conn*} sl-db))
+          ;; sl-db (refresh-sl)
 
           ;; set up an ScmParent
           scmp (scmparent {:scm (scm {:val1 "3" :scm2 {:val1 5}})})
-          scmp-eid (create-sp! {:conn *conn*} scmp)
-          scmp-db (get-by-eid (db) scmp-eid)
+          scmp-db (create! {:conn *conn*} scmp)
+          ;; scmp-db (get-by-eid (db) scmp-eid)
 
           ;; update the :val1 field of the ScmLink -- should be different than scmp
-          _ (update-sp! {:conn *conn*} sl-db (assoc sl-db :val1 scmp-db))
+          _ (assoc! {:conn *conn*} sl-db :val1 scmp-db)
           sl-db (refresh-sl)
           _ (is (not (= (:db-ref (:val1 sl-db)) 
                         (:db-ref scmp-db))))
 
           ;; check that the Scms are no longer linked
-          _ (update-sp! {:conn *conn*}
-                        scmp-db
-                        (assoc scmp-db :scm
-                               (assoc (:scm scmp-db) :val1 "4")))
-          scmp-db (get-by-eid (db) scmp-eid)
+          _ (assoc! {:conn *conn*} (:scm scmp-db) :val1 "4")
+          scmp-db (refresh {:conn *conn*} scmp-db)
           sl-db (refresh-sl)
           _ (is (= (-> scmp-db :scm :val1) "4"))
           _ (is (= (-> sl-db :scmparent :scm :val1)) "3")
 
           ;; link a new Scm into :link1 -- should be passed by ref
           s (scm {:val1 "5" :scm2 {:val1 5}})
-          s-eid (create-sp! {:conn *conn*} s)
-          s-db (get-by-eid (db) s-eid)
-          _ (update-sp! {:conn *conn*} sl-db (assoc sl-db :link1 s-db))
-          sl-db (refresh-sl)
+          s-db (create! {:conn *conn*} s)
+          s-db-ref (:db-ref s-db)
+          ;; s-db (get-by-eid (db) s-eid)
+          sl-db (assoc! {:conn *conn*} sl-db :link1 s-db)
+          _ (is (= (:db-ref (:link1 sl-db))
+                   s-db-ref))
           _ (is (= (:db-ref (:link1 sl-db))
                    (:db-ref s-db)))
 
           ;; changing the Scm also changes the Scm in :link1
-          _ (update-sp! {:conn *conn*} s-db (assoc s-db :val1 "6"))
+          _ (assoc! {:conn *conn*} s-db :val1 "6")
           sl-db (refresh-sl)
           _ (is (= (:val1 (:link1 sl-db)) "6"))])))
