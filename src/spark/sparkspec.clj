@@ -255,9 +255,32 @@
              (let [c# (deref ~'cache)]
                (new ~lazy-class ~'atmap (atom (assoc c# (first e#) (second e#)))))))
          (defmethod print-method ~lazy-class [v# ^java.io.Writer w#]
-           (.write w# (str "#<" ~(namespace-munge *ns*) "." '~lazy-class))
-           (print-method (.cache v#) w#)
-           (.write w# ">")))))
+           (write-lazy-instance ~spec v# w#)))))
+
+(defn write-lazy-instance [spec le ^java.io.Writer w]
+  (letfn [(write-link [v w]
+            (do (.write w "<link ")
+                (if-let [eid (get-in v [:db-ref :eid])]
+                  (.write w (str eid)))
+                (.write w ">")))
+          (write-value [v link? w]
+            (if link? (write-link v w) (print-method v w)))
+          (write-item [{iname :name link? :link? [c t] :type :as item} w]
+            (if-let [v (iname le)]
+              (do (.write w (str ":" (name iname) " "))
+                  (case c
+                    :one (write-value v link? w)
+                    :many (do (.write w "[")
+                              (doseq [sub-v v :when v]
+                                (do (write-value sub-v link? w) (.write w ",")))
+                              (.write w "]")))
+                  (.write w ","))))]
+    (do (.write w (str "#<" (name (:name spec)) "{"))
+        (if-let [eid (get-in le [:db-ref :eid])]
+          (.write w (str ":eid " eid ",")))
+        (doseq [item (:items spec)]
+          (write-item item w))
+        (.write w "}>"))))
 
 (defn spec->enum-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
@@ -341,9 +364,10 @@
   precondititions and types."
   (let [ctor-name (make-name spec #(lower-case %))]
     `(do
-       (t/ann ~ctor-name ~(if (empty? (:items spec))
-                            ['-> (symbol (name (:name spec)))]
-                            [(symbol (name (:name spec))) '-> (symbol (name (:name spec)))]))
+       (t/ann ~(with-meta ctor-name (assoc (meta ctor-name) :no-check true))
+              ~(if (empty? (:items spec))
+                 ['-> (symbol (name (:name spec)))]
+                 [(symbol (name (:name spec))) '-> (symbol (name (:name spec)))]))
        (defn ~(with-meta ctor-name (assoc (meta ctor-name) :spec-tacular/spec (:name spec)))
          ~(str "deep-walks a nested map structure to construct a "
                (name (:name spec)))

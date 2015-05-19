@@ -1,5 +1,6 @@
 (ns spark.sparkspec.test-specs
   {:core.typed {:collect-only true}}
+  (:refer-clojure :exclude [assoc!])
   (:use spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic))
@@ -16,7 +17,7 @@
 
 (defspec Scm3)
 
-(defenum ScmEnum :Scm2 :Scm3)
+(defenum ScmEnum :Scm2 :Scm3 :Scm)
 
 (defspec ScmOwnsEnum
   (:link

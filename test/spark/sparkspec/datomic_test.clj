@@ -747,24 +747,65 @@
         ;; TODO: add enum tests here
         ))))
 
-(deftest type-tests
-  (with-out-str 
-    (do (t/check-ns 'spark.sparkspec.datomic :collect-only true)
-        (t/check-ns 'spark.sparkspec.datomic-test :collect-only true)
-        (t/check-ns 'spark.sparkspec.test-specs :collect-only true)))
-  (testing "types" ; fully qualify for command line
-    (t/cf (spark.sparkspec.datomic/q :find [:Scm :Scm2] 
-                                     :in (spark.sparkspec.datomic-test/db)
-                                     :where [%1 {:scm2 %2}])
-          (clojure.core.typed/Set 
-           (clojure.core.typed/HVec 
-            [spark.sparkspec.test-specs/Scm
-             spark.sparkspec.test-specs/Scm2])))))
-
 ;; TODO bad syntax
 #_(sd/q :find :Transfer :in db :where
         [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
 #_(first (q :find :ScmM :in (db) :where [% {}]))
+
+(deftest test-create!
+  (with-test-db simple-schema
+    (let [e-soe (scmownsenum {:enums [(scm3) (scm3) (scm2 {:val1 123})]})
+          a-soe (create! {:conn *conn*} e-soe)]
+      (is (not (empty? (:enums a-soe))))))
+  (with-test-db simple-schema
+    (let [soe (create! {:conn *conn*}
+                       (assoc (scmownsenum {:enum (scm3)})
+                              :enum (scm2 {:val1 123})))]
+      (is (= (q :find :long :in (db) :where
+                [:ScmOwnsEnum {:enum [:Scm2 {:val1 %}]}])
+             #{123})
+          "can update to change an enum field from one to another")))
+  (testing "many enums"
+    (with-test-db simple-schema
+      (let [se1 (scm2 {:val1 5})
+            se2 (scm2 {:val1 120})
+            se3 (scm3)
+            se4 (scm2 {:val1 42})
+            se5 (scm3)
+            se6 (-> (scm {})
+                    (merge {:scm2 (create! {:conn *conn*} (scm2 {:val1 7}))}))
+            se7 (scm2 {:val1 51})
+            soe (scmownsenum)
+
+            ;; make one enum first
+            e-soe (assoc soe :enums (map #(create! {:conn *conn*} %) [se1]))
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= (first (:enums a-soe)) se1))
+            _ (is (= a-soe e-soe))
+
+            ;; make all enums first
+            e-soe (assoc soe :enums (map #(create! {:conn *conn*} %) [se2 se3]))
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= a-soe e-soe))
+
+            ;; dont make any enum first
+            e-soe (scmownsenum {:enums [se4]})
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= (first (:enums a-soe)) se4))
+            _ (is (= a-soe e-soe))
+
+            ;; dont make any enum first
+            e-soe (scmownsenum {:enums [se5 se6]})
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= a-soe e-soe))
+
+            ;; lazy seq
+            e-soe (-> (scmownsenum {})
+                      (assoc :enums (for [s [se7]] (create! {:conn *conn*} s))))
+            _ (is (= (type (:enums e-soe))
+                     clojure.lang.LazySeq))
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (get-in (first (:enums a-soe)) [:db-ref :eid]))]))))
 
 (deftest test-link
   (with-test-db simple-schema
