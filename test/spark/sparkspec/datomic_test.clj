@@ -105,47 +105,44 @@
                         :else res)))))
       (testing "invalid"))))
 
-;;;; sp->transactions tests
-;; TODO CLEANUP
-(def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
-(def scm-non-nested (scm {:val1 "ho" :val2 56666}))
+(deftest test-commit-sp-transactions
+  (let [scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})})
+        scm-non-nested (scm {:val1 "ho" :val2 56666})]
+    (testing "new sp->transactions"
+      (let [tx-info (with-test-db simple-schema
+                      @(db/transact *conn* (sp->transactions (db) scm-1)))]
+        (is (not (= (:db-before tx-info) (:db-after tx-info))))
+        (is (every? :added (:tx-data tx-info))))
+      (with-test-db simple-schema
+        (let [tx1 (sp->transactions (db) scm-non-nested)]
+          (is (= 1 (count tx1)))
+          (is (thrown? java.lang.AssertionError
+                       (sp->transactions (db) (scm {:extra-key 1})))))))
 
-(deftest new-transaction-tests
-  (let [tx-info (with-test-db simple-schema
-                  @(db/transact *conn* (sp->transactions (db) scm-1)))]
-    (is (not (= (:db-before tx-info) (:db-after tx-info))))
-    (is (every? :added (:tx-data tx-info))))
-  (with-test-db simple-schema
-    (let [tx1 (sp->transactions (db) scm-non-nested)]
-      (is (= 1 (count tx1)))
-      (is (thrown? java.lang.AssertionError
-                   (sp->transactions (db) (scm {:extra-key 1})))))))
+    (testing "update sp->transactions"
+      (with-test-db simple-schema
+        (let [tx1 (sp->transactions (db) scm-1)
+              tx-info1 @(db/transact *conn* tx1)
+              tx2 (sp->transactions (db) (assoc scm-1 :val2 555))
+              tx-info2 @(db/transact *conn* tx2)]
+          (is (= (ffirst (db/q '[:find ?val2
+                                 :where [?eid :scm/val1 "hi"] [?eid :scm/val2 ?val2]]
+                               (db)))
+                 555)))))
 
-(deftest update-transaction-tests
-  (with-test-db simple-schema
-    (let [tx1 (sp->transactions (db) scm-1)
-          tx-info1 @(db/transact *conn* tx1)
-          tx2 (sp->transactions (db) (assoc scm-1 :val2 555))
-          tx-info2 @(db/transact *conn* tx2)]
-      (is (= (ffirst (db/q '[:find ?val2
-                             :where [?eid :scm/val1 "hi"] [?eid :scm/val2 ?val2]]
-                           (db)))
-             555)))))
+    (testing "db->sp"
+      (with-test-db simple-schema
+        @(db/transact *conn* (sp->transactions (db) scm-1))
+        (let [query (db/q '[:find ?eid :where [?eid :scm/val1 "hi"]] (db))
+              e (db/entity (db) (ffirst query))]
+          (is (scm? (db->sp (db) e :Scm))))))
 
-(deftest db->sp-tests
-  (with-test-db simple-schema
-    @(db/transact *conn* (sp->transactions (db) scm-1))
-    (let [query (db/q '[:find ?eid :where [?eid :scm/val1 "hi"]] (db))
-          e (db/entity (db) (ffirst query))]
-      (is (scm? (db->sp (db) e :Scm))))))
-
-(deftest commit-sp-transactions-tests
-  (with-test-db simple-schema
-    (let [tx1 (sp->transactions (db) scm-1)
-          eid (commit-sp-transactions {:conn *conn*} tx1)]
-      (is (scm? (db->sp (db) (db/entity (db) eid) :Scm))
-          "The eid we get back from commit-sp-transactions should be
-          tied to what we put in."))))
+    (testing "commit-sp-transactions"
+      (with-test-db simple-schema
+        (let [tx1 (sp->transactions (db) scm-1)
+              eid (commit-sp-transactions {:conn *conn*} tx1)]
+          (is (scm? (db->sp (db) (db/entity (db) eid) :Scm))
+              "The eid we get back should be tied to what we put in."))))))
 
 (defn recursive-expand
   "Returns a completely fleshed out map from the given entity."
@@ -161,23 +158,17 @@
 
 (defn inspect-eids
   [eids]
-  (->> 
-   eids
-   (map #(recursive-expand (db/entity (db) (first %))))
-   (into #{})
-   doall))
+  (->> eids
+       (map #(recursive-expand (db/entity (db) (first %))))
+       (into #{})))
 
 (deftest nested-is-many
   (testing "can create an object with several is-many children."
-    (is (= #{{:scmm/vals #{{:scm2/val1 3
-                            :spec-tacular/spec :Scm2} 
-                           {:scm2/val1 4
-                            :spec-tacular/spec :Scm2}}
+    (is (= #{{:scmm/vals #{{:scm2/val1 3 :spec-tacular/spec :Scm2} 
+                           {:scm2/val1 4 :spec-tacular/spec :Scm2}}
               :spec-tacular/spec :ScmM}}
            (with-test-db simple-schema
-             (let [txs (sp->transactions
-                        (db)
-                        (recursive-ctor :ScmM {:vals [{:val1 3} {:val1 4}]}))
+             (let [txs (sp->transactions (db) (recursive-ctor :ScmM {:vals [{:val1 3} {:val1 4}]}))
                    _ @(db/transact *conn* txs)
                    res (db/q '[:find ?eid
                                :where
@@ -187,72 +178,65 @@
 
 (deftest several-nested
   (testing "can create multiple distinct objects."
-    (is (= #{{:scmm/vals #{{:scm2/val1 1, :spec-tacular/spec :Scm2}},
-              :spec-tacular/spec :ScmM}
-             {:scmm/vals #{{:scm2/val1 2, :spec-tacular/spec :Scm2}},
-              :spec-tacular/spec :ScmM}}
-           (with-test-db simple-schema
-             (let [txs (concat
-                        (sp->transactions
-                         (db)
-                         (recursive-ctor :ScmM {:vals [{:val1 1}]}))
-                        (sp->transactions
-                         (db)
-                         (recursive-ctor :ScmM {:vals [{:val1 2}]})))
-                   _ @(db/transact *conn* txs)
-                   res (db/q '[:find ?eid
-                               :where
-                               [?eid :scmm/vals ?es]
-                               [?es  :scm2/val1 ?v1]] (db))]
-               (inspect-eids res)))))))
+    (with-test-db simple-schema
+      (let [txs (concat
+                 (sp->transactions (db) (recursive-ctor :ScmM {:vals [{:val1 1}]}))
+                 (sp->transactions (db) (recursive-ctor :ScmM {:vals [{:val1 2}]})))
+            _   @(db/transact *conn* txs)
+            res (db/q '[:find ?eid
+                        :where
+                        [?eid :scmm/vals ?es]
+                        [?es  :scm2/val1 ?v1]] (db))
+            res (inspect-eids res)]
+        (is (= #{{:scmm/vals #{{:scm2/val1 1, :spec-tacular/spec :Scm2}},
+                  :spec-tacular/spec :ScmM}
+                 {:scmm/vals #{{:scm2/val1 2, :spec-tacular/spec :Scm2}},
+                  :spec-tacular/spec :ScmM}}
+               res))))))
 
 (deftest identity-add-one
   (testing "setting an is-many valued object updates the set to exactly the new set"
-    (is (= #{{:scmm/identity "myident",
-              :scmm/vals #{{:scm2/val1 2
-                            :spec-tacular/spec :Scm2}}
-              :spec-tacular/spec :ScmM}}
-           (with-test-db simple-schema
-             (let [tx1 (sp->transactions
-                        (db)
-                        (scmm {:identity "myident" :vals [{:val1 1}]}))
-                   _ @(db/transact *conn* tx1)
-                   tx2 (sp->transactions
-                        (db)
-                        (scmm {:identity "myident" :vals [{:val1 2}]}))
-                   _ @(db/transact *conn* tx2)
-                   res (db/q '[:find ?eid
-                               :where
-                               [?eid :scmm/identity _]] (db))]
-               (inspect-eids res)))))))
+    (with-test-db simple-schema
+      (let [tx1 (sp->transactions
+                 (db)
+                 (scmm {:identity "myident" :vals [{:val1 1}]}))
+            _   @(db/transact *conn* tx1)
+            tx2 (sp->transactions
+                 (db)
+                 (scmm {:identity "myident" :vals [{:val1 2}]}))
+            _   @(db/transact *conn* tx2)
+            res (db/q '[:find ?eid :where [?eid :scmm/identity _]] (db))
+            res (inspect-eids res)]
+        (is (= #{{:scmm/identity "myident",
+                  :scmm/vals #{{:scm2/val1 2 :spec-tacular/spec :Scm2}}
+                  :spec-tacular/spec :ScmM}}
+               res))))))
 
 (deftest identity-edit-one-is-many
-  (testing
-      "fixing a unique attribute on parent AND is-many child will
-      upsert that item, and not add a new one."
-    (is (= #{{:scmm/identity "myident",
-              :scmm/vals #{{:scm2/val1 2
-                            :spec-tacular/spec :Scm2}}
-              :spec-tacular/spec :ScmM}}
-           (with-test-db simple-schema
-             (let [tx1 (sp->transactions
-                        (db)
-                        (recursive-ctor :ScmM {:identity "myident"
-                                               :vals [{:val1 1}]})) ;initially 1
-                   _ @(db/transact *conn* tx1)
-                   child-eid (ffirst (db/q '[:find ?child
-                                             :where
-                                             [?eid :scmm/vals ?child]] (db))) ; remember the item we added
-                   tx2 (sp->transactions
-                        (db)
-                        (recursive-ctor :ScmM {:identity "myident"
-                                               :vals [{:db-ref {:eid child-eid}
-                                                       :val1 2}]})) ; setting to 2 (fixing via child-eid)
-                   _ @(db/transact *conn* tx2)
-                   res (db/q '[:find ?eid
-                               :where
-                               [?eid :scmm/vals ?_]] (db))]
-               (inspect-eids res)))))))
+  (with-test-db simple-schema
+    (let [tx1 (sp->transactions
+               (db)
+               (recursive-ctor :ScmM {:identity "myident"
+                                      :vals [{:val1 1}]})) ; initially 1
+          _   @(db/transact *conn* tx1)
+          child-eid (ffirst (db/q '[:find ?child
+                                    :where
+                                    [?eid :scmm/vals ?child]] (db))) ; remember the item we added
+          tx2 (sp->transactions
+               (db)
+               (recursive-ctor :ScmM {:identity "myident"
+                                      :vals [{:db-ref {:eid child-eid}
+                                              :val1 2}]})) ; setting to 2 (fixing via child-eid)
+          _   @(db/transact *conn* tx2)
+          res (db/q '[:find ?eid
+                      :where
+                      [?eid :scmm/vals ?_]] (db))
+          res (inspect-eids res)]
+      (is (= #{{:scmm/identity "myident",
+                :scmm/vals #{{:scm2/val1 2 :spec-tacular/spec :Scm2}}
+                :spec-tacular/spec :ScmM}}
+             res)
+          "fixing a unique attribute on parent AND is-many child will upsert that item, and not add a new one."))))
 
 (deftest removed-data-should-reflect-in-db
   (testing "removing simple data"

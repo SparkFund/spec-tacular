@@ -1053,13 +1053,17 @@
    Get eid from object using :db-ref field.
    Aborts if the entity does not exist in the database (use create!)."
   [conn-ctx si & {:as updates}]
-  (let [spec    (get-spec si)
-        ;; updates (apply hash-map updates)
-        data    (transaction-data spec si updates)
-        eid     (commit-sp-transactions conn-ctx data)
-        em      (db/entity (db/db (:conn conn-ctx)) eid)]
+  (let [spec (get-spec si)
+        data (transaction-data spec si updates)
+        eid  (commit-sp-transactions conn-ctx data)
+        em   (db/entity (db/db (:conn conn-ctx)) eid)]
     (assoc ((get-lazy-ctor spec) (spec-entity-map spec em))
            :db-ref {:eid eid})))
+
+(defn update!
+  [conn-ctx si-old si-new]
+  (let [updates (mapcat (fn [[k v]] [k v]) si-new)]
+    (apply assoc! si-old updates)))
 
 (t/ann ^:no-check refresh
        (t/All [a] [ConnCtx a -> a]))
