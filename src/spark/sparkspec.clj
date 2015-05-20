@@ -3,8 +3,6 @@
   (:require [clojure.core.typed :as t]
             [clojure.string :refer [lower-case]]
             [spark.sparkspec.grammar :refer [parse-spec parse-enum]]
-            [schema.core :as s]
-            [schema.macros :as m]
             [spark.sparkspec.spec :refer :all])
   (:import (clojure.lang ASeq)))
 
@@ -85,7 +83,6 @@
 (defmethod get-type :default [x] (get type-map x))
 
 (defmulti get-ctor identity)
-(defmulti get-lazy-ctor identity)
 
 (defmulti get-map-ctor
   "If the keyword or class names a Spec MySpec,
@@ -100,6 +97,12 @@
   identity)
 
 (defmethod get-spec-class :default [_] nil)
+
+(defmulti get-database-coersion
+  "returns the coersion function that maps an object of a known database
+   type (like datomic.query.EntityMap) to a map that can be used by recursive-ctor"
+  (fn [o] (type o)))
+(defmethod get-database-coersion :default [_] nil)
 
 (doseq [[k v] type-map]
   (defmethod get-spec-class k [_] (:type v)))
@@ -189,75 +192,54 @@
 (defn- make-name [spec append-fn]
   (symbol (append-fn (name (:name spec)))))
 
-(defn checked-lazy-access [spec k v]
-  "user has asked to reference a field of a lazily constructed sp
-   the value of that field has not been cached yet, so we check
-   that the value v adheres to the spec if we can, and return it"
-  (let [item (get-item spec k)
-        [arity sub-spec-name] (:type item)]
-    (if (and item sub-spec-name) ; should just ignore keyword accesses to things not in the spec
-      (if (primitive? sub-spec-name)
-        (do (check-component! spec k v) v)
-        (let [f #(if-let [possible-specs (:elements (get-spec sub-spec-name))]
-                   (if-let [sub-spec (or (get-spec (:spec-tacular/spec %)) (get-spec %))]
-                     (if (contains? possible-specs (:name sub-spec))
-                       ((get-lazy-ctor sub-spec) %)
-                       (throw (ex-info "enum spec does not contain sub-spec" 
-                                       {:sub-spec sub-spec :elements possible-specs :field k})))
-                     (throw (ex-info "enum sub-term does not have a spec" 
-                                     {:atmap % :field k :spec spec})))
-                   ((get-lazy-ctor sub-spec-name) %))]
-          (case arity 
-            :one (f v)
-            :many (vec (map f v))))))))
-
+;; SpecInstances represent entities:
+;; -- when wrap is :local, wrapping a local entity (not on the db)
+;; -- when wrap is :db, wrapping an entity on the database
 (defn- mk-record [spec]
-  "defines a record type for spec, and a lazy type for spec"
-  (let [strict-class (symbol (str "s_" (-> spec :name name)))
-        lazy-class (symbol (str "l_" (-> spec :name name)))
-        gs (gensym)]
-    `(do (defrecord ~strict-class [])
-         (deftype ~lazy-class [~'atmap ~'cache]
+  (let [gs (gensym), class-name (symbol (str "i_" (-> spec :name name)))
+        {rec :rec non-rec :non-rec} (group-by recursiveness (:items spec))
+        non-rec-kws (map :name non-rec)]
+    `(do (deftype ~class-name [~'atmap]
+           clojure.lang.IObj 
+           ;; user doesn't get the map out again so it's fine to put the meta on it
+           ;; stipulation -- meta of the SpecInstance is initially inherited from meta of the map
+           (meta [this#] (meta ~'atmap))
+           (withMeta [this# ~gs] (new ~class-name (with-meta ~'atmap ~gs)))
            clojure.lang.ILookup
            (valAt [this# k# not-found#]
-             (or (let [maybe# (k# (deref ~'cache))]
-                   (if (some? maybe#) maybe# nil))
-                 (let [val# (.valAt ~'atmap k# not-found#)]
-                   (if (identical? val# not-found#) not-found#
-                       (let [lsp# (checked-lazy-access ~spec k# val#)]
-                         (do (swap! ~'cache assoc k# lsp#) lsp#))))))
+             (let [val# (.valAt ~'atmap k# not-found#)]
+               (cond
+                 (identical? val# not-found#) val#
+                 (some #(= % k#) [~@non-rec-kws]) val#
+                 :else (if-let [db-fn# (get-database-coersion val#)]
+                         (let [{[arity type] :type} (get-item ~spec k#)]
+                           (recursive-ctor ~type (db-fn# val#)))
+                         val#))))
            (valAt [~'this ~'k]
              (.valAt ~'this ~'k nil))
            clojure.lang.IPersistentMap
-           (equiv ~'[this o]
-             (or (and (instance? ~lazy-class ~'o)
-                      (.equiv ~'atmap (.atmap ~'o)))
-                 (and ~@(for [{iname :name [cardinality sub-sp-nm] :type :as item}
-                              (:items spec)]
-                          (case cardinality
-                            :one `(= (~iname ~'this) (~iname ~'o))
-                            :many `(every? (fn [l#] (some #(= l# %) (~iname ~'o)))
-                                           (~iname ~'this)))))))
+           #_(equiv ~'[this o]
+               (and (instance? ~class-name ~'o)
+                    (.equiv ~'atmap (.atmap ~'o))))
            (seq [~gs]
-             (seq [~@(for [{iname :name [cardinality sub-sp-nm] :type :as item}
-                           (:items spec)]
-                       (do (assert (keyword? iname))
-                           `(new clojure.lang.MapEntry ~iname (~iname ~gs))))]))
-           (assoc [this# k# v#]
-             (let [c# (deref ~'cache)] 
-               (new ~lazy-class ~'atmap (atom (assoc c# k# v#)))))
+             (seq [~@(for [{iname :name :as item} (:items spec)]
+                       `(new clojure.lang.MapEntry ~iname (~iname ~gs)))]))
+           (assoc [this# k# v#] ;; TODO
+             (new ~class-name (assoc ~'atmap k# v#)))
            (containsKey [this# k#] 
              (not (identical? this# (.valAt this# k# this#))))
-           (iterator [this#]
-             (.iterator (apply hash-map (mapcat #(list (:name %) ((:name %) ~'atmap)) 
-                                                (:items ~spec)))))
-           (cons [this# e#]
-             (let [c# (deref ~'cache)]
-               (new ~lazy-class ~'atmap (atom (assoc c# (first e#) (second e#)))))))
-         (defmethod print-method ~lazy-class [v# ^java.io.Writer w#]
-           (write-lazy-instance ~spec v# w#)))))
+           #_(iterator [this#]
+               (.iterator (apply hash-map (mapcat #(list (:name %) ((:name %) ~'atmap)) 
+                                                  (:items ~spec)))))
+           #_(cons [this# e#]
+               (assoc this# (first e#) (second e#)))
+           (without [this# k#]
+             (new ~class-name (dissoc ~'atmap k#))))
+         
+         (defmethod print-method ~class-name [v# ^java.io.Writer w#]
+           (write-spec-instance ~spec v# w#)))))
 
-(defn write-lazy-instance [spec le ^java.io.Writer w]
+(defn write-spec-instance [spec le ^java.io.Writer w]
   (letfn [(write-link [v w]
             (do (.write w "<link ")
                 (if-let [eid (get-in v [:db-ref :eid])]
@@ -293,9 +275,7 @@
                  [iname (let [t (case cardinality
                                   :one  item-type
                                   :many (list `t/SequentialSeqable item-type))]
-                          (if required?
-                            t
-                            (list `t/Option t)))]))]
+                          (if required? t (list `t/Option t)))]))]
     `(t/HMap
       ;; FIXME: This should be true but waiting on 
       ;; http://dev.clojure.org/jira/browse/CTYP-198
@@ -314,49 +294,47 @@
          (defmethod get-type ~(:name spec) [_#] 
            {:name ~(:name spec) :type-symbol '~alias}))))
 
-(m/defn non-recursive-ctor
-  "builds a spark type from a record, checking fields, but children
+(defn non-recursive-ctor
+  "builds an instance from another, checking fields, but children
    must all be primitive, non-recursive values or already spark types"
-  [map-ctor :- (s/=> s/Any {s/Keyword s/Any}),
-   spec :- spark.sparkspec.spec.Spec,
-   sp :- {s/Keyword s/Any}]
+  [map-ctor spec sp]
+  (prn map-ctor (:name spec) sp)
   (let [items (:items spec)
-        defaults (-> (fn [m {name :name dv :default-value}]
-                       (if (some? dv) (assoc m (keyword name) (if (ifn? dv) (dv) dv)) m))
-                     (reduce sp items))
-        sp-map (-> (fn [m k]
-                     (let [coerced (coerce spec k (get sp k))]
-                       (if (some? coerced) (assoc m k coerced) m)))
-                   (reduce defaults (keys sp)))]
-    (doseq [i (filter #(or (contains? sp-map (:name %)) (:required? %)) items)]
-      (check-component! spec (:name i) (get sp-map (:name i))))
-    (dissoc (with-meta (map-ctor sp-map) {:spec spec})
-            :spec-tacular/spec)))
+        defaults (reduce (fn [m {name :name dv :default-value}]
+                           (if (some? dv) (assoc m (keyword name) (if (ifn? dv) (dv) dv)) m))
+                         sp items)
+        sp-map   (reduce (fn [m k]
+                           (let [coerced (coerce spec k (get sp k))]
+                             (if (some? coerced) (assoc m k coerced) m)))
+                         defaults (keys sp))
+        actual-kws   (keys sp)
+        required-kws (keep #(if (:required? %) (:name %)) items)]
+    (do (doseq [kw (concat required-kws actual-kws)]
+          (check-component! spec kw (get sp-map kw)))
+        (map-ctor sp-map))))
 
-(m/defn recursive-ctor 
-  "deep-walks a nested map structure, constructing 
-   proper spark types from nested values. Any sub-sp
-   that is already a Spec of the correct type is
-   acceptable as well."
-  [spec-name :- s/Keyword, sp :- s/Any]
-  (let [spec (get-spec spec-name)]
-    (if (and (instance? clojure.lang.IRecord sp)
-             (if (:elements spec)
-               (not (contains? (:elements spec) (:name (get-spec (class sp)))))
-               ;;sp is already an instance of some specific record; has to agree.
-               (not= spec (get-spec (class sp))))) 
-      (throw (ex-info (str "provided wrong spec type in ctor: " (class sp) " expecting " spec-name)
-                      {:provided (class sp) :expecting spec-name}))
-      (let [{recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))
-            sub-kvs (->> recs
-                         (keep (fn [{[arity sub-spec-name] :type :as item}]
-                                 (let [sub-sp (get sp (:name item))]
-                                   (cond
-                                     (and (= arity :one) sub-sp) ; only build non-nil sub-sps
-                                     ,[(:name item) (recursive-ctor sub-spec-name sub-sp)]
-                                     (and (= arity :many) sub-sp)
-                                     ,[(:name item) (map #(recursive-ctor sub-spec-name %) sub-sp)]
-                                     :else nil)))))]
+(defn recursive-ctor 
+  "walks a nested map structure, constructing proper instances from nested values.
+   Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
+  [spec-name sp]
+  (prn spec-name sp)
+  (letfn [(build-rec-item [{iname :name [arity sub-spec-name] :type link? :link?} sub-sp]
+            (letfn [(rec [sub] (->> (if link? sub (dissoc sub :db-ref))
+                                    (recursive-ctor sub-spec-name)))]
+              [iname (case arity :one (rec sub-sp) :many (map rec sub-sp))]))]
+    (if (if-let [spec-class (get-spec-class spec-name)]
+          (instance? spec-class sp))
+      sp
+      (let [spec (get-spec spec-name)
+            spec (if (:elements spec)
+                   (if-let [sub-spec (get-spec sp)]
+                     (and (some #(= (:name sub-spec) %) (:elements spec)) sub-spec))
+                   spec)
+            _ (when-not spec (throw (ex-info (str "cannot create " (name spec-name)) {:sp sp})))
+            {recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))
+            sub-kvs (->> recs (keep (fn [{iname :name :as item}]
+                                      (if-let [sub-sp (get sp iname)]
+                                        (build-rec-item item sub-sp)))))]
         (non-recursive-ctor (get-map-ctor spec-name) spec (into sp sub-kvs))))))
 
 (defn- mk-checking-ctor [spec]
@@ -375,19 +353,6 @@
        (defmethod get-ctor ~(:name spec) [_#] ~ctor-name)
        (defmethod get-ctor ~spec [_#] ~ctor-name))))
 
-(defn- mk-lazy-ctor [spec]
-  (let [lazy-class (symbol (str (namespace-munge *ns*) ".l_" (name (:name spec))))
-        strict-class (symbol (str (namespace-munge *ns*) ".s_" (name (:name spec))))]
-    `(let [l-ctor# (fn [atmap#]
-                     (when-not (instance? clojure.lang.IPersistentMap atmap#)
-                       (throw (ex-info (str "cannot construct " (name (:name ~spec)))
-                                       {:type (type atmap#) :atmap atmap#})))
-                     (if (or (instance? ~lazy-class atmap#)
-                             (instance? ~strict-class atmap#)) 
-                       atmap# (~(symbol (str lazy-class ".")) atmap# (atom {}))))]
-       (do (defmethod get-lazy-ctor ~(:name spec) [_#] l-ctor#)
-           (defmethod get-lazy-ctor ~spec [_#] l-ctor#)))))
-
 (defn eval-default-values [spec]
   "like eval, but eval won't go into records types like Spec or Item.
    we need to eval because we want the Spec record at macro time, but want to defer
@@ -400,26 +365,25 @@
 (defn- mk-get-spec [spec]
   `(let [spec-sym# (eval-default-values ~spec)] ; want eval to happen after this is expanded, so the two methods share the resulting value.
      (defmethod get-spec ~(:name spec) [_#] spec-sym#)
-     (defmethod get-spec ~(symbol (str "s_" (name (:name spec)))) [_#] spec-sym#)
-     (defmethod get-spec ~(symbol (str "l_" (name (:name spec)))) [_#] spec-sym#)))
+     (defmethod get-spec ~(symbol (str "i_" (name (:name spec)))) [_#] spec-sym#)))
 
 (defn- mk-get-spec-class [spec]
-  (let [class-name (symbol (str "s_" (name (:name spec))))]
+  (let [class-name (symbol (str "i_" (name (:name spec))))]
     `(defmethod get-spec-class ~(:name spec) [_#] ~class-name)))
 
 (defn- mk-get-map-ctor [spec]
-  (let [builtin-sym (symbol (str "map->s_" (name (:name spec))))
-        fac-sym     (symbol (str builtin-sym "-fixed"))]
+  (let [class-ctor (str "i_" (name (:name spec)))
+        fac-sym    (symbol (str class-ctor "-fixed"))]
     `(do
-       (defn ~fac-sym [o#] (~builtin-sym (into {} o#))) ; avoid CLJ-1388 until Clojure 1.7 comes out.
+       (defn ~fac-sym [o#] (~(symbol (str class-ctor ".")) o#))
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
-       (defmethod get-map-ctor ~(symbol (str "s_" (name (:name spec)))) [_#] ~fac-sym))))
+       (defmethod get-map-ctor ~(symbol (str "i_" (name (:name spec)))) [_#] ~fac-sym))))
 
 (defn- mk-enum-get-spec [spec]
   `(defmethod get-spec ~(:name spec) [_#] ~spec))
 
 (defn- mk-enum-get-map-ctor [spec]
-  (let [fac-sym (symbol (str "map->s_" (name (:name spec))))]
+  (let [fac-sym (symbol (str "map->i_" (name (:name spec)) "-fixed"))]
     `(do
        ;; the "map ctor" for an enum means it's arg needs to 
        ;; be a tagged map or a record type of one of the enum's ctors.
@@ -436,11 +400,9 @@
 
 (defn- mk-huh [spec]
   (let [huh (make-name spec #(str (lower-case %) "?"))
-        strict-class (symbol (str (namespace-munge *ns*) ".s_" (name (:name spec))))
-        lazy-class   (symbol (str (namespace-munge *ns*) ".l_" (name (:name spec))))]
+        strict-class (symbol (str (namespace-munge *ns*) ".i_" (name (:name spec))))]
     `(defn ~huh [o#] 
-       (or (instance? ~strict-class o#)
-           (instance? ~lazy-class o#)))))
+       (instance? ~strict-class o#))))
 
 (defn- mk-enum-huh [spec]
   (let [huh (symbol (str (-> spec :name name lower-case) "?"))]
@@ -456,7 +418,6 @@
        ~(mk-get-map-ctor s)
        ~(mk-huh s)
        ~(mk-checking-ctor s)
-       ~(mk-lazy-ctor s)
        ~(mk-get-spec s)
        ~(mk-get-spec-class s))))
 

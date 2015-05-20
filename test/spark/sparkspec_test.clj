@@ -3,6 +3,9 @@
   (:use spark.sparkspec
         clojure.test))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; defspec
+
 (defspec TestSpec1
   [val1 :is-a :long :required]
   [val2 :is-a :string]
@@ -10,63 +13,77 @@
   [val4 :is-a :keyword :default-value (fn [] :val)]
   [val5 :is-a :TestSpec2])
 
+(deftest test-TestSpec1
+  (testing "valid"
+    (let [good (testspec1 {:val1 3 :val2 "hi"})]
+      (is (testspec1? good))
+      (is (= (:val1 good) 3))
+      (is (= (:val2 good) "hi"))
+      (is (= (:val3 good) 3))
+      (is (= (:val4 good) :val))
+
+      (testing "has-spec?"
+        (is (has-spec? good))
+        (is (not (has-spec? 5))))
+      (testing "get-basis"
+        (is (= (get-basis :TestSpec1) 
+               [:val1 :val2 :val3 :val4 :val5]))
+        (is (= (get-basis good)
+               [:val1 :val2 :val3 :val4 :val5])))))
+  (testing "invalid"
+    (is (not (testspec1? {:val1 3 :val2 "hi"}))
+        "not a record")
+    (is (thrown-with-msg? java.lang.AssertionError #"is required" 
+                          (testspec1 {:val1 nil}))
+        "missing required field")
+    (is (thrown-with-msg? java.lang.AssertionError #"is required"
+                          (testspec1 {:val2 1}))
+        "missing required field")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
+                          (testspec1 {:val1 0 :val2 1}))
+        "wrong type")
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
+                          (testspec1 {:val1 3 :extra-key true}))
+        "extra key")))
+
 (defspec TestSpec2
-  [ts1 :is-a :TestSpec1])
+  (:link [ts1 :is-a :TestSpec1]))
+
+(deftest test-TestSpec2
+  (is (doall (testspec2 {:ts1 (testspec1 {:val1 42})})))
+
+  (testing "order of spec definition does not matter"
+    (is (testspec1? (testspec1 {:val1 1 :val5 (testspec2 {})}))))
+
+  (testing "links are not checked"
+    (let [ts1 (i_TestSpec1. {::bad-key true})]
+      (is (testspec2 {:ts1 ts1})))))
 
 (defspec TestSpec3)
 
 (defspec TestSpec4
   [val1 :is-a :boolean])
 
+(deftest test-TestSpec4
+  (testing "valid"
+    (is (some? (check-component! (get-spec :TestSpec4) :val1 false)))
+    (is (testspec4? (testspec4 {:val1 false})))))
+
 (defspec TestSpec5
   [name :is-a :string :required])
 
-(deftest test-defspec
-  (let [good (testspec1 {:val1 3 :val2 "hi"})]
-    (testing "valid specs"
-      (is (testspec1? good)
-          "should conform to huh-forms"))
+(deftest test-TestSpec5
+  (testing "empty string"
+    (is (some? (check-component! (get-spec :TestSpec5) :name "")))))
 
-    (testing "invalid specs"
-      (is (not (testspec1? {:val1 3 :val2 "hi"}))
-          "not a record")
-      (is (thrown-with-msg? java.lang.AssertionError #"is required" 
-                            (testspec1 {:val1 nil}))
-          "missing required field")
-      (is (thrown-with-msg? java.lang.AssertionError #"is required"
-                            (testspec1 {:val2 1}))
-          "missing required field")
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
-                            (testspec1 {:val1 0 :val2 1}))
-          "wrong type"))
+;; forward references
+(defspec A [b :is-a :B])
+(defspec B [a :is-a :A])
 
-    (testing "default values"
-      (is (= 3 (:val3 good)))
-      (is (= :val (:val4 good))))
-
-    (testing "has-spec?"
-      (is (has-spec? good))
-      (is (not (has-spec? 5))))
-
-    (testing "get-basis"
-      (is (= (get-basis :TestSpec1) 
-             [:val1 :val2 :val3 :val4 :val5]))
-      (is (= (get-basis good)
-             [:val1 :val2 :val3 :val4 :val5])))
-
-    (testing "false"
-      (is (some? (check-component! (get-spec :TestSpec4) :val1 false)))
-      (is (testspec4? (testspec4 {:val1 false})))) ;; TODO: more false tests
-
-    (testing "empty string"
-      (is (some? (check-component! (get-spec :TestSpec5) :name ""))))))
-
-(deftest recursive-tests
-  (testing "order of spec definition does not matter"
-    (is (testspec1? (testspec1 {:val1 1 :val5 (testspec2 {})})))))
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; enums
 
 (defenum testenum :TestSpec2 :TestSpec3)
-
 (defspec ES [foo :is-a :testenum])
 (defspec ESParent [es :is-a :ES])
 
@@ -75,37 +92,14 @@
   (is (instance? spark.sparkspec.spec.EnumSpec (get-spec testenum)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
   (is (thrown? clojure.lang.ExceptionInfo (check-component! (get-spec :ES) :foo :nope)))
-  (is (= (es {:foo (testspec3)})
-         #spark.sparkspec_test.s_ES{:foo #spark.sparkspec_test.s_TestSpec3{}}))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
-  (is (= (esparent {:es {:foo (testspec3)}})
-         #spark.sparkspec_test.s_ESParent{:es #spark.sparkspec_test.s_ES{:foo #spark.sparkspec_test.s_TestSpec3{}}})
-      "nested ctor works with enums")
-  (is (thrown? clojure.lang.ExceptionInfo
-               (esparent {:es {:foo (testspec1 {:val1 1})}}))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
+                        (esparent {:es {:foo (testspec1 {:val1 1})}}))
       "nested ctor fails properly with enums"))
 
-;; recursive and forward-references
+;; forward enum reference
 (defenum EnumFoo :EnumForward)
 (defspec EnumForward)
-
-(defspec A [b :is-a :B])
-(defspec B [a :is-a :A])
-
-(deftest test-lazy-ctor
-  (let [bad-test1 {:val1 3 :val2 2}
-        ts2 ((get-lazy-ctor :TestSpec2) {:ts1 bad-test1})]
-    (is (testspec2? ts2))
-    (is (testspec1? (:ts1 ts2)))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" (:val2 (:ts1 ts2))))
-    (is (= 3 (:val1 (:ts1 ts2)))))
-  (let [l-ts4 ((get-lazy-ctor :TestSpec4) {:val1 true})]
-    (is (= (testspec4 l-ts4)
-           (testspec4 {:val1 true}))))
-
-  (testing "enum equality"
-    (is (= ((get-lazy-ctor :EnumForward) {})
-           ((get-ctor :EnumForward) {})))))
 
 (def ns-specs (namespace->specs *ns*))
 (deftest test-namespace->specs
@@ -119,18 +113,18 @@
 (defspec TestSpec6
   [enum :is-many :EnumFoo])
 
-(deftest test-is-many
-  (let [f (get-lazy-ctor :TestSpec6)]
-    (testing "is-many"
-      (is (checked-lazy-access
-           (get-spec :TestSpec6)
-           :enum [(enumforward) (enumforward)])
-          "checked-lazy-access")
-      (is (= [(enumforward) (enumforward)]
-             [(enumforward) (enumforward)]))
-      (is (= (:enum (f {:enum [(enumforward) (enumforward)]}))
-             (:enum (testspec6 {:enum [(enumforward) (enumforward)]})))
-          "equality"))))
+#_(deftest test-is-many
+    (let [f (get-lazy-ctor :TestSpec6)]
+      (testing "is-many"
+        (is (checked-lazy-access
+             (get-spec :TestSpec6)
+             :enum [(enumforward) (enumforward)])
+            "checked-lazy-access")
+        (is (= [(enumforward) (enumforward)]
+               [(enumforward) (enumforward)]))
+        (is (= (:enum (f {:enum [(enumforward) (enumforward)]}))
+               (:enum (testspec6 {:enum [(enumforward) (enumforward)]})))
+            "equality"))))
 
 (defspec Link
   (:link
