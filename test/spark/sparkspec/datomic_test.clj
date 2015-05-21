@@ -12,10 +12,25 @@
             [clojure.core.typed :as t]
             [clojure.tools.macro :as m]))
 
-
 (def simple-schema
   (cons schema/spec-tactular-map
         (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
+
+(deftest test-entity-coersion
+  (with-test-db simple-schema
+    @(db/transact *conn* [{:db/id (db/tempid :db.part/user)
+                           :spec-tacular/spec :Scm
+                           :scm/scm2 {:db/id (db/tempid :db.part/user)
+                                      :spec-tacular/spec :Scm2
+                                      :scm2/val1 42}}])
+    (let [scm-eid  (ffirst (db/q '[:find ?v :where [?v :spec-tacular/spec :Scm]] (db)))
+          scm-em   (db/entity (db) scm-eid)
+          scm2-eid (ffirst (db/q '[:find ?v :where [?v :spec-tacular/spec :Scm2]] (db)))
+          scm2-em  (db/entity (db) scm2-eid)]
+      (is (= (:scm2 (database-coersion scm-em)) scm2-em))
+      (is (= (:val1 (database-coersion scm2-em)) 42))
+      (is (= (recursive-ctor :Scm2 (:scm2 (database-coersion scm-em)))
+             (scm2 {:val1 42}))))))
 
 (deftest test-transaction-data
   (testing "Scm2"
@@ -116,8 +131,9 @@
       (with-test-db simple-schema
         (let [tx1 (sp->transactions (db) scm-non-nested)]
           (is (= 1 (count tx1)))
-          (is (thrown? java.lang.AssertionError
-                       (sp->transactions (db) (scm {:extra-key 1})))))))
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo #"is not in the spec"
+               (sp->transactions (db) (scm {:extra-key 1})))))))
 
     (testing "update sp->transactions"
       (with-test-db simple-schema
@@ -328,6 +344,8 @@
           b2eid (create-sp! {:conn *conn*} (scmm {:vals [(scm2 {:val1 1})
                                                          (scm2 {:val1 2})]}))
           b3db (get-by-eid (db) b2eid)
+          _ (is (= (item-mask :ScmM (assoc b3db :vals nil))
+                   (item-mask :ScmM (assoc b3db :vals []))))
           _ (update-sp! {:conn *conn*}
                         b3db
                         (assoc b3db :vals nil))
@@ -336,10 +354,10 @@
                 "Can delete non-primitive is-manys via nil too")
           scmreq-eid (create-sp! {:conn *conn*} (scmreq {:name "blah"}))
           scmreq-db (get-by-eid (db) scmreq-eid)
-          _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"attempt to delete a required field"
-                                  (update-sp! {:conn *conn*}
-                                              scmreq-db
-                                              (assoc scmreq-db :name nil))))])))
+          #_(is (thrown-with-msg? clojure.lang.ExceptionInfo #"attempt to delete a required field"
+                                    (update-sp! {:conn *conn*}
+                                                scmreq-db
+                                                (assoc scmreq-db :name nil))))])))
 
 (deftest enum-tests
   (with-test-db simple-schema
@@ -482,6 +500,9 @@
   (is (= (item-mask :ScmOwnsEnum (scmownsenum {:enums []}))
          {:enums true})
       "empty lists of enums are 'true' as well")
+  (is (= (item-mask :ScmOwnsEnum (assoc (scmownsenum) :enums nil))
+         {:enums true})
+      "nil lists of enums are 'true' as well")
   (with-test-db simple-schema
     (let [a1 (scm2 {:val1 1})
           a2 (scm2 {:val1 2})
@@ -563,23 +584,6 @@
                    (db) 5678 e2)
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
-(deftest test-lazy-ctor
-  (with-test-db simple-schema
-    (let [e-scm2 (scm2 {:val1 42})
-          e-soe  (scmownsenum {:enum e-scm2})]
-      (create-sp! {:conn *conn*} e-soe)
-
-      (let [a-soe  (first (q :find :ScmOwnsEnum :in (db) :where [% {:enum [:Scm2 {:val1 42}]}]))
-            a-scm2 (:enum a-soe)]
-        (testing "enum lazy-ctor"
-          (is (= a-scm2 e-scm2)
-              "equality")
-          (is (= (checked-lazy-access (get-spec :ScmOwnsEnum) :enum a-scm2)
-                 e-scm2)
-              "checked access")
-          (is (= 42 (:val1 (:enum a-soe)))
-              "deep access"))))))
-
 (deftest query-tests
   (with-test-db simple-schema
     (is (= #{} (->> (q :find ?a :in (db) :where
@@ -636,10 +640,8 @@
         
         (let [a-scm (first (q :find :Scm :in (db) :where [% {:scm2 [:Scm2 {:val1 5}]}]))]
           (testing "equality on returned entities"
-            (is (.equiv (filter (fn [[k v]] (some? v)) a-scm)
-                        (filter (fn [[k v]] (some? v)) e-scm)))
             (is (= a-scm e-scm))
-            #_(is (= e-scm a-scm))))
+            (is (= e-scm a-scm))))
         
         (let [[a-scm a-scm2]
               ,(->> (q :find [:Scm :Scm2] :in (db) :where
@@ -653,15 +655,11 @@
           (is (map? (:db-ref (:scm2 a-scm)))
               "allow :db-ref keyword access on sub-entities"))
 
-        (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
-          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))
-
         (testing "is-many"
           (let [e-scmm (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})
                 scmm-eid (create-sp! {:conn *conn*} e-scmm)
                 a-scmm1 (first (q :find :ScmM :in (db) :where [% {:identity "hi"}]))
-                a-scmm2 ((get-lazy-ctor :ScmM)
-                         (spec-entity-map (get-spec :ScmM) (db/entity (db) scmm-eid)))]
+                a-scmm2 (recursive-ctor :ScmM (db/entity (db) scmm-eid))]
             (is (= a-scmm1 e-scmm))
             (is (= a-scmm2 e-scmm)))
 
@@ -670,8 +668,7 @@
                       :val (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})})
                 esw-id (create-sp! {:conn *conn*} esw)
                 asw1 (first (q :find :ScmM :in (db) :where [:ScmMWrap {:name "scmwrap" :val %}]))
-                asw2 (:val ((get-lazy-ctor :ScmMWrap) 
-                            (spec-entity-map (get-spec :ScmMWrap) (db/entity (db) esw-id))))]
+                asw2 (:val (recursive-ctor :ScmMWrap (db/entity (db) esw-id)))]
             ;; (is (= asw1 esw) "returned from query equality")
             (testing "lazy-ctor"
               #_(is (instance? spark.sparkspec.test_specs.l_ScmM asw2) "type") ;; TODO
@@ -682,8 +679,7 @@
 
       (testing "absent field access"
         (let [eid (create-sp! {:conn *conn*} (scm2))
-              a-scm2 ((get-lazy-ctor :Scm2) 
-                      (spec-entity-map (get-spec :Scm2) (db/entity (db) eid)))]
+              a-scm2 (recursive-ctor :Scm2 (db/entity (db) eid))]
           (let [b (not (:val1 (scm2 a-scm2)))] ;; lol printing it out draws an early error
             (is b))
           #_(is (not (:val1 (scm2 a-scm2)))))))
@@ -712,10 +708,20 @@
         (is (= id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/scm2 123]] (db))))
             "insertion of bad scm2 ref should work")
 
-        (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
-                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-          (is (= :Scm2 (:expected-spec data))
-              "should be an error to use bad scm2 ref as an :Scm2"))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (recursive-ctor :Scm (db/entity (db) id)))
+            "cant make an Scm out of it")
+
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (:scm2 (recursive-ctor :Scm (db/entity (db) id))))
+            "cant get an Scm2 out of it")
+
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}]))
+            "cant directly get the Scm2 either")
 
         (assert @(db/transact *conn*
                               [{:db/id (db/tempid :db.part/user -100)
@@ -723,11 +729,10 @@
                                 :scm/val1 "5"}
                                [:db/add id :scm/scm2 (db/tempid :db.part/user -100)]]))
 
-        (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
-                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-          (is (= [:scm/val1 :spec-tacular/spec] (:actual-keys data))
-              "should be an error to have an :Scm2 with :scm/val1 key"))
-
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])))
+        
         ;; TODO: add enum tests here
         ))))
 
@@ -790,6 +795,22 @@
                      clojure.lang.LazySeq))
             a-soe (create! {:conn *conn*} e-soe)
             _ (is (get-in (first (:enums a-soe)) [:db-ref :eid]))]))))
+
+(deftest test-create!
+  (with-test-db simple-schema
+    (let [exs [(scm2 {:val1 1})
+               (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
+               (scm {:val1 "2" :scm2 {:val1 4}})
+               (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})
+               (scmparent {:scm {:val1 "2" :scm2 {:val1 4}}})
+               (scmlink {:val1 (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})
+               (scmlink {:link1 (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
+                         :val1  (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})
+               (scmlink {:link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]})
+               (scmlink {:link1 (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
+                         :link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]
+                         :val1  (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})]]
+      (doseq [ex exs] (is (doall (create! {:conn *conn*} ex)) (str ex))))))
 
 (deftest test-link
   (with-test-db simple-schema

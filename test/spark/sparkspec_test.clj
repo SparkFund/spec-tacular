@@ -1,5 +1,6 @@
 (ns spark.sparkspec-test
-  (:require [clojure.core.typed :as t])
+  (:require [clojure.core.typed :as t]
+            [clojure.data :refer [diff]])
   (:use spark.sparkspec
         clojure.test))
 
@@ -14,13 +15,20 @@
   [val5 :is-a :TestSpec2])
 
 (deftest test-TestSpec1
+
   (testing "valid"
+    (is (some? (get-spec :TestSpec1)))
+    (is (some? (get-spec :TestSpec1 :TestSpec1)))
+    (is (some? (get-spec {:spec-tacular/spec :TestSpec1})))
+    
     (let [good (testspec1 {:val1 3 :val2 "hi"})]
       (is (testspec1? good))
       (is (= (:val1 good) 3))
       (is (= (:val2 good) "hi"))
       (is (= (:val3 good) 3))
       (is (= (:val4 good) :val))
+
+      (is (= (keys good) [:val1 :val2 :val3 :val4]))
 
       (testing "has-spec?"
         (is (has-spec? good))
@@ -88,6 +96,10 @@
 (defspec ESParent [es :is-a :ES])
 
 (deftest test-defenum
+  (is (some? (get-spec :testenum)))
+  (is (= (get-spec :testenum {:spec-tacular/spec :TestSpec2})
+         (get-spec :TestSpec2)))
+  
   (is (testenum? (testspec2 {})))
   (is (instance? spark.sparkspec.spec.EnumSpec (get-spec testenum)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
@@ -103,7 +115,7 @@
 
 (def ns-specs (namespace->specs *ns*))
 (deftest test-namespace->specs
-  (let [[a b both] (clojure.data/diff 
+  (let [[a b both] ( 
                     (into #{} (map :name ns-specs))
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testenum :ES :ESParent :EnumFoo :EnumForward :A :B})]
@@ -134,7 +146,13 @@
   [ts4 :is-many :TestSpec4])
 
 (deftest test-link
-  (is (link? (link {:ts1 (testspec1 {:val1 42})
-                    :ts2 [(testspec2) (testspec2 {:ts1 (testspec1 {:val1 42})})]
-                    :ts3 (testspec3)
-                    :ts4 [(testspec4 {:val1 false})]}))))
+  (let [many [(testspec2) (testspec2 {:ts1 (testspec1 {:val1 42})})]
+        l (link {:ts1 (testspec1 {:val1 42})
+                 :ts2 many
+                 :ts3 (testspec3)
+                 :ts4 [(testspec4 {:val1 false})]})]
+    (is (link? l))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a map"
+                          (recursive-ctor :TestSpec2 many)))
+    (is (= (:ts2 l) many))))
+

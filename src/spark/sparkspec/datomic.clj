@@ -12,6 +12,8 @@
             [clojure.tools.macro :as m]
             [clojure.walk :as walk]))
 
+(t/typed-deps spark.sparkspec)
+
 (require '[datomic.api :as db])
 
 (t/defalias Pattern (t/Map t/Any t/Any))
@@ -73,6 +75,25 @@
       (contains? a :name)
       ,(make-keyword (name (:name a)))
       :else (throw (ex-info "cannot make db-keyword" {:spec spec :attr a})))))
+
+(t/ann ^:no-check database-coersion [DatomicEntity -> (t/Map t/Keyword t/Any)])
+(t/tc-ignore
+ ;; the returned map may be missing valid keys, but it will definitely
+ ;; be of the correct spec and won't have completely invalid kws
+ (defmethod database-coersion datomic.query.EntityMap [em]
+   (let [spec (get-spec em)]
+     (do (when (not spec)
+           (throw (ex-info "bad entity in database" {:entity em})))
+         (when-not (every? (fn [kw] (some #(= (db-keyword spec (:name %)) kw) (:items spec)))
+                           (filter #(case % (:spec-tacular/spec :db-ref :db/txInstant) false true)
+                                   (keys em)))
+           (throw (ex-info "bad entity in database" {:entity em})))
+         (doall (->> (for [{iname :name :as item} (:items spec)]
+                       [iname (get em (db-keyword spec iname))])
+                     (cons [:db-ref {:eid (:db/id em)}])
+                     (cons [:spec-tacular/spec (:name spec)])
+                     (filter second)
+                     (into {})))))))
 
 (t/ann get-all-eids [datomic.db.DbId SpecT -> (t/ASeq Long)])
 (defn get-all-eids
@@ -170,7 +191,7 @@
   "Helper function that returns all items of a single spec"
   [db spec]
   (let [eids (get-all-eids db spec)]
-    (map (fn [eid] (db->sp db (db/entity db eid) (:name spec))) eids)))
+    (map (fn [eid] (recursive-ctor (:name spec) (db/entity db eid))) eids)))
 
 (t/ann ^:no-check build-transactions
        (t/IFn [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]
@@ -691,71 +712,6 @@
 (t/defalias QueryMapVec (t/HVec [t/Keyword QueryMapVal]))
 
 (t/defalias DatomicWhereClause (t/HVec [t/Any t/Keyword t/Any]))
-(declare spec-entity-map)
-
-(t/ann-datatype SpecEntityMap [spec :- SpecT, 
-                               em :- DatomicEntity,
-                               cache :- (t/Atom1 (t/Map t/Keyword SpecEntityMap))])
-(t/tc-ignore
- (deftype SpecEntityMap [spec em cache]
-   clojure.lang.ILookup
-   (valAt [this k not-found]
-     (or (let [maybe (k @cache)]
-           (if (some? maybe) maybe nil))
-         (if (contains? em k)
-           (.valAt em k not-found)
-           (let [v (.valAt em (db-keyword spec k) not-found)]
-             (if (identical? v not-found) not-found
-                 (let [f #(checked-lazy-access spec k %)
-                       g #(if (instance? datomic.query.EntityMap %)
-                            (let [spec (:spec-tacular/spec %)]
-                              (assoc ((get-lazy-ctor spec) (spec-entity-map (get-spec spec) %))
-                                     :db-ref {:eid (:db/id %)}))
-                            %)
-                       [arity sub-spec-name] (:type (get-item spec k))
-                       result (case arity :one (g v) :many (set (map g v)))
-                       result (checked-lazy-access spec k result)
-                       result (if (instance? datomic.query.EntityMap v)
-                                (assoc result :db-ref {:eid (:db/id v)}) result)]
-                   (do (swap! cache assoc k result) result)))))))
-   (valAt [this k]
-     (.valAt this k nil))
-
-   clojure.lang.IPersistentMap
-   (equiv [this o]
-     (and (instance? SpecEntityMap o)
-          (.equiv em (.em o))))))
-
-(t/ann spec-entity-map [SpecT DatomicEntity -> SpecEntityMap])
-(defn spec-entity-map [spec em]
-  (when-not (instance? datomic.query.EntityMap em)
-    (throw (ex-info (str "cannot create SpecEntityMap from given entity")
-                    {:type (type em) :entity em})))
-  (t/let [a-spec (get-spec (:spec-tacular/spec em))
-          e-spec (if (:elements spec) a-spec spec) ; add tests for this
-          _ (when-not (and a-spec e-spec)
-              (throw (ex-info "spec missing"
-                              {:entity em
-                               :expected-spec (:name e-spec)
-                               :actual-spec (:name a-spec)})))
-          cache :- (t/Atom1 (t/Map t/Keyword SpecEntityMap)) (atom {})
-          valid-kws (->> (:items e-spec) 
-                         (map (t/ann-form :name [Item -> t/Keyword])) ; srs types
-                         (map (t/ann-form #(db-keyword e-spec %)
-                                          [t/Keyword -> t/Keyword]))
-                         (cons :spec-tacular/spec)
-                         (into #{}))
-          actual-kws (keys (into {} em))] ; types, sigh
-    (cond
-      (not (if (:elements spec)
-             (contains? (:elements spec) (:name a-spec))
-             (= a-spec spec)))
-      (throw (ex-info "possible spec mismatch"
-                      {:expected-spec spec :actual-spec a-spec}))
-      (not (every? #(contains? valid-kws %) actual-kws))
-      (throw (ex-info "possible spec mismatch"
-                      {:expected-keys valid-kws :actual-keys actual-kws}))
-      :else (SpecEntityMap. spec em cache))))
 
 (t/ann expand-ident [QueryIdent QueryUEnv QueryTEnv ->
                      (t/HMap :mandatory {:var t/Sym :spec SpecT})])
@@ -925,11 +881,7 @@
                             ~(err result t-s))
                        `(if (instance? java.lang.Long ~result)
                           (let [e# (db/entity ~db ~result)]
-                            (clojure.core.typed.unsafe/ignore-with-unchecked-cast
-                             (assoc (~(get-lazy-ctor t-kw)
-                                     (spec-entity-map ~(get-spec t-kw) e#))
-                                    :db-ref {:eid (:db/id e#)})
-                             ~t-s))
+                            (recursive-ctor ~t-kw e#))
                           ~(err result t-s)))))]
     `(let [check# (t/ann-form
                    (fn [~(vec args)]
@@ -998,13 +950,11 @@
         ;;    on which group (old or new) the entity came from
         ;; -- new entities won't have eids, so just give them something unique
         ;;    to key on and add them
-        (let [by-eids (group-by #(get-in % [:db-ref :eid] (gensym))
-                                (concat old new))]
+        (let [by-eids (group-by #(get-in % [:db-ref :eid] (gensym)) (concat old new))]
           (->> (for [[_ [e1 & [e2]]] by-eids]
-                 (cond
-                   e2 []
-                   (some #(identical? e1 %) old) (retract e1)
-                   :else (add e1)))
+                 (if e2 []
+                     (if (some #(identical? e1 %) old)
+                       (retract e1) (add e1))))
                (apply concat)))))))
 
 (t/ann ^:no-check transaction-data
@@ -1024,8 +974,7 @@
                (cons [:db/add eid :spec-tacular/spec (:name spec)] %)))
          (#(with-meta % (assoc (meta %) :eid eid))))))
 
-(t/ann ^:no-check create!
-       (t/All [a] [ConnCtx a -> a]))
+(t/ann ^:no-check create! (t/All [a] [ConnCtx a -> a]))
 (defn create!
   "Creates a new instance of the given entity on the database in the given connection.
    Returns a representation of the newly created object.
@@ -1040,11 +989,9 @@
     (let [data (transaction-data spec nil new-si)
           eid  (commit-sp-transactions conn-ctx data)
           em   (db/entity (db/db (:conn conn-ctx)) eid)]
-      (assoc ((get-lazy-ctor spec) (spec-entity-map spec em))
-             :db-ref {:eid eid}))))
+      (recursive-ctor (:name spec) em))))
 
-(t/ann ^:no-check assoc!
-       (t/All [a] [ConnCtx a t/Keyword t/Any -> a]))
+(t/ann ^:no-check assoc! (t/All [a] [ConnCtx a t/Keyword t/Any -> a]))
 (defn assoc!
   "Updates the given entity in database in the given connection.
    The entity must be an object representation of an entity on the database
@@ -1057,16 +1004,15 @@
         data (transaction-data spec si updates)
         eid  (commit-sp-transactions conn-ctx data)
         em   (db/entity (db/db (:conn conn-ctx)) eid)]
-    (assoc ((get-lazy-ctor spec) (spec-entity-map spec em))
-           :db-ref {:eid eid})))
+    (recursive-ctor (:name spec) em)))
 
+(t/ann ^:no-check update! (t/All [a] [ConnCtx a a -> a]))
 (defn update!
   [conn-ctx si-old si-new]
   (let [updates (mapcat (fn [[k v]] [k v]) si-new)]
     (apply assoc! si-old updates)))
 
-(t/ann ^:no-check refresh
-       (t/All [a] [ConnCtx a -> a]))
+(t/ann ^:no-check refresh (t/All [a] [ConnCtx a -> a]))
 (defn refresh
   [conn-ctx si]
   (let [eid  (get-in si [:db-ref :eid])
@@ -1074,8 +1020,7 @@
     (when-not eid (throw (ex-info "entity without identity" {:entity si})))
     (when-not spec (throw (ex-info "entity without spec" {:entity si})))
     (let [em (db/entity (db/db (:conn conn-ctx)) eid)]
-      (assoc ((get-lazy-ctor spec) (spec-entity-map spec em))
-             :db-ref {:eid eid}))))
+      (recursive-ctor (:name spec) em))))
 
 ;; wishlist
 ;; (defn copy [])

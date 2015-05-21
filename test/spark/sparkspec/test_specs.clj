@@ -1,6 +1,7 @@
 (ns spark.sparkspec.test-specs
   {:core.typed {:collect-only true}}
   (:refer-clojure :exclude [assoc!])
+  (:require [clojure.core.typed :as t])
   (:use spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic))
