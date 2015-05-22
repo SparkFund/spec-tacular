@@ -68,7 +68,7 @@
     (is (testspec1? (testspec1 {:val1 1 :val5 (testspec3)}))))
 
   (testing "links are not checked"
-    (let [ts1 (i_TestSpec1. {::bad-key true})]
+    (let [ts1 (i_TestSpec1. {::bad-key true} (atom {}))]
       (is (testspec2 {:ts1 ts1})))))
 
 (defspec TestSpec4

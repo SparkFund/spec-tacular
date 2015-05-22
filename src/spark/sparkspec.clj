@@ -203,24 +203,26 @@
   (let [gs (gensym), class-name (symbol (str "i_" (-> spec :name name)))
         {rec :rec non-rec :non-rec} (group-by recursiveness (:items spec))
         non-rec-kws (concat [:db-ref] (map :name non-rec))]
-    `(do (deftype ~class-name [~'atmap]
+    `(do (deftype ~class-name [~'atmap ~'cache]
            clojure.lang.IRecord
            clojure.lang.IObj 
            ;; user doesn't get the map out again so it's fine to put the meta on it
            ;; stipulation -- meta of the SpecInstance is initially inherited from meta of the map
            (meta [this#] (meta ~'atmap))
-           (withMeta [this# ~gs] (new ~class-name (with-meta ~'atmap ~gs)))
+           (withMeta [this# ~gs] (new ~class-name (with-meta ~'atmap ~gs) (atom {})))
            clojure.lang.ILookup
            (valAt [this# k# not-found#]
-             (let [val# (.valAt ~'atmap k# not-found#)]
-               (cond
-                 (identical? val# not-found#) val#
-                 (some #(= % k#) [~@non-rec-kws]) val#
-                 (not val#) val#
-                 :else (let [{[arity# type#] :type :as item#} (get-item ~spec k#)]
-                         (case arity#
-                           :one (recursive-ctor type# val#)
-                           :many (vec (map #(recursive-ctor type# %) val#)))))))
+             (or ;; (k# (deref ~'cache))
+                 (let [val# (.valAt ~'atmap k# not-found#)]
+                   (cond
+                     (identical? val# not-found#) val#
+                     (some #(= % k#) [~@non-rec-kws]) val#
+                     (not val#) val#
+                     :else (let [res# (let [{[arity# type#] :type :as item#} (get-item ~spec k#)]
+                                       (case arity#
+                                         :one (recursive-ctor type# val#)
+                                         :many (vec (map #(recursive-ctor type# %) val#))))]
+                             (do (swap! ~'cache assoc k# res#) res#))))))
            (valAt [~'this ~'k]
              (.valAt ~'this ~'k nil))
            clojure.lang.IPersistentMap
@@ -234,6 +236,10 @@
                               :one `(= ~v1 ~v2)
                               :many `(and (every? (fn [l#] (some #(= l# %) ~v1)) ~v2)
                                           (= (count ~v1) (count ~v2)))))))))
+           (entryAt [this# k#]
+             (let [v# (.valAt this# k# this#)]
+               (when-not (identical? this# v#)
+                 (clojure.lang.MapEntry. k# v#))))
            (seq [~gs]
              (->> [(if-let [ref# (.valAt ~gs :db-ref)]
                      (new clojure.lang.MapEntry :db-ref ref#))
@@ -251,12 +257,11 @@
                (when (and (= arity# :many) (not (every? identity v#)))
                  (throw (ex-info "invalid value for arity :many"
                                  {:entity this# :field k# :value v#})))
-               (new ~class-name (assoc ~'atmap k# v#))))
+               (new ~class-name (assoc ~'atmap k# v#) (atom {}))))
            (containsKey [this# k#]
              (not (identical? this# (.valAt ~'atmap k# this#))))
-           #_(iterator [this#]
-               (.iterator (apply hash-map (mapcat #(list (:name %) ((:name %) ~'atmap)) 
-                                                  (:items ~spec)))))
+           (iterator [this#]
+             (.iterator ~'atmap))
            (cons [this# e#]
              (if (map? e#)
                (reduce (fn [m# [k# v#]] (assoc m# k# v#)) this# e#)
@@ -264,7 +269,7 @@
                  (assoc this# (first e#) (second e#))
                  (throw (ex-info (str "don't know how to cons " e#) {:this this# :e e#})))))
            (without [this# k#]
-             (new ~class-name (dissoc ~'atmap k#))))
+             (new ~class-name (dissoc ~'atmap k#) (atom {}))))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
            (write-spec-instance ~spec v# w#))
@@ -415,7 +420,7 @@
   (let [class-ctor (str "i_" (name (:name spec)))
         fac-sym    (symbol (str class-ctor "-fixed"))]
     `(do
-       (defn ~fac-sym [o#] (~(symbol (str class-ctor ".")) o#))
+       (defn ~fac-sym [o#] (~(symbol (str class-ctor ".")) o# (atom {})))
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
        (defmethod get-map-ctor ~(symbol (str "i_" (name (:name spec)))) [_#] ~fac-sym))))
 

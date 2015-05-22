@@ -33,19 +33,24 @@
 (defn spec-gen [spec spec-gen-env]
   (if (:elements spec)
     (gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
-    (letfn [(foo [{nam :name [cardinality type-key] :type required :required?}]
+    (letfn [(foo [{nam :name [cardinality type-key] :type required :required? unique? :unique?}]
               (let [generator ((get spec-gen-env type-key) spec-gen-env)
                     maybe-optionize (if required identity
-                                        #(gen/one-of [(gen/return nil) %]))]
+                                        #(gen/one-of [(gen/return nil) %]))
+                    maybe-unique
+                    (if (and unique? (= type-key :string))
+                      #(gen/bind % (fn [s] (gen/return (str (str (gensym) s)))))
+                      identity)]
                 (assert generator (str "missing definition of sub-generator: "
                                        type-key))
                 [nam (maybe-optionize
-                      (case cardinality
-                        :one generator
-                        :many (gen/bind (gen/resize 2 (gen/vector generator))
-                                ;; distinct works for primitives but
-                                ;; not for spec instances for some reason
-                                (fn [coll] (gen/return (distinct coll))))))]))]
+                      (maybe-unique
+                       (case cardinality
+                         :one generator
+                         :many (gen/bind (gen/resize 2 (gen/vector generator))
+                                 ;; distinct works for primitives but
+                                 ;; not for spec instances for some reason
+                                 (fn [coll] (gen/return (distinct coll)))))))]))]
       (let [kvs (->> (:items spec) (map foo) (filter identity))
             mapgen (apply gen/hash-map (apply concat kvs))
             factory (get-ctor (:name spec))]
