@@ -217,7 +217,7 @@
                  (identical? val# not-found#) val#
                  (some #(= % k#) [~@non-rec-kws]) val#
                  (not val#) val#
-                 :else (let [{[arity# type#] :type} (get-item ~spec k#)]
+                 :else (let [{[arity# type#] :type :as item#} (get-item ~spec k#)]
                          (case arity#
                            :one (recursive-ctor type# val#)
                            :many (vec (map #(recursive-ctor type# %) val#)))))))
@@ -245,9 +245,12 @@
            (empty [this#]
              (throw (UnsupportedOperationException. (str "can't create empty " ~(:name spec)))))
            (assoc [this# k# v#] ;; TODO
-             (let [{required?# :required? :as item#} (get-item ~spec k#)]
+             (let [{[arity# type#] :item required?# :required? :as item#} (get-item ~spec k#)]
                (when (and required?# (not v#))
                  (throw (ex-info "attempt to delete a required field" {:instance this# :field k#})))
+               (when (and (= arity# :many) (not (every? identity v#)))
+                 (throw (ex-info "invalid value for arity :many"
+                                 {:entity this# :field k# :value v#})))
                (new ~class-name (assoc ~'atmap k# v#))))
            (containsKey [this# k#]
              (not (identical? this# (.valAt ~'atmap k# this#))))

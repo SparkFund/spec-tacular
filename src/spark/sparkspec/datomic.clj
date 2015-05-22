@@ -551,7 +551,7 @@
                          sp (keys sp))))
                     nil)))]
         (if (and (coll? sp) (not (map? sp)))
-          (map filter-one sp)
+          (filter identity (map filter-one sp)) ;; don't let nils thru
           (filter-one sp)))
       (if (= true mask)
         sp
@@ -578,7 +578,8 @@
         old-eid (get-in old-sp [:db-ref :eid])
         _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to update."  {:old-eid old-eid :new-eid (get-in new-sp [:db-ref :eid])})))
         current (sp-filter-with-mask mask (:name spec) (db->sp db (db/entity db old-eid) (:name spec)))]
-    (when (not= (sp-filter-with-mask mask (:name spec) old-sp) current) (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
+    (when (not= (sp-filter-with-mask mask (:name spec) old-sp) current)
+      (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
     (let [deletions (atom '())
           datomic-data (build-transactions db new-sp mask deletions)
           txns  (with-meta

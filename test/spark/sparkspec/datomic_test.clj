@@ -302,7 +302,14 @@
       "only eids on a 'true' mask")
   (is (= (sp-filter-with-mask {:scm2 true} :Scm (scm {:db-ref {:eid 123} :val1 "1" :val2 1 :scm2 (scm2 {:val1 1 :db-ref {:eid 321}})}))
          (scm {:db-ref {:eid 123} :scm2 (scm2 {:db-ref {:eid 321}})}))
-      "only eids on a 'true' mask, nested."))
+      "only eids on a 'true' mask, nested.")
+
+  (let [original (scmownsenum {:enums [(scm2 {:val1 42})]})
+        updates  {:enums [(scm {:val2 53})]}
+        expected (merge original updates)
+        mask     (item-mask :ScmOwnsEnum expected)]
+    (is (= mask {:enums {:Scm {:val2 true}}}))
+    (is (doall (sp-filter-with-mask mask :ScmOwnsEnum original)))))
 
 (deftest update-tests
   (with-test-db simple-schema
@@ -842,7 +849,10 @@
                 :expected (scmlink {})}
                {:original (scmm {:identity " !" :vals []})
                 :updates  {:identity nil}
-                :expected (scmm {:vals []})}]]
+                :expected (scmm {:vals []})}
+               {:original (scmownsenum {:enums [(scm2 {:val1 42})]})
+                :updates  {:enums [(scm {:val2 53})]}
+                :expected (scmownsenum {:enums [(scm {:val2 53})]})}]]
       (doseq [{:keys [original updates expected] :as ex} exs]
         (let [actual (create! {:conn *conn*} original)]
           (is (= actual original)
