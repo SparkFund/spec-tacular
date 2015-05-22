@@ -7,7 +7,7 @@
         spark.sparkspec.datomic))
 
 (defspec Scm2
-  [val1 :is-a :long :unique :identity])
+  [val1 :is-a :long])
 
 (defspec Scm
   [val1 :is-a :string :unique :identity]
@@ -26,9 +26,8 @@
    [enums :is-many :ScmEnum]))
 
 (defspec ScmM
-  (:link
-   [identity :is-a :string :unique :identity]
-   [vals :is-many :Scm2]))
+  [identity :is-a :string :unique :identity]
+  (:link [vals :is-many :Scm2]))
 
 (defspec ScmParent
   (:link [scm :is-a :Scm]))

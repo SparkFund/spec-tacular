@@ -1,8 +1,12 @@
 (ns spark.sparkspec-test
-  (:require [clojure.core.typed :as t]
-            [clojure.data :refer [diff]])
   (:use spark.sparkspec
-        clojure.test))
+        clojure.test
+        spark.sparkspec.generators)
+  (:require [clojure.core.typed :as t]
+            [clojure.data :refer [diff]]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.properties :as prop]
+            [clojure.test.check.clojure-test :as ct]))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; defspec
@@ -12,10 +16,9 @@
   [val2 :is-a :string]
   [val3 :is-a :long :default-value 3]
   [val4 :is-a :keyword :default-value (fn [] :val)]
-  [val5 :is-a :TestSpec2])
+  [val5 :is-a :TestSpec3])
 
 (deftest test-TestSpec1
-
   (testing "valid"
     (is (some? (get-spec :TestSpec1)))
     (is (some? (get-spec :TestSpec1 :TestSpec1)))
@@ -41,10 +44,10 @@
   (testing "invalid"
     (is (not (testspec1? {:val1 3 :val2 "hi"}))
         "not a record")
-    (is (thrown-with-msg? java.lang.AssertionError #"is required" 
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"required" 
                           (testspec1 {:val1 nil}))
         "missing required field")
-    (is (thrown-with-msg? java.lang.AssertionError #"is required"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"required"
                           (testspec1 {:val2 1}))
         "missing required field")
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
@@ -56,18 +59,17 @@
 
 (defspec TestSpec2
   (:link [ts1 :is-a :TestSpec1]))
+(defspec TestSpec3)
 
 (deftest test-TestSpec2
   (is (doall (testspec2 {:ts1 (testspec1 {:val1 42})})))
 
   (testing "order of spec definition does not matter"
-    (is (testspec1? (testspec1 {:val1 1 :val5 (testspec2 {})}))))
+    (is (testspec1? (testspec1 {:val1 1 :val5 (testspec3)}))))
 
   (testing "links are not checked"
     (let [ts1 (i_TestSpec1. {::bad-key true})]
       (is (testspec2 {:ts1 ts1})))))
-
-(defspec TestSpec3)
 
 (defspec TestSpec4
   [val1 :is-a :boolean])
@@ -115,7 +117,7 @@
 
 (def ns-specs (namespace->specs *ns*))
 (deftest test-namespace->specs
-  (let [[a b both] ( 
+  (let [[a b both] (diff
                     (into #{} (map :name ns-specs))
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testenum :ES :ESParent :EnumFoo :EnumForward :A :B})]
@@ -125,25 +127,13 @@
 (defspec TestSpec6
   [enum :is-many :EnumFoo])
 
-#_(deftest test-is-many
-    (let [f (get-lazy-ctor :TestSpec6)]
-      (testing "is-many"
-        (is (checked-lazy-access
-             (get-spec :TestSpec6)
-             :enum [(enumforward) (enumforward)])
-            "checked-lazy-access")
-        (is (= [(enumforward) (enumforward)]
-               [(enumforward) (enumforward)]))
-        (is (= (:enum (f {:enum [(enumforward) (enumforward)]}))
-               (:enum (testspec6 {:enum [(enumforward) (enumforward)]})))
-            "equality"))))
-
 (defspec Link
   (:link
    [ts1 :is-a :TestSpec1]
    [ts2 :is-many :TestSpec2])
   [ts3 :is-a :TestSpec3]
-  [ts4 :is-many :TestSpec4])
+  [ts4 :is-many :TestSpec4]
+  [s1 :is-many :string])
 
 (deftest test-link
   (let [many [(testspec2) (testspec2 {:ts1 (testspec1 {:val1 42})})]
@@ -154,5 +144,35 @@
     (is (link? l))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a map"
                           (recursive-ctor :TestSpec2 many)))
-    (is (= (:ts2 l) many))))
+    (is (= (:ts2 l) many)))
 
+  (let [l (link {:s1 ["a" "b" "c"]})]
+    (is (link? l)))
+
+  (let [l (link {:ts3 nil})]
+    (is (link? l))
+    (is (not (:ts3 l)))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; random testing
+
+(defn prop-check-components
+  "property for verifying that check-component!, create!, and update! work correctly"
+  [spec-key]
+  (let [sp-gen (mk-spec-generator spec-key)
+        spec   (get-spec spec-key)
+        gen    (gen/bind sp-gen gen/return)
+        fields (map :name (:items spec))]
+    (prop/for-all [instance gen]
+      (every? #(check-component! spec % (get instance %)) fields))))
+
+(ct/defspec gen-TestSpec3 100 (prop-check-components :TestSpec3))
+(ct/defspec gen-TestSpec1 100 (prop-check-components :TestSpec1))
+(ct/defspec gen-TestSpec2 100 (prop-check-components :TestSpec2))
+(ct/defspec gen-TestSpec4 100 (prop-check-components :TestSpec4))
+(ct/defspec gen-TestSpec5 100 (prop-check-components :TestSpec5))
+(ct/defspec gen-testenum 100  (prop-check-components :testenum))
+(ct/defspec gen-ES 100        (prop-check-components :ES))
+(ct/defspec gen-ESParent 100  (prop-check-components :ESParent))
+(ct/defspec gen-TestSpec6 100 (prop-check-components :TestSpec6))
+(ct/defspec gen-Link 100      (prop-check-components :Link))

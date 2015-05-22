@@ -9,6 +9,7 @@
                  [io.pedestal/pedestal.jetty "0.3.0"]
                  [io.pedestal/pedestal.service "0.3.0"]
                  [io.pedestal/pedestal.service-tools "0.3.0"]
+                 [org.clojure/test.check "0.7.0"]
                  [ring/ring-core "1.3.0"]
                  [clj-http "0.9.1"]
                  [clojure-csv/clojure-csv "2.0.1"]

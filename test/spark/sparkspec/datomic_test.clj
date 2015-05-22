@@ -5,12 +5,16 @@
         spark.sparkspec.spec
         spark.sparkspec.datomic
         spark.sparkspec.test-utils
-        spark.sparkspec.test-specs)
+        spark.sparkspec.test-specs
+        spark.sparkspec.generators)
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :as sd]
             [spark.sparkspec.schema :as schema]
             [clojure.core.typed :as t]
-            [clojure.tools.macro :as m]))
+            [clojure.tools.macro :as m]
+            [clojure.test.check.properties :as prop]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.clojure-test :as ct]))
 
 (def simple-schema
   (cons schema/spec-tactular-map
@@ -37,7 +41,7 @@
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :Scm2)
-          td #(transaction-data spec %1 %2)]
+          td #(transaction-data nil spec %1 %2)]
       (testing "valid"
         (is (= (td si {:val1 125})
                [[:db/add gs :scm2/val1 125]]))
@@ -53,19 +57,23 @@
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :Scm)
-          td #(transaction-data spec %1 %2)]
+          td #(transaction-data nil spec %1 %2)]
       (testing "valid"
         (is (= (td si {:val1 "125" :val2 125})
                [[:db/add gs :scm/val1 "125"]
                 [:db/add gs :scm/val2 125]]))
         (is (= (td si {:multi ["125" "1"]})
-               [[:db/add gs :scm/multi "125"]
-                [:db/add gs :scm/multi "1"]]))
+               [[:db/add gs :scm/multi "1"]
+                [:db/add gs :scm/multi "125"]]))
         (is (= (td si {:val1 nil})
                []))
         (is (= (td (assoc si :multi ["1"]) {:multi ["125"]})
                [[:db/retract gs :scm/multi "1"]
                 [:db/add gs :scm/multi "125"]]))
+        (is (= (td (assoc si :multi ["" "125"]) {:multi [""]})
+               [[:db/retract gs :scm/multi "125"]]))
+        (is (= (td (assoc si :multi ["" "125"]) {:multi [""]})
+               [[:db/retract gs :scm/multi "125"]]))
         (is (= (td si {:scm2 {:db-ref {:eid 120} :val1 42}})
                [[:db/add gs :scm/scm2 120]])))
       (testing "invalid")))
@@ -74,7 +82,7 @@
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :ScmOwnsEnum)
-          td #(transaction-data spec %1 %2)
+          td #(transaction-data nil spec %1 %2)
           a-scm3 (assoc (scm3) :db-ref {:eid 5})
           a-scm2 (assoc (scm2) :db-ref {:eid 120})]
       (testing "valid"
@@ -99,14 +107,15 @@
         (is (= (td (assoc si :enums [a-scm2])
                    (assoc si :enums [(assoc a-scm2 :val1 6)]))
                [])
-            "does not update links"))
+            "does not update links")
+        (is (= (count (td si {:enum (scm2 {:val1 -1})})) 3)))
       (testing "invalid")))
 
   (testing "ScmLink"
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :ScmLink)
-          td #(transaction-data spec %1 %2)
+          td #(transaction-data nil spec %1 %2)
           a-scm  (assoc (scm {:val1 "hi"}) :db-ref {:eid 1})
           a-scmp (assoc (scmparent {:scm a-scm}) :db-ref {:eid 2})
           a-scml (assoc (scmlink {:val1 a-scmp}) :db-ref {:eid 3})]
@@ -117,7 +126,10 @@
                            _
                            [:db/add eid3 :scmparent/scm 1]] :seq)]
                         (and (= eid1 gs) (= eid2 eid3) true)
-                        :else res)))))
+                        :else res))))
+        (let [res (td a-scml (assoc a-scml :val1 nil))]
+          (is (= (get-in a-scml [:val1 :db-ref :eid]) 2))
+          (is (= res [[:db/retract 3 :scmlink/val1 2]]))))
       (testing "invalid"))))
 
 (deftest test-commit-sp-transactions
@@ -741,9 +753,9 @@
         [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
 #_(first (q :find :ScmM :in (db) :where [% {}]))
 
-(deftest test-create!
+(deftest test-create!1
   (with-test-db simple-schema
-    (let [e-soe (scmownsenum {:enums [(scm3) (scm3) (scm2 {:val1 123})]})
+    (let [e-soe (scmownsenum {:enums [(scm3) (scm2 {:val1 123})]})
           a-soe (create! {:conn *conn*} e-soe)]
       (is (not (empty? (:enums a-soe))))))
   (with-test-db simple-schema
@@ -792,7 +804,7 @@
             e-soe (-> (scmownsenum {})
                       (assoc :enums (for [s [se7]] (create! {:conn *conn*} s))))
             _ (is (= (type (:enums e-soe))
-                     clojure.lang.LazySeq))
+                     clojure.lang.PersistentVector))
             a-soe (create! {:conn *conn*} e-soe)
             _ (is (get-in (first (:enums a-soe)) [:db-ref :eid]))]))))
 
@@ -801,16 +813,43 @@
     (let [exs [(scm2 {:val1 1})
                (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
                (scm {:val1 "2" :scm2 {:val1 4}})
-               (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})
-               (scmparent {:scm {:val1 "2" :scm2 {:val1 4}}})
-               (scmlink {:val1 (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})
-               (scmlink {:link1 (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
-                         :val1  (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})
+               (scmparent {:scm (scm {:val1 "3" :scm2 {:val1 4}})})
+               (scmparent {:scm {:val1 "4" :scm2 {:val1 4}}})
+               (scmlink {:val1 (scmparent {:scm (scm {:val1 "5" :scm2 {:val1 4}})})})
+               (scmlink {:link1 (scm {:val1 "6" :scm2 (scm2 {:val1 1})})
+                         :val1  (scmparent {:scm (scm {:val1 "7.235" :scm2 {:val1 4}})})})
                (scmlink {:link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]})
-               (scmlink {:link1 (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
+               (scmlink {:link1 (scm {:val1 "7" :scm2 (scm2 {:val1 1})})
                          :link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]
-                         :val1  (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})]]
-      (doseq [ex exs] (is (doall (create! {:conn *conn*} ex)) (str ex))))))
+                         :val1  (scmparent {:scm (scm {:val1 "8" :scm2 {:val1 4}})})})
+               (scmlink{:val1 (scmparent{:scm (scm {:multi ["$" "J~"]  :val2 3 :val1 "K"})})
+                        :link1 (scm {:scm2 (scm2 {}) :multi [] :val2 -5 :val1 "Z"})})]]
+      (doseq [ex exs] (is (= (create! {:conn *conn*} ex) ex) (str ex))))))
+
+(deftest test-update!
+  (with-test-db simple-schema
+    (let [exs [{:original (scm {:multi ["" "N"]})
+                :updates  {:multi [""]}
+                :expected (scm {:multi [""]})}
+               {:original (scm {:val1 "C" :val2 -40 :multi [""] :scm2 {:val1 -7}})
+                :updates {:val2 9, :multi ["" "NN"]}
+                :expected (scm {:val1 "C" :val2 9 :multi ["" "NN"] :scm2 {:val1 -7}})}
+               {:original (scmownsenum {:enum nil :enums nil})
+                :updates {:enum (scm2 {:val1 -1})}
+                :expected (scmownsenum {:enum (scm2 {:val1 -1}) :enums nil})}
+               {:original (scmlink {:val1 (scmparent {:scm (scm {:val1 "!"})})})
+                :updates {:val1 nil}
+                :expected (scmlink {})}
+               {:original (scmm {:identity " !" :vals []})
+                :updates  {:identity nil}
+                :expected (scmm {:vals []})}]]
+      (doseq [{:keys [original updates expected] :as ex} exs]
+        (let [actual (create! {:conn *conn*} original)]
+          (is (= actual original)
+              (str "create!\n" (with-out-str (clojure.pprint/pprint ex))))
+          (let [actual (update! {:conn *conn*} actual updates)]
+            (is (= actual expected)
+                (str "update!\n" (with-out-str (clojure.pprint/pprint ex))))))))))
 
 (deftest test-link
   (with-test-db simple-schema
@@ -825,20 +864,9 @@
           ;; set up an ScmParent
           scmp (scmparent {:scm (scm {:val1 "3" :scm2 {:val1 5}})})
           scmp-db (create! {:conn *conn*} scmp)
-          ;; scmp-db (get-by-eid (db) scmp-eid)
-
-          ;; update the :val1 field of the ScmLink -- should be different than scmp
-          _ (assoc! {:conn *conn*} sl-db :val1 scmp-db)
-          sl-db (refresh-sl)
-          _ (is (not (= (:db-ref (:val1 sl-db)) 
-                        (:db-ref scmp-db))))
-
-          ;; check that the Scms are no longer linked
-          _ (assoc! {:conn *conn*} (:scm scmp-db) :val1 "4")
-          scmp-db (refresh {:conn *conn*} scmp-db)
-          sl-db (refresh-sl)
-          _ (is (= (-> scmp-db :scm :val1) "4"))
-          _ (is (= (-> sl-db :scmparent :scm :val1)) "3")
+          _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already in database"
+                                  (assoc! {:conn *conn*} sl-db :val1 scmp-db))
+                "adding another scm with the same identity errors -- tried to copy")
 
           ;; link a new Scm into :link1 -- should be passed by ref
           s (scm {:val1 "5" :scm2 {:val1 5}})
@@ -855,3 +883,75 @@
           _ (assoc! {:conn *conn*} s-db :val1 "6")
           sl-db (refresh-sl)
           _ (is (= (:val1 (:link1 sl-db)) "6"))])))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; random testing
+
+(defn check-create! [conn-ctx original]
+  (let [actual
+        ,(try (create! conn-ctx original)
+              (catch java.util.concurrent.ExecutionException e
+                (cond
+                  (re-find #"^java.lang.IllegalArgumentException: :db.error/datoms-conflict"
+                           (.getMessage e))
+                  :skip
+                  (re-find #"^java.lang.IllegalStateException: :db.error/unique-conflict"
+                           (.getMessage e))
+                  :skip
+                  :else (throw e)))
+              (catch clojure.lang.ExceptionInfo e
+                (re-find #"entity already in database" (.getMessage e))
+                :skip
+                :else (throw e)))]
+    (if (or (= :skip actual) (= actual original)) actual
+        (throw (ex-info "creation mismatch: output doesn't reflect input" 
+                        {:actual actual :expected original})))))
+
+(defn check-update!
+  "update-subset is a subset of key-vals from original-db-value to try updating.
+  returns {:ok true} or {:error {reasons}}"
+  [conn-ctx original updates]
+  (let [expected
+        ,(merge original updates)
+        actual
+        ,(try (update! conn-ctx original updates)
+              (catch java.util.concurrent.ExecutionException e
+                (if (or (re-find #"^java.lang.IllegalArgumentException: :db.error/datoms-conflict"
+                                 (.getMessage e))
+                        (re-find #"^java.lang.IllegalStateException: :db.error/unique-conflict"
+                                 (.getMessage e)))
+                  :skip (throw e))))]
+    (if (or (= :skip actual) (= expected actual)) actual
+        (throw (ex-info "update mismatch, output is not equivalent to input"
+                        {:original original :updates updates :actual actual})))))
+
+(defn prop-check-components
+  "property for verifying that check-component!, create!, and update! work correctly"
+  [spec-key]
+  (let [sp-gen (mk-spec-generator spec-key)
+        spec (get-spec spec-key)
+        gen (gen/bind sp-gen
+              (fn [sp]
+                (let [spec-name (:name (get-spec sp))]
+                  (gen/bind (if (:elements spec)
+                              (spec-subset (mk-spec-generator spec-name))
+                              (spec-subset sp-gen))
+                    (fn [sp-subset]
+                      (gen/return {:instance sp :subset sp-subset}))))))
+        fieldnames (map :name (:items spec))]
+    (prop/for-all
+     [{:keys [instance subset]} gen]
+     (with-test-db simple-schema
+       (let [conn-ctx {:conn *conn*}]
+         (do (every? #(check-component! spec % (get instance %)) fieldnames)
+             (let [created (check-create! conn-ctx instance)]
+               (or (= created :skip)
+                   (do (check-update! conn-ctx created subset) true)))))))))
+
+(ct/defspec gen-Scm2 10 (prop-check-components :Scm2))
+(ct/defspec gen-Scm 20 (prop-check-components :Scm))
+(ct/defspec get-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
+(ct/defspec get-ScmLink 20 (prop-check-components :ScmLink))
+(ct/defspec get-ScmM 10 (prop-check-components :ScmM))
+(ct/defspec get-ScmParent 10 (prop-check-components :ScmParent))
+(ct/defspec get-ScmMWrap 10 (prop-check-components :ScmMWrap))

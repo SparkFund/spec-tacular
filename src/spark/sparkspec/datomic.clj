@@ -606,10 +606,7 @@
   "recursively strip all entries of :db-ref {:eid ...} from sp.
    can be used for checking equality with a non-db value."
   [sp]
-  (walk/postwalk (fn [m] (if (get-in m [:db-ref :eid])
-                           (dissoc m :db-ref)
-                           m))
-                 sp))
+  (walk/postwalk (fn [m] (if (get m :db-ref) (dissoc m :db-ref) m)) sp))
 
 (t/ann ^:no-check remove-identity-items [SpecT SpecInstance -> SpecInstance])
 (defn remove-identity-items
@@ -900,36 +897,40 @@
 (t/defalias TransactionData (t/List (t/HVec [t/Keyword Long t/Keyword t/Any])))
 
 (t/ann ^:no-check transaction-data-item
-       [SpecT Long Item t/Any t/Any -> TransactionData])
+       [ConnCtx SpecT Long Item t/Any t/Any -> TransactionData])
 (defn transaction-data-item
-  [parent-spec parent-eid
+  [conn-ctx parent-spec parent-eid
    {iname :name required? :required? link? :link? [cardinality type] :type :as item}
    old new]
   (let [datomic-key (keyword (datomic-ns parent-spec) (name iname))]
     (letfn [(add [i] ;; adds i to field datomic-key in entity eid
               (when (not i)
-                (throw (ex-info "cannot add nil as a value"
-                                {:spec (:name parent-spec) :old old :new new})))
+                (throw (ex-info "cannot add nil" {:spec (:name parent-spec) :old old :new new})))
               (if-let [sub-eid (and link? (get-in i [:db-ref :eid]))]
                 ;; adding by reference
                 [[:db/add parent-eid datomic-key sub-eid]]
                 ;; adding by value
-                (if (= (recursiveness item) :non-rec)
-                  [[:db/add parent-eid datomic-key i]]
-                  (let [sub-eid  (db/tempid :db.part/user)
-                        sub-spec (get-spec (second (:type item)))
-                        sub-spec (if (:elements sub-spec)
-                                   (get-spec i) sub-spec)]
-                    (concat [[:db/add parent-eid datomic-key sub-eid]
-                             [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
-                            (transaction-data sub-spec {:db-ref {:eid sub-eid}} i))))))
+                (do (when (and conn-ctx (get-eid (db/db (:conn conn-ctx)) i))
+                      (throw (ex-info "entity already in database" {:entity i})))
+                    (if (= (recursiveness item) :non-rec)
+                      [[:db/add parent-eid datomic-key i]]
+                      (let [sub-eid  (db/tempid :db.part/user)
+                            sub-spec (get-spec (second (:type item)))
+                            sub-spec (if (:elements sub-spec)
+                                       (get-spec i) sub-spec)]
+                        (concat [[:db/add parent-eid datomic-key sub-eid]
+                                 [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
+                                (transaction-data conn-ctx sub-spec {:db-ref {:eid sub-eid}} i)))))))
             (retract [i] ;; removes i from field datomic-key in entity eid
+              (when (not i)
+                (throw (ex-info "cannot retract nil" {:spec (:name parent-spec) :old old :new new})))
               (when required?
                 (throw (ex-info "attempt to delete a required field"
                                 {:item item :field iname :spec parent-spec})))
-              (if link?
+              (if-let [eid (get-in i [:db-ref :eid])]
                 [[:db/retract parent-eid datomic-key (get-in i [:db-ref :eid])]]
-                [[:db/retract parent-eid datomic-key i]]))]
+                (do (when link? (throw (ex-info "retracted link missing eid" {:entity i})))
+                    [[:db/retract parent-eid datomic-key i]])))]
       (cond
         (= cardinality :one)
         ,(cond
@@ -937,9 +938,11 @@
            (some? old) (retract old)
            :else [])
         (= (recursiveness item) :non-rec)
-        ,(let [[adds deletes] (diff new old)]
-           (concat (mapcat retract deletes)
-                   (mapcat add adds)))
+        ,(do (when-not (apply distinct? nil new)
+               (throw (ex-info "adding identical" {:new new})))
+             (let [[adds deletes both] (diff (set new) (set old))]
+               (concat (mapcat retract deletes)
+                       (mapcat add adds))))
         :else
         ;; this is a bit tricky:
         ;; -- group things from old and new by eid, resulting in
@@ -951,6 +954,8 @@
         ;; -- new entities won't have eids, so just give them something unique
         ;;    to key on and add them
         (let [by-eids (group-by #(get-in % [:db-ref :eid] (gensym)) (concat old new))]
+          (when-not (apply distinct? nil new)
+            (throw (ex-info "adding identical" {:new new})))
           (->> (for [[_ [e1 & [e2]]] by-eids]
                  (if e2 []
                      (if (some #(identical? e1 %) old)
@@ -958,8 +963,8 @@
                (apply concat)))))))
 
 (t/ann ^:no-check transaction-data
-       [SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
-(defn transaction-data [spec old-si updates]
+       [ConnCtx SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
+(defn transaction-data [conn-ctx spec old-si updates]
   "Given a possibly nil, possibly out of date old entity.
    Returns the transaction data to do the desired updates to something of type spec."
   (let [eid (or (get-in old-si [:db-ref :eid])
@@ -968,7 +973,7 @@
       (throw (ex-info "spec missing" {:old old-si :updates updates})))
     (->> (for [{iname :name :as item} (:items spec)
                :when (contains? updates iname)]
-           (transaction-data-item spec eid item (iname old-si) (iname updates)))
+           (transaction-data-item conn-ctx spec eid item (iname old-si) (iname updates)))
          (apply concat)
          (#(if (get-in old-si [:db-ref :eid]) %
                (cons [:db/add eid :spec-tacular/spec (:name spec)] %)))
@@ -979,14 +984,14 @@
   "Creates a new instance of the given entity on the database in the given connection.
    Returns a representation of the newly created object.
    Get eid from object using :db-ref field.
-   Aborts if the entity already exists in the database (use assoc! or copy instead)."
+   Aborts if the entity already exists in the database (use assoc! instead)."
   [conn-ctx new-si]
   (let [db (db/db (:conn conn-ctx))
         spec (get-spec new-si)]
     (assert spec (str "could not find spec for " new-si))
-    ;; TODO: why does this check give false-positives
-    ;; (assert (not (get-eid db new-si)) (str "entity in db already " new-si))
-    (let [data (transaction-data spec nil new-si)
+    (when (or (get new-si :db-ref) (get-eid db new-si))
+      (throw (ex-info "entity already in database" {:entity new-si})))
+    (let [data (transaction-data conn-ctx spec nil new-si)
           eid  (commit-sp-transactions conn-ctx data)
           em   (db/entity (db/db (:conn conn-ctx)) eid)]
       (recursive-ctor (:name spec) em))))
@@ -1000,8 +1005,10 @@
    Get eid from object using :db-ref field.
    Aborts if the entity does not exist in the database (use create!)."
   [conn-ctx si & {:as updates}]
+  (when-not (:db-ref si)
+    (throw (ex-info "entity must be on database already" {:entity si})))
   (let [spec (get-spec si)
-        data (transaction-data spec si updates)
+        data (transaction-data conn-ctx spec si updates)
         eid  (commit-sp-transactions conn-ctx data)
         em   (db/entity (db/db (:conn conn-ctx)) eid)]
     (recursive-ctor (:name spec) em)))
@@ -1010,7 +1017,10 @@
 (defn update!
   [conn-ctx si-old si-new]
   (let [updates (mapcat (fn [[k v]] [k v]) si-new)]
-    (apply assoc! si-old updates)))
+    (if (empty? updates) si-old
+        (if (not (even? (count updates)))
+          (throw (ex-info "bad updates" {:updates updates}))
+          (apply assoc! conn-ctx si-old updates)))))
 
 (t/ann ^:no-check refresh (t/All [a] [ConnCtx a -> a]))
 (defn refresh

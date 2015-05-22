@@ -3,7 +3,9 @@
   (:require [clojure.core.typed :as t]
             [clojure.string :refer [lower-case]]
             [spark.sparkspec.grammar :refer [parse-spec parse-enum]]
-            [spark.sparkspec.spec :refer :all])
+            [spark.sparkspec.spec :refer :all]
+            [clojure.string :refer [join]] ;; TODO
+            [clojure.pprint :as pp])
   (:import (clojure.lang ASeq)))
 
 ;;;; TODO:
@@ -55,6 +57,7 @@
 
 (defn get-item [spec kw] 
   "returns the item in spec with the name kw"
+  (assert (keyword? kw) (str "not a keyword: " kw))
   (->> spec :items (filter #(= (name (:name %)) (name kw))) first))
 
 (defn coerce [spec kw val] 
@@ -120,8 +123,8 @@
          precondition :precondition}
         (get-item spec k)
         sname (:name spec)]
-    (when required?
-      (assert (some? v) (format "%s is required in %s" iname sname)))
+    (when (and required? (not (some? v)))
+      (throw (ex-info "missing required field" {:field iname :spec sname})))
     (when (and precondition (or required? v))
       (assert (precondition v)
               (format "precondition for %s failed for %s = %s" sname iname v)))
@@ -201,6 +204,7 @@
         {rec :rec non-rec :non-rec} (group-by recursiveness (:items spec))
         non-rec-kws (concat [:db-ref] (map :name non-rec))]
     `(do (deftype ~class-name [~'atmap]
+           clojure.lang.IRecord
            clojure.lang.IObj 
            ;; user doesn't get the map out again so it's fine to put the meta on it
            ;; stipulation -- meta of the SpecInstance is initially inherited from meta of the map
@@ -212,6 +216,7 @@
                (cond
                  (identical? val# not-found#) val#
                  (some #(= % k#) [~@non-rec-kws]) val#
+                 (not val#) val#
                  :else (let [{[arity# type#] :type} (get-item ~spec k#)]
                          (case arity#
                            :one (recursive-ctor type# val#)
@@ -237,6 +242,8 @@
                           (new clojure.lang.MapEntry ~iname (~iname ~gs))))]
                   (filter identity)
                   (seq)))
+           (empty [this#]
+             (throw (UnsupportedOperationException. (str "can't create empty " ~(:name spec)))))
            (assoc [this# k# v#] ;; TODO
              (let [{required?# :required? :as item#} (get-item ~spec k#)]
                (when (and required?# (not v#))
@@ -247,13 +254,21 @@
            #_(iterator [this#]
                (.iterator (apply hash-map (mapcat #(list (:name %) ((:name %) ~'atmap)) 
                                                   (:items ~spec)))))
-           #_(cons [this# e#]
-               (assoc this# (first e#) (second e#)))
+           (cons [this# e#]
+             (if (map? e#)
+               (reduce (fn [m# [k# v#]] (assoc m# k# v#)) this# e#)
+               (if (= (count e#) 2)
+                 (assoc this# (first e#) (second e#))
+                 (throw (ex-info (str "don't know how to cons " e#) {:this this# :e e#})))))
            (without [this# k#]
              (new ~class-name (dissoc ~'atmap k#))))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
-           (write-spec-instance ~spec v# w#)))))
+           (write-spec-instance ~spec v# w#))
+         (defmethod pp/simple-dispatch ~class-name [v#]
+           (pp/pprint-logical-block
+            :prefix ~(str "(" (lower-case (name (:name spec)))) :suffix ")"
+            (pp/simple-dispatch (.atmap v#)))))))
 
 (defn write-spec-instance [spec si ^java.io.Writer w]
   (letfn [(write-link [v w]
@@ -272,16 +287,16 @@
                           :one (write-value v link? w)
                           :many (do (.write w "[")
                                     (doseq [sub-v v]
-                                      (do (write-value sub-v link? w) (.write w ",")))
+                                      (do (write-value sub-v link? w) (.write w " ")))
                                     (.write w "]")))
-                        (.write w ","))
-                    (.write w "nil,")))))]
-    (do (.write w (str "#<" (name (:name spec)) "{"))
+                        (.write w " "))
+                    (.write w "nil ")))))]
+    (do (.write w (str "(" (lower-case (name (:name spec))) "{"))
         (if-let [ref (get-in si [:db-ref])]
           (.write w (str ":ref " ref ",")))
         (doseq [item (:items spec)]
           (write-item item w))
-        (.write w "}>"))))
+        (.write w "})"))))
 
 (defn spec->enum-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
@@ -336,8 +351,7 @@
   "walks a nested map structure, constructing proper instances from nested values.
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
   (letfn [(build-rec-item [{iname :name [arity sub-spec-name] :type link? :link?} sub-sp]
-            (letfn [(rec [sub] (->> (recursive-ctor sub-spec-name sub)
-                                    (#(if link? % (dissoc % :db-ref)))))]
+            (letfn [(rec [sub] (recursive-ctor sub-spec-name sub))]
               [iname (case arity :one (rec sub-sp) :many (map rec sub-sp))]))]
     (let [spec (get-spec spec-name orig-sp)
           sp   (or (database-coersion orig-sp) orig-sp)]
@@ -352,7 +366,7 @@
               sub-kvs (->> recs (keep (fn [{iname :name :as item}]
                                         (if-let [sub-sp (get sp iname)]
                                           (build-rec-item item sub-sp)))))]
-          (non-recursive-ctor (get-map-ctor spec-name) spec (into sp sub-kvs)))))))
+          (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs)))))))
 
 (defn- mk-checking-ctor [spec]
   "For use in macros, creates a constructor that checks
@@ -415,8 +429,7 @@
        ;; the "map ctor" for an enum means it's arg needs to 
        ;; be a tagged map or a record type of one of the enum's ctors.
        (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tacular/spec (:name spec))) [o#]
-         (let [subspec-name# (or (:spec-tacular/spec o#)
-                                 (:name (get-spec o#)))]
+         (let [subspec-name# (:name (get-spec o#))]
            (assert subspec-name#
                    (str "could not find spec for "o#))
            (assert (contains? ~(:elements spec) subspec-name#) 
