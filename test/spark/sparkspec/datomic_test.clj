@@ -12,6 +12,7 @@
             [spark.sparkspec.schema :as schema]
             [clojure.core.typed :as t]
             [clojure.tools.macro :as m]
+            [clojure.test.check :as tc]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.clojure-test :as ct]))
@@ -898,22 +899,8 @@
 ;; random testing
 
 (defn check-create! [conn-ctx original]
-  (let [actual
-        ,(try (create! conn-ctx original)
-              (catch java.util.concurrent.ExecutionException e
-                (cond
-                  (re-find #"^java.lang.IllegalArgumentException: :db.error/datoms-conflict"
-                           (.getMessage e))
-                  :skip
-                  (re-find #"^java.lang.IllegalStateException: :db.error/unique-conflict"
-                           (.getMessage e))
-                  :skip
-                  :else (throw e)))
-              (catch clojure.lang.ExceptionInfo e
-                (re-find #"entity already in database" (.getMessage e))
-                :skip
-                :else (throw e)))]
-    (if (or (= :skip actual) (= actual original)) actual
+  (let [actual (create! conn-ctx original)]
+    (if (= actual original) actual
         (throw (ex-info "creation mismatch: output doesn't reflect input" 
                         {:actual actual :expected original})))))
 
@@ -921,47 +908,29 @@
   "update-subset is a subset of key-vals from original-db-value to try updating.
   returns {:ok true} or {:error {reasons}}"
   [conn-ctx original updates]
-  (let [expected
-        ,(merge original updates)
-        actual
-        ,(try (update! conn-ctx original updates)
-              (catch java.util.concurrent.ExecutionException e
-                (if (or (re-find #"^java.lang.IllegalArgumentException: :db.error/datoms-conflict"
-                                 (.getMessage e))
-                        (re-find #"^java.lang.IllegalStateException: :db.error/unique-conflict"
-                                 (.getMessage e)))
-                  :skip (throw e))))]
-    (if (or (= :skip actual) (= expected actual)) actual
+  (let [expected (merge original updates)
+        actual   (update! conn-ctx original updates)]
+    (if (= expected actual) actual
         (throw (ex-info "update mismatch, output is not equivalent to input"
                         {:original original :updates updates :actual actual})))))
 
 (defn prop-check-components
   "property for verifying that check-component!, create!, and update! work correctly"
   [spec-key]
-  (let [sp-gen (mk-spec-generator spec-key)
-        spec (get-spec spec-key)
-        gen (gen/bind sp-gen
-              (fn [sp]
-                (let [spec-name (:name (get-spec sp))]
-                  (gen/bind (if (:elements spec)
-                              (spec-subset (mk-spec-generator spec-name))
-                              (spec-subset sp-gen))
-                    (fn [sp-subset]
-                      (gen/return {:instance sp :subset sp-subset}))))))
-        fieldnames (map :name (:items spec))]
-    (prop/for-all
-     [{:keys [instance subset]} gen]
-     (with-test-db simple-schema
-       (let [conn-ctx {:conn *conn*}]
-         (do (every? #(check-component! spec % (get instance %)) fieldnames)
-             (let [created (check-create! conn-ctx instance)]
-               (or (= created :skip)
-                   (do (check-update! conn-ctx created subset) true)))))))))
+  (with-test-db simple-schema
+    (let [spec     (get-spec spec-key)
+          gen      (instance-generator spec)
+          fields   (map :name (:items spec))
+          conn-ctx {:conn *conn*}]
+      (prop/for-all [{:keys [original updates]} gen]
+        (and (every? #(check-component! spec % (get original %)) fields)
+             (when-let [created (check-create! conn-ctx original)]
+               (or (= created :skip) (check-update! conn-ctx created updates))))))))
 
 (ct/defspec gen-Scm2 10 (prop-check-components :Scm2))
-(ct/defspec gen-Scm 20 (prop-check-components :Scm))
 (ct/defspec get-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
-(ct/defspec get-ScmLink 20 (prop-check-components :ScmLink))
 (ct/defspec get-ScmM 10 (prop-check-components :ScmM))
 (ct/defspec get-ScmParent 10 (prop-check-components :ScmParent))
 (ct/defspec get-ScmMWrap 10 (prop-check-components :ScmMWrap))
+(ct/defspec gen-Scm 20 (prop-check-components :Scm))
+(ct/defspec get-ScmLink 50 (prop-check-components :ScmLink))

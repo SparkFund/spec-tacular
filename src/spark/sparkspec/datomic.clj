@@ -15,6 +15,8 @@
 (t/typed-deps spark.sparkspec)
 
 (require '[datomic.api :as db])
+#_(require '[taoensso.timbre.profiling :as profiling
+             :refer (pspy pspy* profile defnp p p*)])
 
 (t/defalias Pattern (t/Map t/Any t/Any))
 (t/defalias Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
@@ -88,12 +90,12 @@
                            (filter #(case % (:spec-tacular/spec :db-ref :db/txInstant) false true)
                                    (keys em)))
            (throw (ex-info "bad entity in database" {:entity em})))
-         (doall (->> (for [{iname :name :as item} (:items spec)]
-                       [iname (get em (db-keyword spec iname))])
-                     (cons [:db-ref {:eid (:db/id em)}])
-                     (cons [:spec-tacular/spec (:name spec)])
-                     (filter second)
-                     (into {})))))))
+         (->> (for [{iname :name :as item} (:items spec)]
+                [iname (get em (db-keyword spec iname))])
+              (cons [:db-ref {:eid (:db/id em)}])
+              (cons [:spec-tacular/spec (:name spec)])
+              (filter second)
+              (into {}))))))
 
 (t/ann get-all-eids [datomic.db.DbId SpecT -> (t/ASeq Long)])
 (defn get-all-eids
@@ -495,7 +497,6 @@
         db (db/db (:conn conn-ctx))]
     (assert (not (get-eid db new-sp))
             "object must not already be in the db")
-    (check-complete! spec new-sp)
     (commit-sp-transactions conn-ctx (sp->transactions db new-sp))))
 
 (t/ann ^:no-check masked-create-sp!

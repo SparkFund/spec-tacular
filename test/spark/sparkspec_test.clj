@@ -4,6 +4,7 @@
         spark.sparkspec.generators)
   (:require [clojure.core.typed :as t]
             [clojure.data :refer [diff]]
+            [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.clojure-test :as ct]))
@@ -40,7 +41,10 @@
         (is (= (get-basis :TestSpec1) 
                [:val1 :val2 :val3 :val4 :val5]))
         (is (= (get-basis good)
-               [:val1 :val2 :val3 :val4 :val5])))))
+               [:val1 :val2 :val3 :val4 :val5]))))
+
+    (is (= (count (into #{} [(testspec1 {:val1 5}) (testspec1 {:val1 5})])) 1)))
+
   (testing "invalid"
     (is (not (testspec1? {:val1 3 :val2 "hi"}))
         "not a record")
@@ -151,7 +155,11 @@
 
   (let [l (link {:ts3 nil})]
     (is (link? l))
-    (is (not (:ts3 l)))))
+    (is (not (:ts3 l))))
+
+  (let [l1 (link {:ts3 (assoc (testspec3) :db-ref 1)})
+        l2 (link {:ts3 (assoc (testspec3) :db-ref 2)})]
+    (is (= l1 l2) "equality on by-value fields should ignore :db-ref")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
@@ -171,8 +179,8 @@
 (ct/defspec gen-TestSpec2 100 (prop-check-components :TestSpec2))
 (ct/defspec gen-TestSpec4 100 (prop-check-components :TestSpec4))
 (ct/defspec gen-TestSpec5 100 (prop-check-components :TestSpec5))
-(ct/defspec gen-testenum 100  (prop-check-components :testenum))
-(ct/defspec gen-ES 100        (prop-check-components :ES))
-(ct/defspec gen-ESParent 100  (prop-check-components :ESParent))
+(ct/defspec gen-testenum  100 (prop-check-components :testenum))
+(ct/defspec gen-ES        100 (prop-check-components :ES))
+(ct/defspec gen-ESParent  100 (prop-check-components :ESParent))
 (ct/defspec gen-TestSpec6 100 (prop-check-components :TestSpec6))
-(ct/defspec gen-Link 100      (prop-check-components :Link))
+(ct/defspec gen-Link      100 (prop-check-components :Link))

@@ -14,7 +14,8 @@
   (cons schema/spec-tactular-map
         (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
 
-(def ^{:doc "map of generators for primitive specs, by keyword name."}
+(def ^{:doc "map of generators for primitive specs, by keyword name."
+       :private true}
   prim-gens
   {:keyword (fn [_] gen/keyword)
    :string  (fn [_] gen/string-ascii)
@@ -111,3 +112,13 @@
   (let [spec-gen-env (mk-spec-generators #{spec-key} prim-gens)]
     ((get spec-gen-env spec-key) spec-gen-env)))
 
+(defn instance-generator [spec]
+  (let [sp-gen (mk-spec-generator (:name spec))]
+    (gen/bind sp-gen
+      (fn [sp]
+        (let [spec-name (:name (get-spec sp))]
+          (gen/bind (if (:elements spec)
+                      (spec-subset (mk-spec-generator spec-name))
+                      (spec-subset sp-gen))
+            (fn [sp-subset]
+              (gen/return {:original sp :updates sp-subset}))))))))

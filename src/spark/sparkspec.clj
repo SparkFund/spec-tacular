@@ -29,32 +29,6 @@
 (t/ann ^:no-check spark.sparkspec/get-ctor [t/Keyword -> [(t/Map t/Any t/Any) -> SpecInstance]])
 (t/ann ^:no-check spark.sparkspec/get-type [(t/U SpecInstance t/Keyword) -> (t/Map t/Keyword t/Any)])
 
-;;;; There is no existing Java class for a primitive byte array
-(def Bytes (class (byte-array [1 2])))
-
-(defrecord SpecType [name type type-symbol coercion])
-
-(def type-map
-  (reduce
-   (fn [m [n t ts c]]
-     (assoc m n (map->SpecType {:name n :type t :type-symbol ts :coercion c})))
-          {}
-          [[:keyword clojure.lang.Keyword `clojure.lang.Keyword keyword]
-           [:string String `String nil] ; str Q: Do we lean on "str" coercion?
-           [:boolean Boolean `Boolean boolean]
-           [:long Long `Long long]
-           [:bigint java.math.BigInteger `java.math.BigInteger bigint]
-           [:float Float `Float float]
-           [:double Double `Double double]
-           [:bigdec java.math.BigDecimal `java.math.BigDecimal bigdec]
-           [:instant java.util.Date `java.util.Date nil]
-           [:uuid java.util.UUID `java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
-           [:uri java.net.URI `java.net.URI nil]
-           [:bytes Bytes `Bytes nil]
-           ;; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
-           ;; TODO: Longs don't seem to be datomic.db.DbIds
-           [:ref Object `Object nil]])) 
-
 (defn get-item [spec kw] 
   "returns the item in spec with the name kw"
   (assert (keyword? kw) (str "not a keyword: " kw))
@@ -212,7 +186,7 @@
            (withMeta [this# ~gs] (new ~class-name (with-meta ~'atmap ~gs) (atom {})))
            clojure.lang.ILookup
            (valAt [this# k# not-found#]
-             (or ;; (k# (deref ~'cache))
+             (or (k# (deref ~'cache))
                  (let [val# (.valAt ~'atmap k# not-found#)]
                    (cond
                      (identical? val# not-found#) val#
@@ -228,13 +202,22 @@
            clojure.lang.IPersistentMap
            (equiv ~'[this o]
              (and (instance? ~class-name ~'o)
-                  ~@(for [{iname :name [arity sub-sp-nm] :type :as item}
+                  (let [ref1# (get ~'this :db-ref), ref2# (get ~'o :db-ref)]
+                    (or (not ref1#) (not ref2#)
+                        (= ref1# ref2#)))
+                  ~@(for [{iname :name [arity sub-sp-nm] :type link? :link? :as item}
                           (:items spec)]
-                      (let [v1 (gensym), v2 (gensym)]
+                      (let [v1 (gensym), v2 (gensym), l (gensym), m (gensym)
+                            remove-ref #(if (or link? (primitive? sub-sp-nm))
+                                          % `(dissoc ~% :db-ref))]
                         `(let [~v1 (~iname ~'this), ~v2 (~iname ~'o)]
                            ~(case arity
-                              :one `(= ~v1 ~v2)
-                              :many `(and (every? (fn [l#] (some #(= l# %) ~v1)) ~v2)
+                              :one `(= ~(remove-ref v1) ~(remove-ref v2))
+                              :many `(and (every?
+                                           (fn [~l]
+                                             (some (fn [~m] (= ~(remove-ref l) ~(remove-ref m)))
+                                                   ~v1))
+                                           ~v2)
                                           (= (count ~v1) (count ~v2)))))))))
            (entryAt [this# k#]
              (let [v# (.valAt this# k# this#)]
@@ -257,7 +240,11 @@
                (when (and (= arity# :many) (not (every? identity v#)))
                  (throw (ex-info "invalid value for arity :many"
                                  {:entity this# :field k# :value v#})))
-               (new ~class-name (assoc ~'atmap k# v#) (atom {}))))
+               (new ~class-name
+                    (reduce
+                     (fn [m# [k1# v1#]] (assoc m# k1# v1#))
+                     ~'atmap (conj (deref ~'cache) [k# v#])) ;; order important - k#/v# win
+                    (atom {}))))
            (containsKey [this# k#]
              (not (identical? this# (.valAt ~'atmap k# this#))))
            (iterator [this#]
@@ -269,7 +256,15 @@
                  (assoc this# (first e#) (second e#))
                  (throw (ex-info (str "don't know how to cons " e#) {:this this# :e e#})))))
            (without [this# k#]
-             (new ~class-name (dissoc ~'atmap k#) (atom {}))))
+             (new ~class-name (dissoc ~'atmap k#) (atom {})))
+           clojure.lang.IHashEq
+           (hasheq [this#]
+             (bit-xor ~(hash class-name)
+                      (clojure.lang.APersistentMap/mapHasheq this#)))
+           (hashCode [this#]
+             (clojure.lang.APersistentMap/mapHash this#))
+           (equals [this# ~gs]
+             (clojure.lang.APersistentMap/mapEquals this# ~gs)))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
            (write-spec-instance ~spec v# w#))
@@ -278,12 +273,13 @@
             :prefix ~(str "(" (lower-case (name (:name spec)))) :suffix ")"
             (pp/simple-dispatch (.atmap v#)))))))
 
+;; TODO: this would be better as a function over strings, so we could
+;; use join to make nice spacing
 (defn write-spec-instance [spec si ^java.io.Writer w]
   (letfn [(write-link [v w]
-            (if-let [eid (get-in v [:db-ref :eid])]
-              (do (.write w "<link ")
-                  (.write w (str eid))
-                  (.write w ">"))
+            (if-let [ref (get-in v :db-ref)]
+              (let [spec-name (:name (get-spec v))]
+                (.write w (str "(" spec-name " " ref ")")))
               (print-method v w)))
           (write-value [v link? w]
             (if link? (write-link v w) (print-method v w)))
@@ -301,7 +297,7 @@
                     (.write w "nil ")))))]
     (do (.write w (str "(" (lower-case (name (:name spec))) "{"))
         (if-let [ref (get-in si [:db-ref])]
-          (.write w (str ":ref " ref ",")))
+          (.write w (str ":db-ref " ref ",")))
         (doseq [item (:items spec)]
           (write-item item w))
         (.write w "})"))))
@@ -358,23 +354,25 @@
 (defn recursive-ctor [spec-name orig-sp]
   "walks a nested map structure, constructing proper instances from nested values.
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
-  (letfn [(build-rec-item [{iname :name [arity sub-spec-name] :type link? :link?} sub-sp]
-            (letfn [(rec [sub] (recursive-ctor sub-spec-name sub))]
-              [iname (case arity :one (rec sub-sp) :many (map rec sub-sp))]))]
-    (let [spec (get-spec spec-name orig-sp)
-          sp   (or (database-coersion orig-sp) orig-sp)]
-      (when-not (and spec sp)
-        (throw (ex-info (str "cannot create " (name spec-name)) {:sp orig-sp})))
-      (when-not (instance? clojure.lang.IPersistentMap sp)
-        (throw (ex-info "sp is not a map" {:spec (:name spec) :sp sp})))
-      (if (if-let [spec-class (get-spec-class spec-name)]
-            (instance? spec-class sp))
-        sp
-        (let [{recs :rec non-recs :non-rec} (group-by recursiveness (:items spec))
-              sub-kvs (->> recs (keep (fn [{iname :name :as item}]
-                                        (if-let [sub-sp (get sp iname)]
-                                          (build-rec-item item sub-sp)))))]
-          (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs)))))))
+  (let [spec (get-spec spec-name orig-sp)
+        sp   (or (database-coersion orig-sp) orig-sp)]
+    (when-not (and spec sp)
+      (throw (ex-info (str "cannot create " (name spec-name)) {:sp orig-sp})))
+    (when-not (instance? clojure.lang.IPersistentMap sp)
+      (throw (ex-info "sp is not a map" {:spec (:name spec) :sp sp})))
+    (if (if-let [spec-class (get-spec-class spec-name)]
+          (instance? spec-class sp))
+      sp
+      (let [{recs :rec non-recs :non-rec}
+            (group-by recursiveness (:items spec))
+            sub-kvs
+            (->> recs (keep (fn [{iname :name [arity sub-spec-name]
+                                  :type link? :link? :as item}]
+                              (if-let [sub-sp (get sp iname)]
+                                [iname (case arity
+                                         :one (recursive-ctor sub-spec-name sub-sp)
+                                         :many (map #(recursive-ctor sub-spec-name %) sub-sp))]))))]
+        (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs))))))
 
 (defn- mk-checking-ctor [spec]
   "For use in macros, creates a constructor that checks
@@ -402,15 +400,10 @@
              (fn [items] (doall (map (fn [item] (update-in item [:default-value] eval)) items)))))
 
 (defn- mk-get-spec [spec]
-  (let [gs (gensym), o (gensym), rest (gensym),
-        body `(if (empty? ~rest) ~gs
-                  (if-let [rest-spec# (apply get-spec ~rest)]
-                    (if (= ~gs rest-spec#) ~gs
-                        (throw (ex-info "spec mismatch" {:objects (cons ~o ~rest)})))
-                    ~gs))]
+  (let [gs (gensym)]
     `(let [~gs (eval-default-values ~spec)]
-       (defmethod get-spec ~(:name spec) [~o & ~rest] ~body)
-       (defmethod get-spec ~(symbol (str "i_" (name (:name spec)))) [~o & ~rest] ~body))))
+       (defmethod get-spec ~(:name spec) [& _#] ~gs)
+       (defmethod get-spec ~(symbol (str "i_" (name (:name spec)))) [& _#] ~gs))))
 
 (defn- mk-get-spec-class [spec]
   (let [class-name (symbol (str "i_" (name (:name spec))))]
@@ -424,7 +417,9 @@
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
        (defmethod get-map-ctor ~(symbol (str "i_" (name (:name spec)))) [_#] ~fac-sym))))
 
-(defn- mk-enum-get-spec [spec]
+;; when calling get-spec on an enum, try using the extra args to narrow down the spec
+;; i.e. it's not always `spec` being returned if we can do better
+(defn- mk-enum-get-spec [spec] 
   `(defmethod get-spec ~(:name spec) [o# & rest#]
      (if-let [rest-spec# (and (not (empty? rest#)) (apply get-spec rest#))]
        (if (some #(= (:name rest-spec#) %) (:elements ~spec)) rest-spec#
