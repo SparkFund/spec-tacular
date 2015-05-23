@@ -264,34 +264,43 @@
              (clojure.lang.APersistentMap/mapEquals this# ~gs)))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
-           (.write w# (spec-instance->str ~spec v#)))
+           (.write w# (spec-instance->str ~spec v# '~(ns-name *ns*))))
          (defmethod pp/simple-dispatch ~class-name [v#]
            (pp/pprint-logical-block
-            :prefix ~(str "(" (lower-case (name (:name spec))) " ") :suffix ")"
+            :prefix (str "(" (resolved-ctor-name ~spec '~(ns-name *ns*)) " ") :suffix ")"
             (pp/simple-dispatch (merge (.atmap v#) (deref (.cache v#)))))))))
 
-(defn spec-instance->str [spec si]
+(defn resolved-ctor-name [spec ns]
+  (let [ctor-name (symbol (lower-case (name (:name spec))))]
+    (if (contains? (ns-refers *ns*) ctor-name) ctor-name
+        (if-let [alias (some->> (ns-aliases *ns*)
+                                (some (fn [[short long]] (and (= (ns-name long) ns) short))))]
+          (str alias "/" ctor-name)
+          (str ns    "/" ctor-name)))))
+
+(defn spec-instance->str [spec si ns]
   "returns a string representation of spec instance si suitable for printing"
-  (letfn [(write-value [v link?]
-            (if-let [ref (and link? (get v :db-ref))]
-              (let [spec-name (lower-case (name (:name (get-spec v))))]
-                (str "(" spec-name " " {:db-ref ref} ")"))
-              (with-out-str (print-method v *out*))))
-          (write-item [{iname :name link? :link? [c t] :type :as item}]
-            (when (contains? si iname)
-              (->> (if-let [v (iname si)]
-                     (case c
-                       :one (write-value v link?)
-                       :many (str "[" (->> v (map #(write-value % link?)) (join " ")) "]"))
-                     "nil")
-                   (str iname " "))))]
-    (str "(" (lower-case (name (:name spec))) " {"
-         (->> (:items spec)
-              (map #(write-item %))
-              (cons (if-let [ref (get si :db-ref)] (str ":db-ref " ref)))
-              (filter identity)
-              (join " "))
-         "})")))
+  (let [ctor-name (resolved-ctor-name spec ns)]
+    (letfn [(write-value [v link?]
+              (if-let [ref (and link? (get v :db-ref))]
+                (let [spec-name (lower-case (name (:name (get-spec v))))]
+                  (str "(" ctor-name " " {:db-ref ref} ")"))
+                (with-out-str (print-method v *out*))))
+            (write-item [{iname :name link? :link? [c t] :type :as item}]
+              (when (contains? si iname)
+                (->> (if-let [v (iname si)]
+                       (case c
+                         :one (write-value v link?)
+                         :many (str "[" (->> v (map #(write-value % link?)) (join " ")) "]"))
+                       "nil")
+                     (str iname " "))))]
+      (str "(" ctor-name " {"
+           (->> (:items spec)
+                (map #(write-item %))
+                (cons (if-let [ref (get si :db-ref)] (str ":db-ref " ref)))
+                (filter identity)
+                (join " "))
+           "})"))))
 
 (defn spec->enum-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
