@@ -879,7 +879,8 @@
                        `(if (instance? ~t-s ~result) ~result
                             ~(err result t-s))
                        `(if (instance? java.lang.Long ~result)
-                          (let [e# (db/entity ~db ~result)]
+                          (let [e# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
+                                    (db/entity ~db ~result) ~t-s)]
                             (recursive-ctor ~t-kw e#))
                           ~(err result t-s)))))]
     `(let [check# (t/ann-form
