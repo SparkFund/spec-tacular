@@ -264,40 +264,43 @@
              (clojure.lang.APersistentMap/mapEquals this# ~gs)))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
-           (write-spec-instance ~spec v# w#))
+           (.write w# (spec-instance->str ~spec v# '~(ns-name *ns*))))
          (defmethod pp/simple-dispatch ~class-name [v#]
            (pp/pprint-logical-block
-            :prefix ~(str "(" (lower-case (name (:name spec)))) :suffix ")"
-            (pp/simple-dispatch (.atmap v#)))))))
+            :prefix (str "(" (resolved-ctor-name ~spec '~(ns-name *ns*)) " ") :suffix ")"
+            (pp/simple-dispatch (merge (.atmap v#) (deref (.cache v#)))))))))
 
-;; TODO: this would be better as a function over strings, so we could
-;; use join to make nice spacing
-(defn write-spec-instance [spec si ^java.io.Writer w]
-  (letfn [(write-link [v w]
-            (if-let [ref (get-in v :db-ref)]
-              (let [spec-name (:name (get-spec v))]
-                (.write w (str "(" spec-name " " ref ")")))
-              (print-method v w)))
-          (write-value [v link? w]
-            (if link? (write-link v w) (print-method v w)))
-          (write-item [{iname :name link? :link? [c t] :type :as item} w]
-            (when (contains? si iname)
-              (do (.write w (str ":" (name iname) " "))
-                  (if-let [v (iname si)]
-                    (do (case c
-                          :one (write-value v link? w)
-                          :many (do (.write w "[")
-                                    (doseq [sub-v v]
-                                      (do (write-value sub-v link? w) (.write w " ")))
-                                    (.write w "]")))
-                        (.write w " "))
-                    (.write w "nil ")))))]
-    (do (.write w (str "(" (lower-case (name (:name spec))) "{"))
-        (if-let [ref (get-in si [:db-ref])]
-          (.write w (str ":db-ref " ref ",")))
-        (doseq [item (:items spec)]
-          (write-item item w))
-        (.write w "})"))))
+(defn resolved-ctor-name [spec ns]
+  (let [ctor-name (symbol (lower-case (name (:name spec))))]
+    (if (contains? (ns-refers *ns*) ctor-name) ctor-name
+        (if-let [alias (some->> (ns-aliases *ns*)
+                                (some (fn [[short long]] (and (= (ns-name long) ns) short))))]
+          (str alias "/" ctor-name)
+          (str ns    "/" ctor-name)))))
+
+(defn spec-instance->str [spec si ns]
+  "returns a string representation of spec instance si suitable for printing"
+  (let [ctor-name (resolved-ctor-name spec ns)]
+    (letfn [(write-value [v link?]
+              (if-let [ref (and link? (get v :db-ref))]
+                (let [spec-name (lower-case (name (:name (get-spec v))))]
+                  (str "(" ctor-name " " {:db-ref ref} ")"))
+                (with-out-str (print-method v *out*))))
+            (write-item [{iname :name link? :link? [c t] :type :as item}]
+              (when (contains? si iname)
+                (->> (if-let [v (iname si)]
+                       (case c
+                         :one (write-value v link?)
+                         :many (str "[" (->> v (map #(write-value % link?)) (join " ")) "]"))
+                       "nil")
+                     (str iname " "))))]
+      (str "(" ctor-name " {"
+           (->> (:items spec)
+                (map #(write-item %))
+                (cons (if-let [ref (get si :db-ref)] (str ":db-ref " ref)))
+                (filter identity)
+                (join " "))
+           "})"))))
 
 (defn spec->enum-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
@@ -362,14 +365,13 @@
           (instance? spec-class sp))
       sp
       (let [{recs :rec non-recs :non-rec}
-            (group-by recursiveness (:items spec))
+            ,(group-by recursiveness (:items spec))
             sub-kvs
-            (->> recs (keep (fn [{iname :name [arity sub-spec-name]
-                                  :type link? :link? :as item}]
-                              (if-let [sub-sp (get sp iname)]
-                                [iname (case arity
-                                         :one (recursive-ctor sub-spec-name sub-sp)
-                                         :many (map #(recursive-ctor sub-spec-name %) sub-sp))]))))]
+            ,(->> recs (keep (fn [{iname :name [arity sub-spec-name] :type :as item}]
+                               (if-let [sub-sp (get sp iname)]
+                                 [iname (case arity
+                                          :one (recursive-ctor sub-spec-name sub-sp)
+                                          :many (map #(recursive-ctor sub-spec-name %) sub-sp))]))))]
         (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs))))))
 
 (defn- mk-checking-ctor [spec]
@@ -417,12 +419,13 @@
 
 ;; when calling get-spec on an enum, try using the extra args to narrow down the spec
 ;; i.e. it's not always `spec` being returned if we can do better
-(defn- mk-enum-get-spec [spec] 
-  `(defmethod get-spec ~(:name spec) [o# & rest#]
-     (if-let [rest-spec# (and (not (empty? rest#)) (apply get-spec rest#))]
-       (if (some #(= (:name rest-spec#) %) (:elements ~spec)) rest-spec#
-           (throw (ex-info "spec mismatch" {:objects (cons o# rest#)})))
-       ~spec)))
+(defn- mk-enum-get-spec [spec]
+  (let [elements (:elements spec)]
+    `(defmethod get-spec ~(:name spec) [o# & [rest#]]
+       (if-let [rest-spec# (and rest# (get-spec rest#))]
+         (if (some #(= (:name rest-spec#) %) [~@elements])
+           rest-spec# (throw (ex-info "spec mismatch" {:objects (cons o# rest#)})))
+         ~spec))))
 
 (defn- mk-enum-get-map-ctor [spec]
   (let [fac-sym (symbol (str "map->i_" (name (:name spec)) "-fixed"))]

@@ -148,7 +148,8 @@
     (is (link? l))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a map"
                           (recursive-ctor :TestSpec2 many)))
-    (is (= (:ts2 l) many)))
+    (is (= (:ts2 l) many))
+    (is (doall (with-out-str (prn l)))))
 
   (let [l (link {:s1 ["a" "b" "c"]})]
     (is (link? l)))
@@ -172,7 +173,8 @@
         gen    (gen/bind sp-gen gen/return)
         fields (map :name (:items spec))]
     (prop/for-all [instance gen]
-      (every? #(check-component! spec % (get instance %)) fields))))
+      (and (every? #(check-component! spec % (get instance %)) fields)
+           (do (with-out-str (prn instance)) true)))))
 
 (ct/defspec gen-TestSpec3 100 (prop-check-components :TestSpec3))
 (ct/defspec gen-TestSpec1 100 (prop-check-components :TestSpec1))
