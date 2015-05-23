@@ -365,14 +365,13 @@
           (instance? spec-class sp))
       sp
       (let [{recs :rec non-recs :non-rec}
-            (group-by recursiveness (:items spec))
+            ,(group-by recursiveness (:items spec))
             sub-kvs
-            (->> recs (keep (fn [{iname :name [arity sub-spec-name]
-                                  :type link? :link? :as item}]
-                              (if-let [sub-sp (get sp iname)]
-                                [iname (case arity
-                                         :one (recursive-ctor sub-spec-name sub-sp)
-                                         :many (map #(recursive-ctor sub-spec-name %) sub-sp))]))))]
+            ,(->> recs (keep (fn [{iname :name [arity sub-spec-name] :type :as item}]
+                               (if-let [sub-sp (get sp iname)]
+                                 [iname (case arity
+                                          :one (recursive-ctor sub-spec-name sub-sp)
+                                          :many (map #(recursive-ctor sub-spec-name %) sub-sp))]))))]
         (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs))))))
 
 (defn- mk-checking-ctor [spec]
@@ -420,12 +419,13 @@
 
 ;; when calling get-spec on an enum, try using the extra args to narrow down the spec
 ;; i.e. it's not always `spec` being returned if we can do better
-(defn- mk-enum-get-spec [spec] 
-  `(defmethod get-spec ~(:name spec) [o# & rest#]
-     (if-let [rest-spec# (and (not (empty? rest#)) (apply get-spec rest#))]
-       (if (some #(= (:name rest-spec#) %) (:elements ~spec)) rest-spec#
-           (throw (ex-info "spec mismatch" {:objects (cons o# rest#)})))
-       ~spec)))
+(defn- mk-enum-get-spec [spec]
+  (let [elements (:elements spec)]
+    `(defmethod get-spec ~(:name spec) [o# & [rest#]]
+       (if-let [rest-spec# (and rest# (get-spec rest#))]
+         (if (some #(= (:name rest-spec#) %) [~@elements])
+           rest-spec# (throw (ex-info "spec mismatch" {:objects (cons o# rest#)})))
+         ~spec))))
 
 (defn- mk-enum-get-map-ctor [spec]
   (let [fac-sym (symbol (str "map->i_" (name (:name spec)) "-fixed"))]

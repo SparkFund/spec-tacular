@@ -605,6 +605,9 @@
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
 (deftest query-tests
+  (is (= (parse-query '(:find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
+         {:f '[?a] :db '(db) :wc '[[:ScmParent {:scm {:val2 ?a}}]]}))
+
   (with-test-db simple-schema
     (is (= #{} (->> (q :find ?a :in (db) :where
                        [:ScmParent {:scm {:val2 ?a}}])))
@@ -617,28 +620,28 @@
 
     (testing "primitive data"
       (is (= #{[1] [2]}
-             (q :find [?a] :in (db) :where
+             (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val2 ?a}}]))
           "simple one-attribute returns (a ?-prefixed symbol isn't needed- just idiomatic cf datomic)")
       (is (= #{[1 "a"] [2 "b"]}
-             (q :find [?a ?b] :in (db) :where
+             (q :find ?a ?b :in (db) :where
                 [:ScmParent {:scm {:val1 ?b :val2 ?a}}]))
           "multiple attribute returns")
       (is (= #{[1]}
-             (q :find [?a] :in (db) :where
+             (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val1 "a" :val2 ?a}}]))
           "can use literals in the pattern to fix values")
       (is (= #{["b"]}
              (let [two 2]
-               (q :find [?a] :in (db) :where 
+               (q :find ?a :in (db) :where 
                   [:ScmParent {:scm {:val1 ?a :val2 two}}])))
           "can use regular variables to fix values")
       (is (= #{["b"]}
-             (q :find [?a] :in (db) :where
+             (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val1 ?a :val2 (let [?a 2] ?a)}}]))
           "return variables respect lexical scope and don't clobber lets")
       (is (= #{["b"]}
-             (q :find [?a] :in (db) :where
+             (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val1 ?a :val2 ((fn [?a] ?a) 2)}}]))
           "return variables respect lexical scope and don't clobber fns"))
 
@@ -650,7 +653,7 @@
 
         (let [a-scm2 (->> (q :find :Scm2 :in (db) :where
                              [:Scm {:scm2 %}])
-                          first)]
+                          ffirst)]
           (is (= (:val1 a-scm2) 5)
               "can use keywords on returned entities")
           (is (not (:bad-kw a-scm2)))
@@ -658,13 +661,13 @@
                    (instance? java.lang.Long (:eid (:db-ref a-scm2))))
               "allow :db-ref keyword access"))
         
-        (let [a-scm (first (q :find :Scm :in (db) :where [% {:scm2 [:Scm2 {:val1 5}]}]))]
+        (let [a-scm (ffirst (q :find :Scm :in (db) :where [% {:scm2 [:Scm2 {:val1 5}]}]))]
           (testing "equality on returned entities"
             (is (= a-scm e-scm))
             (is (= e-scm a-scm))))
         
         (let [[a-scm a-scm2]
-              ,(->> (q :find [:Scm :Scm2] :in (db) :where
+              ,(->> (q :find :Scm :Scm2 :in (db) :where
                        [%1 {:scm2 %2}])
                     first)]
           (testing "equality on returned sub-entities"
@@ -678,7 +681,7 @@
         (testing "is-many"
           (let [e-scmm (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})
                 scmm-eid (create-sp! {:conn *conn*} e-scmm)
-                a-scmm1 (first (q :find :ScmM :in (db) :where [% {:identity "hi"}]))
+                a-scmm1 (ffirst (q :find :ScmM :in (db) :where [% {:identity "hi"}]))
                 a-scmm2 (recursive-ctor :ScmM (db/entity (db) scmm-eid))]
             (is (= a-scmm1 e-scmm))
             (is (= a-scmm2 e-scmm)))
@@ -687,7 +690,7 @@
                      {:name "scmwrap"
                       :val (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})})
                 esw-id (create-sp! {:conn *conn*} esw)
-                asw1 (first (q :find :ScmM :in (db) :where [:ScmMWrap {:name "scmwrap" :val %}]))
+                asw1 (ffirst (q :find :ScmM :in (db) :where [:ScmMWrap {:name "scmwrap" :val %}]))
                 asw2 (:val (recursive-ctor :ScmMWrap (db/entity (db) esw-id)))]
             ;; (is (= asw1 esw) "returned from query equality")
             (testing "lazy-ctor"
@@ -759,7 +762,7 @@
 ;; TODO bad syntax
 #_(sd/q :find :Transfer :in db :where
         [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
-#_(first (q :find :ScmM :in (db) :where [% {}]))
+#_(ffirst (q :find :ScmM :in (db) :where [% {}]))
 
 (deftest test-create!1
   (with-test-db simple-schema
@@ -772,7 +775,7 @@
                               :enum (scm2 {:val1 123})))]
       (is (= (q :find :long :in (db) :where
                 [:ScmOwnsEnum {:enum [:Scm2 {:val1 %}]}])
-             #{123})
+             #{[123]})
           "can update to change an enum field from one to another")))
   (testing "many enums"
     (with-test-db simple-schema

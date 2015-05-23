@@ -10,13 +10,12 @@
   (:require [clojure.core.typed :as t :refer [for]]
             [clojure.data :only diff]
             [clojure.tools.macro :as m]
-            [clojure.walk :as walk]))
+            [clojure.walk :as walk]
+            [clojure.core.match :refer [match]]))
 
 (t/typed-deps spark.sparkspec)
 
 (require '[datomic.api :as db])
-#_(require '[taoensso.timbre.profiling :as profiling
-             :refer (pspy pspy* profile defnp p p*)])
 
 (t/defalias Pattern (t/Map t/Any t/Any))
 (t/defalias Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
@@ -209,11 +208,6 @@
                         [(get-spec (get-in spec [:elements sub-name]))
                          (get mask sub-name)])
                       [spec mask])
-        extra-keys (clojure.set/difference (into #{} (keys sp)) ; we could check for just non-nil extra keys if we had to for some reason. starting with pickier for now.
-                                           (into #{:db-ref} ; this extra key is fine.
-                                                 (map :name (:items spec))))
-        _ (assert (empty? extra-keys)
-                  (str (:name spec) " has extra keys not in the spec: " extra-keys))
         eid (get-eid db sp)
         db-value (and eid (get-by-eid db eid (:name spec)))
         eid (or eid (db/tempid :db.part/user))]
@@ -505,7 +499,6 @@
   "Ensures sp is not in the db prior to creating. aborts if so."
   [conn-ctx sp mask]
   (let [spec (get-spec sp)
-        _ (check-complete! spec sp)
         db (db/db (:conn conn-ctx))
         _ (assert (not (get-eid db sp))
                   "object must not already be in the db")
@@ -862,9 +855,24 @@
 ;; clause    = [ident map]
 ;; map       = % | %n | spec-name
 ;;           | {:kw (clause | map | ident | value),+}
+;; ((:find) (1 2) (:in) (3) (:where) (4 5))
+(t/tc-ignore ;; only called from inside a macro; TODO type
+ (defn parse-query [stx]
+   (let [keywords [:find :in :where]
+         partitions (partition-by (fn [stx] (some #(= stx %) keywords)) stx)]
+     (match partitions
+       ([([:find] :seq) f ([:in] :seq) db ([:where] :seq) wc] :seq)
+       (do (when-not (= (count db) 1)
+             (throw (ex-info "expecting exactly one database expression" {:syntax db})))
+           ;; TODO -- can do more syntax checking here
+           {:f f :db (first db) :wc wc})
+       :else
+       (throw (ex-info "expecting keywords :find, :in, and :where followed by arguments"
+                       {:syntax partitions}))))))
 
-(defmacro q [_ f _ db _ & wc]
-  (let [{:keys [args env clauses]} (expand-query (if (vector? f) f [f]) wc)
+(defmacro q [& stx]
+  (let [{:keys [f db wc]} (parse-query stx)
+        {:keys [args env clauses]} (expand-query f wc)
         type-kws  (map #(get @env %) args)
         type-maps (map get-type type-kws)
         type-syms (map :type-symbol type-maps)
@@ -883,16 +891,11 @@
                                     (db/entity ~db ~result) ~t-s)]
                             (recursive-ctor ~t-kw e#))
                           ~(err result t-s)))))]
-    `(let [check# (t/ann-form
-                   (fn [~(vec args)]
-                     [~@(map wrap args type-kws type-maps type-syms)])
-                   [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))])]
+    `(t/let [check# :- [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))]
+             (fn [~(vec args)]
+               [~@(map wrap args type-kws type-maps type-syms)])]
        (->> (db/q {:find '~args :in '~['$] :where ~(vec clauses)} ~db)
-            (map check#)
-            ~(if (vector? f)
-               `identity
-               `(map (t/ann-form first [(t/HVec ~(vec type-syms)) ~'-> ~(first type-syms)])))
-            (into #{})))))
+            (map check#) (set)))))
 
 ;; =============================================================================
 

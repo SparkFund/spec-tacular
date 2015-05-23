@@ -7,7 +7,7 @@
 
 (t/typed-deps spark.sparkspec.test-specs)
 
-(t/ann test-query-typecheck [sd/Database -> (t/Set Long)])
+(t/ann test-query-typecheck [sd/Database -> (t/Set (t/HVec [Long]))])
 (defn test-query-typecheck
   "not a runtime unit test: but included in typechecking phase"
   [db]
@@ -17,7 +17,7 @@
 (defn test-multi-query-typecheck
   "not a runtime unit test: but included in typechecking phase"
   [db]
-  (sd/q :find [?a ?b] :in db :where [:Scm {:val1 ?a :val2 ?b}]))
+  (sd/q :find ?a ?b :in db :where [:Scm {:val1 ?a :val2 ?b}]))
 
 (t/ann test-is-multi-vec ts/Scm)
 (def test-is-multi-vec
