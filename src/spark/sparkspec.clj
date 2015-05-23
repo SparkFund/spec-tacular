@@ -264,40 +264,34 @@
              (clojure.lang.APersistentMap/mapEquals this# ~gs)))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
-           (write-spec-instance ~spec v# w#))
+           (.write w# (spec-instance->str ~spec v#)))
          (defmethod pp/simple-dispatch ~class-name [v#]
            (pp/pprint-logical-block
-            :prefix ~(str "(" (lower-case (name (:name spec)))) :suffix ")"
-            (pp/simple-dispatch (.atmap v#)))))))
+            :prefix ~(str "(" (lower-case (name (:name spec))) " ") :suffix ")"
+            (pp/simple-dispatch (merge (.atmap v#) (deref (.cache v#)))))))))
 
-;; TODO: this would be better as a function over strings, so we could
-;; use join to make nice spacing
-(defn write-spec-instance [spec si ^java.io.Writer w]
-  (letfn [(write-link [v w]
-            (if-let [ref (get-in v :db-ref)]
-              (let [spec-name (:name (get-spec v))]
-                (.write w (str "(" spec-name " " ref ")")))
-              (print-method v w)))
-          (write-value [v link? w]
-            (if link? (write-link v w) (print-method v w)))
-          (write-item [{iname :name link? :link? [c t] :type :as item} w]
+(defn spec-instance->str [spec si]
+  "returns a string representation of spec instance si suitable for printing"
+  (letfn [(write-value [v link?]
+            (if-let [ref (and link? (get v :db-ref))]
+              (let [spec-name (lower-case (name (:name (get-spec v))))]
+                (str "(" spec-name " " {:db-ref ref} ")"))
+              (with-out-str (print-method v *out*))))
+          (write-item [{iname :name link? :link? [c t] :type :as item}]
             (when (contains? si iname)
-              (do (.write w (str ":" (name iname) " "))
-                  (if-let [v (iname si)]
-                    (do (case c
-                          :one (write-value v link? w)
-                          :many (do (.write w "[")
-                                    (doseq [sub-v v]
-                                      (do (write-value sub-v link? w) (.write w " ")))
-                                    (.write w "]")))
-                        (.write w " "))
-                    (.write w "nil ")))))]
-    (do (.write w (str "(" (lower-case (name (:name spec))) "{"))
-        (if-let [ref (get-in si [:db-ref])]
-          (.write w (str ":db-ref " ref ",")))
-        (doseq [item (:items spec)]
-          (write-item item w))
-        (.write w "})"))))
+              (->> (if-let [v (iname si)]
+                     (case c
+                       :one (write-value v link?)
+                       :many (str "[" (->> v (map #(write-value % link?)) (join " ")) "]"))
+                     "nil")
+                   (str iname " "))))]
+    (str "(" (lower-case (name (:name spec))) " {"
+         (->> (:items spec)
+              (map #(write-item %))
+              (cons (if-let [ref (get si :db-ref)] (str ":db-ref " ref)))
+              (filter identity)
+              (join " "))
+         "})")))
 
 (defn spec->enum-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
