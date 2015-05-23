@@ -1,62 +1,177 @@
 (ns spark.sparkspec.datomic-test
-  (:refer-clojure :exclude [remove read-string read])
+  (:refer-clojure :exclude [remove read-string read assoc!])
   (:use clojure.test
         spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic
         spark.sparkspec.test-utils
-        spark.sparkspec.test-specs)
+        spark.sparkspec.test-specs
+        spark.sparkspec.generators)
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :as sd]
             [spark.sparkspec.schema :as schema]
             [clojure.core.typed :as t]
-            [clojure.tools.macro :as m]))
-
-;;;; sp->transactions tests
+            [clojure.tools.macro :as m]
+            [clojure.test.check :as tc]
+            [clojure.test.check.properties :as prop]
+            [clojure.test.check.generators :as gen]
+            [clojure.test.check.clojure-test :as ct]))
 
 (def simple-schema
   (cons schema/spec-tactular-map
         (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
 
-(def scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})}))
-(def scm-non-nested (scm {:val1 "ho" :val2 56666}))
-
-(deftest new-transaction-tests
-  (let [tx-info (with-test-db simple-schema
-                  @(db/transact *conn* (sp->transactions (db) scm-1)))]
-    (is (not (= (:db-before tx-info) (:db-after tx-info))))
-    (is (every? :added (:tx-data tx-info))))
+(deftest test-entity-coersion
   (with-test-db simple-schema
-    (let [tx1 (sp->transactions (db) scm-non-nested)]
-      (is (= 1 (count tx1)))
-      (is (thrown? java.lang.AssertionError
-                   (sp->transactions (db) (scm {:extra-key 1})))))))
+    @(db/transact *conn* [{:db/id (db/tempid :db.part/user)
+                           :spec-tacular/spec :Scm
+                           :scm/scm2 {:db/id (db/tempid :db.part/user)
+                                      :spec-tacular/spec :Scm2
+                                      :scm2/val1 42}}])
+    (let [scm-eid  (ffirst (db/q '[:find ?v :where [?v :spec-tacular/spec :Scm]] (db)))
+          scm-em   (db/entity (db) scm-eid)
+          scm2-eid (ffirst (db/q '[:find ?v :where [?v :spec-tacular/spec :Scm2]] (db)))
+          scm2-em  (db/entity (db) scm2-eid)]
+      (is (= (:scm2 (database-coersion scm-em)) scm2-em))
+      (is (= (:val1 (database-coersion scm2-em)) 42))
+      (is (= (recursive-ctor :Scm2 (:scm2 (database-coersion scm-em)))
+             (scm2 {:val1 42}))))))
 
-(deftest update-transaction-tests
-  (with-test-db simple-schema
-    (let [tx1 (sp->transactions (db) scm-1)
-          tx-info1 @(db/transact *conn* tx1)
-          tx2 (sp->transactions (db) (assoc scm-1 :val2 555))
-          tx-info2 @(db/transact *conn* tx2)]
-      (is (= (ffirst (db/q '[:find ?val2
-                             :where [?eid :scm/val1 "hi"] [?eid :scm/val2 ?val2]]
-                           (db)))
-             555)))))
+(deftest test-transaction-data
+  (testing "Scm2"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :Scm2)
+          td #(transaction-data nil spec %1 %2)]
+      (testing "valid"
+        (is (= (td si {:val1 125})
+               [[:db/add gs :scm2/val1 125]]))
+        (is (= (td si {:val1 nil})
+               []))
+        (is (= (td (assoc si :val1 1) {:val1 125})
+               [[:db/add gs :scm2/val1 125]]))
+        (is (= (td (assoc si :val1 1) {:val1 nil})
+               [[:db/retract gs :scm2/val1 1]])))
+      (testing "invalid")))
 
-(deftest db->sp-tests
-  (with-test-db simple-schema
-    @(db/transact *conn* (sp->transactions (db) scm-1))
-    (let [query (db/q '[:find ?eid :where [?eid :scm/val1 "hi"]] (db))
-          e (db/entity (db) (ffirst query))]
-      (is (scm? (db->sp (db) e :Scm))))))
+  (testing "Scm"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :Scm)
+          td #(transaction-data nil spec %1 %2)]
+      (testing "valid"
+        (is (= (td si {:val1 "125" :val2 125})
+               [[:db/add gs :scm/val1 "125"]
+                [:db/add gs :scm/val2 125]]))
+        (is (= (td si {:multi ["125" "1"]})
+               [[:db/add gs :scm/multi "1"]
+                [:db/add gs :scm/multi "125"]]))
+        (is (= (td si {:val1 nil})
+               []))
+        (is (= (td (assoc si :multi ["1"]) {:multi ["125"]})
+               [[:db/retract gs :scm/multi "1"]
+                [:db/add gs :scm/multi "125"]]))
+        (is (= (td (assoc si :multi ["" "125"]) {:multi [""]})
+               [[:db/retract gs :scm/multi "125"]]))
+        (is (= (td (assoc si :multi ["" "125"]) {:multi [""]})
+               [[:db/retract gs :scm/multi "125"]]))
+        (is (= (td si {:scm2 {:db-ref {:eid 120} :val1 42}})
+               [[:db/add gs :scm/scm2 120]])))
+      (testing "invalid")))
 
-(deftest commit-sp-transactions-tests
-  (with-test-db simple-schema
-    (let [tx1 (sp->transactions (db) scm-1)
-          eid (commit-sp-transactions {:conn *conn*} tx1)]
-      (is (scm? (db->sp (db) (db/entity (db) eid) :Scm))
-          "The eid we get back from commit-sp-transactions should be
-          tied to what we put in."))))
+  (testing "ScmOwnsEnum"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :ScmOwnsEnum)
+          td #(transaction-data nil spec %1 %2)
+          a-scm3 (assoc (scm3) :db-ref {:eid 5})
+          a-scm2 (assoc (scm2) :db-ref {:eid 120})]
+      (testing "valid"
+        (is (= (td si {:enum a-scm2})
+               [[:db/add gs :scmownsenum/enum 120]]))
+        (is (= (td si {:enums [a-scm3 a-scm2]})
+               [[:db/add gs :scmownsenum/enums 5]
+                [:db/add gs :scmownsenum/enums 120]]))
+        (is (= (td si {:enum nil})
+               []))
+        (is (= (td si {:enums nil})
+               []))
+        (is (= (td (assoc si :enum a-scm2)
+                   (assoc si :enum (assoc (scm2) :db-ref {:eid 121})))
+               [[:db/add gs :scmownsenum/enum 121]]))
+        (is (= (td (assoc si :enums [a-scm2])
+                   (assoc si :enums [a-scm3]))
+               [[:db/retract gs :scmownsenum/enums 120]
+                [:db/add gs :scmownsenum/enums 5]]))
+        (is (= (td (assoc si :enum a-scm2) {:enum nil})
+               [[:db/retract gs :scmownsenum/enum 120]]))
+        (is (= (td (assoc si :enums [a-scm2])
+                   (assoc si :enums [(assoc a-scm2 :val1 6)]))
+               [])
+            "does not update links")
+        (is (= (count (td si {:enum (scm2 {:val1 -1})})) 3)))
+      (testing "invalid")))
+
+  (testing "ScmLink"
+    (let [gs (gensym)
+          si {:db-ref {:eid gs}}
+          spec (get-spec :ScmLink)
+          td #(transaction-data nil spec %1 %2)
+          a-scm  (assoc (scm {:val1 "hi"}) :db-ref {:eid 1})
+          a-scmp (assoc (scmparent {:scm a-scm}) :db-ref {:eid 2})
+          a-scml (assoc (scmlink {:val1 a-scmp}) :db-ref {:eid 3})]
+      (testing "valid"
+        (let [res (td si a-scml)]
+          (is (= true (clojure.core.match/match [res]
+                        [([[:db/add eid1 :scmlink/val1 eid2]
+                           _
+                           [:db/add eid3 :scmparent/scm 1]] :seq)]
+                        (and (= eid1 gs) (= eid2 eid3) true)
+                        :else res))))
+        (let [res (td a-scml (assoc a-scml :val1 nil))]
+          (is (= (get-in a-scml [:val1 :db-ref :eid]) 2))
+          (is (= res [[:db/retract 3 :scmlink/val1 2]]))))
+      (testing "invalid"))))
+
+(deftest test-commit-sp-transactions
+  (let [scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})})
+        scm-non-nested (scm {:val1 "ho" :val2 56666})]
+    (testing "new sp->transactions"
+      (let [tx-info (with-test-db simple-schema
+                      @(db/transact *conn* (sp->transactions (db) scm-1)))]
+        (is (not (= (:db-before tx-info) (:db-after tx-info))))
+        (is (every? :added (:tx-data tx-info))))
+      (with-test-db simple-schema
+        (let [tx1 (sp->transactions (db) scm-non-nested)]
+          (is (= 1 (count tx1)))
+          (is (thrown-with-msg?
+               clojure.lang.ExceptionInfo #"is not in the spec"
+               (sp->transactions (db) (scm {:extra-key 1})))))))
+
+    (testing "update sp->transactions"
+      (with-test-db simple-schema
+        (let [tx1 (sp->transactions (db) scm-1)
+              tx-info1 @(db/transact *conn* tx1)
+              tx2 (sp->transactions (db) (assoc scm-1 :val2 555))
+              tx-info2 @(db/transact *conn* tx2)]
+          (is (= (ffirst (db/q '[:find ?val2
+                                 :where [?eid :scm/val1 "hi"] [?eid :scm/val2 ?val2]]
+                               (db)))
+                 555)))))
+
+    (testing "db->sp"
+      (with-test-db simple-schema
+        @(db/transact *conn* (sp->transactions (db) scm-1))
+        (let [query (db/q '[:find ?eid :where [?eid :scm/val1 "hi"]] (db))
+              e (db/entity (db) (ffirst query))]
+          (is (scm? (db->sp (db) e :Scm))))))
+
+    (testing "commit-sp-transactions"
+      (with-test-db simple-schema
+        (let [tx1 (sp->transactions (db) scm-1)
+              eid (commit-sp-transactions {:conn *conn*} tx1)]
+          (is (scm? (db->sp (db) (db/entity (db) eid) :Scm))
+              "The eid we get back should be tied to what we put in."))))))
 
 (defn recursive-expand
   "Returns a completely fleshed out map from the given entity."
@@ -72,23 +187,17 @@
 
 (defn inspect-eids
   [eids]
-  (->> 
-   eids
-   (map #(recursive-expand (db/entity (db) (first %))))
-   (into #{})
-   doall))
+  (->> eids
+       (map #(recursive-expand (db/entity (db) (first %))))
+       (into #{})))
 
 (deftest nested-is-many
   (testing "can create an object with several is-many children."
-    (is (= #{{:scmm/vals #{{:scm2/val1 3
-                            :spec-tacular/spec :Scm2} 
-                           {:scm2/val1 4
-                            :spec-tacular/spec :Scm2}}
+    (is (= #{{:scmm/vals #{{:scm2/val1 3 :spec-tacular/spec :Scm2} 
+                           {:scm2/val1 4 :spec-tacular/spec :Scm2}}
               :spec-tacular/spec :ScmM}}
            (with-test-db simple-schema
-             (let [txs (sp->transactions
-                        (db)
-                        (recursive-ctor :ScmM {:vals [{:val1 3} {:val1 4}]}))
+             (let [txs (sp->transactions (db) (recursive-ctor :ScmM {:vals [{:val1 3} {:val1 4}]}))
                    _ @(db/transact *conn* txs)
                    res (db/q '[:find ?eid
                                :where
@@ -98,72 +207,65 @@
 
 (deftest several-nested
   (testing "can create multiple distinct objects."
-    (is (= #{{:scmm/vals #{{:scm2/val1 1, :spec-tacular/spec :Scm2}},
-              :spec-tacular/spec :ScmM}
-             {:scmm/vals #{{:scm2/val1 2, :spec-tacular/spec :Scm2}},
-              :spec-tacular/spec :ScmM}}
-           (with-test-db simple-schema
-             (let [txs (concat
-                        (sp->transactions
-                         (db)
-                         (recursive-ctor :ScmM {:vals [{:val1 1}]}))
-                        (sp->transactions
-                         (db)
-                         (recursive-ctor :ScmM {:vals [{:val1 2}]})))
-                   _ @(db/transact *conn* txs)
-                   res (db/q '[:find ?eid
-                               :where
-                               [?eid :scmm/vals ?es]
-                               [?es  :scm2/val1 ?v1]] (db))]
-               (inspect-eids res)))))))
+    (with-test-db simple-schema
+      (let [txs (concat
+                 (sp->transactions (db) (recursive-ctor :ScmM {:vals [{:val1 1}]}))
+                 (sp->transactions (db) (recursive-ctor :ScmM {:vals [{:val1 2}]})))
+            _   @(db/transact *conn* txs)
+            res (db/q '[:find ?eid
+                        :where
+                        [?eid :scmm/vals ?es]
+                        [?es  :scm2/val1 ?v1]] (db))
+            res (inspect-eids res)]
+        (is (= #{{:scmm/vals #{{:scm2/val1 1, :spec-tacular/spec :Scm2}},
+                  :spec-tacular/spec :ScmM}
+                 {:scmm/vals #{{:scm2/val1 2, :spec-tacular/spec :Scm2}},
+                  :spec-tacular/spec :ScmM}}
+               res))))))
 
 (deftest identity-add-one
   (testing "setting an is-many valued object updates the set to exactly the new set"
-    (is (= #{{:scmm/identity "myident",
-              :scmm/vals #{{:scm2/val1 2
-                            :spec-tacular/spec :Scm2}}
-              :spec-tacular/spec :ScmM}}
-           (with-test-db simple-schema
-             (let [tx1 (sp->transactions
-                        (db)
-                        (scmm {:identity "myident" :vals [{:val1 1}]}))
-                   _ @(db/transact *conn* tx1)
-                   tx2 (sp->transactions
-                        (db)
-                        (scmm {:identity "myident" :vals [{:val1 2}]}))
-                   _ @(db/transact *conn* tx2)
-                   res (db/q '[:find ?eid
-                               :where
-                               [?eid :scmm/identity _]] (db))]
-               (inspect-eids res)))))))
+    (with-test-db simple-schema
+      (let [tx1 (sp->transactions
+                 (db)
+                 (scmm {:identity "myident" :vals [{:val1 1}]}))
+            _   @(db/transact *conn* tx1)
+            tx2 (sp->transactions
+                 (db)
+                 (scmm {:identity "myident" :vals [{:val1 2}]}))
+            _   @(db/transact *conn* tx2)
+            res (db/q '[:find ?eid :where [?eid :scmm/identity _]] (db))
+            res (inspect-eids res)]
+        (is (= #{{:scmm/identity "myident",
+                  :scmm/vals #{{:scm2/val1 2 :spec-tacular/spec :Scm2}}
+                  :spec-tacular/spec :ScmM}}
+               res))))))
 
 (deftest identity-edit-one-is-many
-  (testing
-      "fixing a unique attribute on parent AND is-many child will
-      upsert that item, and not add a new one."
-    (is (= #{{:scmm/identity "myident",
-              :scmm/vals #{{:scm2/val1 2
-                            :spec-tacular/spec :Scm2}}
-              :spec-tacular/spec :ScmM}}
-           (with-test-db simple-schema
-             (let [tx1 (sp->transactions
-                        (db)
-                        (recursive-ctor :ScmM {:identity "myident"
-                                               :vals [{:val1 1}]})) ;initially 1
-                   _ @(db/transact *conn* tx1)
-                   child-eid (ffirst (db/q '[:find ?child
-                                             :where
-                                             [?eid :scmm/vals ?child]] (db))) ; remember the item we added
-                   tx2 (sp->transactions
-                        (db)
-                        (recursive-ctor :ScmM {:identity "myident"
-                                               :vals [{:db-ref {:eid child-eid}
-                                                       :val1 2}]})) ; setting to 2 (fixing via child-eid)
-                   _ @(db/transact *conn* tx2)
-                   res (db/q '[:find ?eid
-                               :where
-                               [?eid :scmm/vals ?_]] (db))]
-               (inspect-eids res)))))))
+  (with-test-db simple-schema
+    (let [tx1 (sp->transactions
+               (db)
+               (recursive-ctor :ScmM {:identity "myident"
+                                      :vals [{:val1 1}]})) ; initially 1
+          _   @(db/transact *conn* tx1)
+          child-eid (ffirst (db/q '[:find ?child
+                                    :where
+                                    [?eid :scmm/vals ?child]] (db))) ; remember the item we added
+          tx2 (sp->transactions
+               (db)
+               (recursive-ctor :ScmM {:identity "myident"
+                                      :vals [{:db-ref {:eid child-eid}
+                                              :val1 2}]})) ; setting to 2 (fixing via child-eid)
+          _   @(db/transact *conn* tx2)
+          res (db/q '[:find ?eid
+                      :where
+                      [?eid :scmm/vals ?_]] (db))
+          res (inspect-eids res)]
+      (is (= #{{:scmm/identity "myident",
+                :scmm/vals #{{:scm2/val1 2 :spec-tacular/spec :Scm2}}
+                :spec-tacular/spec :ScmM}}
+             res)
+          "fixing a unique attribute on parent AND is-many child will upsert that item, and not add a new one."))))
 
 (deftest removed-data-should-reflect-in-db
   (testing "removing simple data"
@@ -201,7 +303,14 @@
       "only eids on a 'true' mask")
   (is (= (sp-filter-with-mask {:scm2 true} :Scm (scm {:db-ref {:eid 123} :val1 "1" :val2 1 :scm2 (scm2 {:val1 1 :db-ref {:eid 321}})}))
          (scm {:db-ref {:eid 123} :scm2 (scm2 {:db-ref {:eid 321}})}))
-      "only eids on a 'true' mask, nested."))
+      "only eids on a 'true' mask, nested.")
+
+  (let [original (scmownsenum {:enums [(scm2 {:val1 42})]})
+        updates  {:enums [(scm {:val2 53})]}
+        expected (merge original updates)
+        mask     (item-mask :ScmOwnsEnum expected)]
+    (is (= mask {:enums {:Scm {:val2 true}}}))
+    (is (doall (sp-filter-with-mask mask :ScmOwnsEnum original)))))
 
 (deftest update-tests
   (with-test-db simple-schema
@@ -255,6 +364,8 @@
           b2eid (create-sp! {:conn *conn*} (scmm {:vals [(scm2 {:val1 1})
                                                          (scm2 {:val1 2})]}))
           b3db (get-by-eid (db) b2eid)
+          _ (is (= (item-mask :ScmM (assoc b3db :vals nil))
+                   (item-mask :ScmM (assoc b3db :vals []))))
           _ (update-sp! {:conn *conn*}
                         b3db
                         (assoc b3db :vals nil))
@@ -263,10 +374,10 @@
                 "Can delete non-primitive is-manys via nil too")
           scmreq-eid (create-sp! {:conn *conn*} (scmreq {:name "blah"}))
           scmreq-db (get-by-eid (db) scmreq-eid)
-          _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"attempt to delete a required field"
-                                  (update-sp! {:conn *conn*}
-                                              scmreq-db
-                                              (assoc scmreq-db :name nil))))])))
+          #_(is (thrown-with-msg? clojure.lang.ExceptionInfo #"attempt to delete a required field"
+                                    (update-sp! {:conn *conn*}
+                                                scmreq-db
+                                                (assoc scmreq-db :name nil))))])))
 
 (deftest enum-tests
   (with-test-db simple-schema
@@ -409,6 +520,9 @@
   (is (= (item-mask :ScmOwnsEnum (scmownsenum {:enums []}))
          {:enums true})
       "empty lists of enums are 'true' as well")
+  (is (= (item-mask :ScmOwnsEnum (assoc (scmownsenum) :enums nil))
+         {:enums true})
+      "nil lists of enums are 'true' as well")
   (with-test-db simple-schema
     (let [a1 (scm2 {:val1 1})
           a2 (scm2 {:val1 2})
@@ -490,23 +604,6 @@
                    (db) 5678 e2)
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
-(deftest test-lazy-ctor
-  (with-test-db simple-schema
-    (let [e-scm2 (scm2 {:val1 42})
-          e-soe  (scmownsenum {:enum e-scm2})]
-      (create-sp! {:conn *conn*} e-soe)
-
-      (let [a-soe  (first (q :find :ScmOwnsEnum :in (db) :where [% {:enum [:Scm2 {:val1 42}]}]))
-            a-scm2 (:enum a-soe)]
-        (testing "enum lazy-ctor"
-          (is (= a-scm2 e-scm2)
-              "equality")
-          (is (= (checked-lazy-access (get-spec :ScmOwnsEnum) :enum a-scm2)
-                 e-scm2)
-              "checked access")
-          (is (= 42 (:val1 (:enum a-soe)))
-              "deep access"))))))
-
 (deftest query-tests
   (with-test-db simple-schema
     (is (= #{} (->> (q :find ?a :in (db) :where
@@ -563,10 +660,8 @@
         
         (let [a-scm (first (q :find :Scm :in (db) :where [% {:scm2 [:Scm2 {:val1 5}]}]))]
           (testing "equality on returned entities"
-            (is (.equiv (filter (fn [[k v]] (some? v)) a-scm)
-                        (filter (fn [[k v]] (some? v)) e-scm)))
             (is (= a-scm e-scm))
-            #_(is (= e-scm a-scm))))
+            (is (= e-scm a-scm))))
         
         (let [[a-scm a-scm2]
               ,(->> (q :find [:Scm :Scm2] :in (db) :where
@@ -580,15 +675,11 @@
           (is (map? (:db-ref (:scm2 a-scm)))
               "allow :db-ref keyword access on sub-entities"))
 
-        (let [ex-scm (first (q :find :Scm :in (db) :where [% {:scm2 :Scm2}]))]
-          (time (dorun (for [x (range 100000)] (:scm2 ex-scm)))))
-
         (testing "is-many"
           (let [e-scmm (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})
                 scmm-eid (create-sp! {:conn *conn*} e-scmm)
                 a-scmm1 (first (q :find :ScmM :in (db) :where [% {:identity "hi"}]))
-                a-scmm2 ((get-lazy-ctor :ScmM)
-                         (spec-entity-map (get-spec :ScmM) (db/entity (db) scmm-eid)))]
+                a-scmm2 (recursive-ctor :ScmM (db/entity (db) scmm-eid))]
             (is (= a-scmm1 e-scmm))
             (is (= a-scmm2 e-scmm)))
 
@@ -597,8 +688,7 @@
                       :val (scmm {:identity "hi" :vals [(scm2 {:val1 42}) (scm2 {:val1 7})]})})
                 esw-id (create-sp! {:conn *conn*} esw)
                 asw1 (first (q :find :ScmM :in (db) :where [:ScmMWrap {:name "scmwrap" :val %}]))
-                asw2 (:val ((get-lazy-ctor :ScmMWrap) 
-                            (spec-entity-map (get-spec :ScmMWrap) (db/entity (db) esw-id))))]
+                asw2 (:val (recursive-ctor :ScmMWrap (db/entity (db) esw-id)))]
             ;; (is (= asw1 esw) "returned from query equality")
             (testing "lazy-ctor"
               #_(is (instance? spark.sparkspec.test_specs.l_ScmM asw2) "type") ;; TODO
@@ -609,8 +699,7 @@
 
       (testing "absent field access"
         (let [eid (create-sp! {:conn *conn*} (scm2))
-              a-scm2 ((get-lazy-ctor :Scm2) 
-                      (spec-entity-map (get-spec :Scm2) (db/entity (db) eid)))]
+              a-scm2 (recursive-ctor :Scm2 (db/entity (db) eid))]
           (let [b (not (:val1 (scm2 a-scm2)))] ;; lol printing it out draws an early error
             (is b))
           #_(is (not (:val1 (scm2 a-scm2)))))))
@@ -639,10 +728,20 @@
         (is (= id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/scm2 123]] (db))))
             "insertion of bad scm2 ref should work")
 
-        (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
-                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-          (is (= (get-spec :Scm2) (:expected-spec data))
-              "should be an error to use bad scm2 ref as an :Scm2"))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (recursive-ctor :Scm (db/entity (db) id)))
+            "cant make an Scm out of it")
+
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (:scm2 (recursive-ctor :Scm (db/entity (db) id))))
+            "cant get an Scm2 out of it")
+
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}]))
+            "cant directly get the Scm2 either")
 
         (assert @(db/transact *conn*
                               [{:db/id (db/tempid :db.part/user -100)
@@ -650,29 +749,188 @@
                                 :scm/val1 "5"}
                                [:db/add id :scm/scm2 (db/tempid :db.part/user -100)]]))
 
-        (let [data (try (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])
-                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
-          (is (= [:scm/val1 :spec-tacular/spec] (:actual-keys data))
-              "should be an error to have an :Scm2 with :scm/val1 key"))
-
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"bad entity in database"
+             (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}])))
+        
         ;; TODO: add enum tests here
         ))))
-
-(deftest type-tests
-  (with-out-str 
-    (do (t/check-ns 'spark.sparkspec.datomic :collect-only true)
-        (t/check-ns 'spark.sparkspec.datomic-test :collect-only true)
-        (t/check-ns 'spark.sparkspec.test-specs :collect-only true)))
-  (testing "types" ; fully qualify for command line
-    (t/cf (spark.sparkspec.datomic/q :find [:Scm :Scm2] 
-                                     :in (spark.sparkspec.datomic-test/db)
-                                     :where [%1 {:scm2 %2}])
-          (clojure.core.typed/Set 
-           (clojure.core.typed/HVec 
-            [spark.sparkspec.test-specs/Scm
-             spark.sparkspec.test-specs/Scm2])))))
 
 ;; TODO bad syntax
 #_(sd/q :find :Transfer :in db :where
         [% {:status [:TransferTransacted (-> txn :db-ref :eid)]}])
 #_(first (q :find :ScmM :in (db) :where [% {}]))
+
+(deftest test-create!1
+  (with-test-db simple-schema
+    (let [e-soe (scmownsenum {:enums [(scm3) (scm2 {:val1 123})]})
+          a-soe (create! {:conn *conn*} e-soe)]
+      (is (not (empty? (:enums a-soe))))))
+  (with-test-db simple-schema
+    (let [soe (create! {:conn *conn*}
+                       (assoc (scmownsenum {:enum (scm3)})
+                              :enum (scm2 {:val1 123})))]
+      (is (= (q :find :long :in (db) :where
+                [:ScmOwnsEnum {:enum [:Scm2 {:val1 %}]}])
+             #{123})
+          "can update to change an enum field from one to another")))
+  (testing "many enums"
+    (with-test-db simple-schema
+      (let [se1 (scm2 {:val1 5})
+            se2 (scm2 {:val1 120})
+            se3 (scm3)
+            se4 (scm2 {:val1 42})
+            se5 (scm3)
+            se6 (-> (scm {})
+                    (merge {:scm2 (create! {:conn *conn*} (scm2 {:val1 7}))}))
+            se7 (scm2 {:val1 51})
+            soe (scmownsenum)
+
+            ;; make one enum first
+            e-soe (assoc soe :enums (map #(create! {:conn *conn*} %) [se1]))
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= (first (:enums a-soe)) se1))
+            _ (is (= a-soe e-soe))
+
+            ;; make all enums first
+            e-soe (assoc soe :enums (map #(create! {:conn *conn*} %) [se2 se3]))
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= a-soe e-soe))
+
+            ;; dont make any enum first
+            e-soe (scmownsenum {:enums [se4]})
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= (first (:enums a-soe)) se4))
+            _ (is (= a-soe e-soe))
+
+            ;; dont make any enum first
+            e-soe (scmownsenum {:enums [se5 se6]})
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (= a-soe e-soe))
+
+            ;; lazy seq
+            e-soe (-> (scmownsenum {})
+                      (assoc :enums (for [s [se7]] (create! {:conn *conn*} s))))
+            _ (is (= (type (:enums e-soe))
+                     clojure.lang.PersistentVector))
+            a-soe (create! {:conn *conn*} e-soe)
+            _ (is (get-in (first (:enums a-soe)) [:db-ref :eid]))]))))
+
+(deftest test-create!
+  (with-test-db simple-schema
+    (let [exs [(scm2 {:val1 1})
+               (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
+               (scm {:val1 "2" :scm2 {:val1 4}})
+               (scmparent {:scm (scm {:val1 "3" :scm2 {:val1 4}})})
+               (scmparent {:scm {:val1 "4" :scm2 {:val1 4}}})
+               (scmlink {:val1 (scmparent {:scm (scm {:val1 "5" :scm2 {:val1 4}})})})
+               (scmlink {:link1 (scm {:val1 "6" :scm2 (scm2 {:val1 1})})
+                         :val1  (scmparent {:scm (scm {:val1 "7.235" :scm2 {:val1 4}})})})
+               (scmlink {:link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]})
+               (scmlink {:link1 (scm {:val1 "7" :scm2 (scm2 {:val1 1})})
+                         :link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]
+                         :val1  (scmparent {:scm (scm {:val1 "8" :scm2 {:val1 4}})})})
+               (scmlink{:val1 (scmparent{:scm (scm {:multi ["$" "J~"]  :val2 3 :val1 "K"})})
+                        :link1 (scm {:scm2 (scm2 {}) :multi [] :val2 -5 :val1 "Z"})})]]
+      (doseq [ex exs] (is (= (create! {:conn *conn*} ex) ex) (str ex))))))
+
+(deftest test-update!
+  (with-test-db simple-schema
+    (let [exs [{:original (scm {:multi ["" "N"]})
+                :updates  {:multi [""]}
+                :expected (scm {:multi [""]})}
+               {:original (scm {:val1 "C" :val2 -40 :multi [""] :scm2 {:val1 -7}})
+                :updates {:val2 9, :multi ["" "NN"]}
+                :expected (scm {:val1 "C" :val2 9 :multi ["" "NN"] :scm2 {:val1 -7}})}
+               {:original (scmownsenum {:enum nil :enums nil})
+                :updates {:enum (scm2 {:val1 -1})}
+                :expected (scmownsenum {:enum (scm2 {:val1 -1}) :enums nil})}
+               {:original (scmlink {:val1 (scmparent {:scm (scm {:val1 "!"})})})
+                :updates {:val1 nil}
+                :expected (scmlink {})}
+               {:original (scmm {:identity " !" :vals []})
+                :updates  {:identity nil}
+                :expected (scmm {:vals []})}
+               {:original (scmownsenum {:enums [(scm2 {:val1 42})]})
+                :updates  {:enums [(scm {:val2 53})]}
+                :expected (scmownsenum {:enums [(scm {:val2 53})]})}]]
+      (doseq [{:keys [original updates expected] :as ex} exs]
+        (let [actual (create! {:conn *conn*} original)]
+          (is (= actual original)
+              (str "create!\n" (with-out-str (clojure.pprint/pprint ex))))
+          (let [actual (update! {:conn *conn*} actual updates)]
+            (is (= actual expected)
+                (str "update!\n" (with-out-str (clojure.pprint/pprint ex))))))))))
+
+(deftest test-link
+  (with-test-db simple-schema
+    (let [;; set up a ScmLink
+          sl (scmlink {:link1 (scm {:val1 "1" :scm2 (scm2 {:val1 1})})
+                       :link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]
+                       :val1 (scmparent {:scm (scm {:val1 "2" :scm2 {:val1 4}})})})
+          sl-db (create! {:conn *conn*} sl)
+          refresh-sl (fn [] (refresh {:conn *conn*} sl-db))
+          ;; sl-db (refresh-sl)
+
+          ;; set up an ScmParent
+          scmp (scmparent {:scm (scm {:val1 "3" :scm2 {:val1 5}})})
+          scmp-db (create! {:conn *conn*} scmp)
+          _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already in database"
+                                  (assoc! {:conn *conn*} sl-db :val1 scmp-db))
+                "adding another scm with the same identity errors -- tried to copy")
+
+          ;; link a new Scm into :link1 -- should be passed by ref
+          s (scm {:val1 "5" :scm2 {:val1 5}})
+          s-db (create! {:conn *conn*} s)
+          s-db-ref (:db-ref s-db)
+          ;; s-db (get-by-eid (db) s-eid)
+          sl-db (assoc! {:conn *conn*} sl-db :link1 s-db)
+          _ (is (= (:db-ref (:link1 sl-db))
+                   s-db-ref))
+          _ (is (= (:db-ref (:link1 sl-db))
+                   (:db-ref s-db)))
+
+          ;; changing the Scm also changes the Scm in :link1
+          _ (assoc! {:conn *conn*} s-db :val1 "6")
+          sl-db (refresh-sl)
+          _ (is (= (:val1 (:link1 sl-db)) "6"))])))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; random testing
+
+(defn check-create! [conn-ctx original]
+  (let [actual (create! conn-ctx original)]
+    (if (= actual original) actual
+        (throw (ex-info "creation mismatch: output doesn't reflect input" 
+                        {:actual actual :expected original})))))
+
+(defn check-update!
+  "update-subset is a subset of key-vals from original-db-value to try updating.
+  returns {:ok true} or {:error {reasons}}"
+  [conn-ctx original updates]
+  (let [expected (merge original updates)
+        actual   (update! conn-ctx original updates)]
+    (if (= expected actual) actual
+        (throw (ex-info "update mismatch, output is not equivalent to input"
+                        {:original original :updates updates :actual actual})))))
+
+(defn prop-check-components
+  "property for verifying that check-component!, create!, and update! work correctly"
+  [spec-key]
+  (with-test-db simple-schema
+    (let [spec     (get-spec spec-key)
+          gen      (instance-generator spec)
+          fields   (map :name (:items spec))
+          conn-ctx {:conn *conn*}]
+      (prop/for-all [{:keys [original updates]} gen]
+        (and (every? #(check-component! spec % (get original %)) fields)
+             (when-let [created (check-create! conn-ctx original)]
+               (or (= created :skip) (check-update! conn-ctx created updates))))))))
+
+(ct/defspec gen-Scm2 10 (prop-check-components :Scm2))
+(ct/defspec get-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
+(ct/defspec get-ScmM 10 (prop-check-components :ScmM))
+(ct/defspec get-ScmParent 10 (prop-check-components :ScmParent))
+(ct/defspec get-ScmMWrap 10 (prop-check-components :ScmMWrap))
+(ct/defspec gen-Scm 20 (prop-check-components :Scm))
+(ct/defspec get-ScmLink 50 (prop-check-components :ScmLink))

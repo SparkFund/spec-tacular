@@ -1,5 +1,5 @@
 (ns spark.sparkspec.schema
-  (:refer-clojure :exclude [read-string read])
+  (:refer-clojure :exclude [read-string read assoc!])
   (:use spark.sparkspec
         spark.sparkspec.spec
         spark.sparkspec.datomic

@@ -5,6 +5,7 @@
 
 (declare parse-spec parse-item parse-type parse-opts)
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; SPEC 
 
 (defn parse-spec [stx & [loc]]
@@ -24,7 +25,9 @@
 
     (([name card type & opts] :seq) :guard vector?)
     ,(let [cardinality (case card (:is-a :is-an) :one (:is-many) :many)
-           item-info (parse-opts opts loc) 
+           item-info (->> (parse-opts opts loc)
+                          (#(if (contains? type-map type)
+                              (dissoc % :link?) %)))
            item-name (keyword name)]
        [(map->Item (merge {:name item-name :type [cardinality type]} item-info))])
     
@@ -43,6 +46,7 @@
       ([:default-value v & rest] :seq)   (k {:default-value v}   rest)
       :else (throw (ex-info "invalid options" (merge loc {:syntax stx}))))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ENUM
 
 (defn parse-enum [stx & [loc]]
