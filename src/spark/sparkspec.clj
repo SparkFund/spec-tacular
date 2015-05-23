@@ -348,6 +348,7 @@
           (check-component! spec kw (get sp-map kw)))
         (map-ctor sp-map))))
 
+(t/ann ^:no-check recursive-ctor (t/All [a] [t/Keyword a -> a]))
 (defn recursive-ctor [spec-name orig-sp]
   "walks a nested map structure, constructing proper instances from nested values.
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
