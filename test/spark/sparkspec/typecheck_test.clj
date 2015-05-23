@@ -5,6 +5,8 @@
             [spark.sparkspec.test-specs :as ts]
             [clojure.core.typed :as t]))
 
+(t/typed-deps spark.sparkspec.test-specs)
+
 (t/ann test-query-typecheck [sd/Database -> (t/Set Long)])
 (defn test-query-typecheck
   "not a runtime unit test: but included in typechecking phase"
