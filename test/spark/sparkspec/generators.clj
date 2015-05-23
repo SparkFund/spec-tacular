@@ -10,10 +10,6 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.clojure-test :as ct]))
 
-(def ^:private simple-schema
-  (cons schema/spec-tactular-map
-        (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
-
 (def ^{:doc "map of generators for primitive specs, by keyword name."
        :private true}
   prim-gens
