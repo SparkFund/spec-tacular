@@ -170,9 +170,6 @@
 (defn- make-name [spec append-fn]
   (symbol (append-fn (name (:name spec)))))
 
-;; SpecInstances represent entities:
-;; -- when wrap is :local, wrapping a local entity (not on the db)
-;; -- when wrap is :db, wrapping an entity on the database
 (defn- mk-record [spec]
   (let [gs (gensym), class-name (symbol (str "i_" (-> spec :name name)))
         {rec :rec non-rec :non-rec} (group-by recursiveness (:items spec))
