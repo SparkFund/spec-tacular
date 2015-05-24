@@ -190,9 +190,9 @@
                      (some #(= % k#) [~@non-rec-kws]) val#
                      (not val#) val#
                      :else (let [res# (let [{[arity# type#] :type :as item#} (get-item ~spec k#)]
-                                       (case arity#
-                                         :one (recursive-ctor type# val#)
-                                         :many (vec (map #(recursive-ctor type# %) val#))))]
+                                        (case arity#
+                                          :one (recursive-ctor type# val#)
+                                          :many (vec (map #(recursive-ctor type# %) val#))))]
                              (do (swap! ~'cache assoc k# res#) res#))))))
            (valAt [~'this ~'k]
              (.valAt ~'this ~'k nil))
@@ -272,11 +272,14 @@
 
 (defn resolved-ctor-name [spec ns]
   (let [ctor-name (symbol (lower-case (name (:name spec))))]
-    (if (contains? (ns-refers *ns*) ctor-name) ctor-name
-        (if-let [alias (some->> (ns-aliases *ns*)
-                                (some (fn [[short long]] (and (= (ns-name long) ns) short))))]
-          (str alias "/" ctor-name)
-          (str ns    "/" ctor-name)))))
+    (cond
+      (= (ns-name *ns*) ns) ctor-name
+      (contains? (ns-refers *ns*) ctor-name) ctor-name
+      :else
+      (if-let [alias (some->> (ns-aliases *ns*)
+                              (some (fn [[short long]] (and (= (ns-name long) ns) short))))]
+        (str alias "/" ctor-name)
+        (str ns    "/" ctor-name)))))
 
 (defn spec-instance->str [spec si ns]
   "returns a string representation of spec instance si suitable for printing"
@@ -361,17 +364,17 @@
       (throw (ex-info (str "cannot create " (name spec-name)) {:sp orig-sp})))
     (when-not (instance? clojure.lang.IPersistentMap sp)
       (throw (ex-info "sp is not a map" {:spec (:name spec) :sp sp})))
-    (if (if-let [spec-class (get-spec-class spec-name)]
+    (if (if-let [spec-class (get-spec-class (:name spec))]
           (instance? spec-class sp))
       sp
-      (let [{recs :rec non-recs :non-rec}
-            ,(group-by recursiveness (:items spec))
-            sub-kvs
-            ,(->> recs (keep (fn [{iname :name [arity sub-spec-name] :type :as item}]
-                               (if-let [sub-sp (get sp iname)]
-                                 [iname (case arity
-                                          :one (recursive-ctor sub-spec-name sub-sp)
-                                          :many (map #(recursive-ctor sub-spec-name %) sub-sp))]))))]
+      (let [sub-kvs
+            ,(keep (fn [{iname :name [arity sub-spec-name] :type :as item}]
+                     (if (not (primitive? sub-spec-name))
+                       (if-let [sub-sp (get sp iname)]
+                         [iname (case arity
+                                  :one (recursive-ctor sub-spec-name sub-sp)
+                                  :many (map #(recursive-ctor sub-spec-name %) sub-sp))])))
+                   (:items spec))]
         (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs))))))
 
 (defn- mk-checking-ctor [spec]
