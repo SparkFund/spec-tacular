@@ -609,8 +609,7 @@
          {:f '[?a] :db '(db) :wc '[[:ScmParent {:scm {:val2 ?a}}]]}))
 
   (with-test-db simple-schema
-    (is (= #{} (->> (q :find ?a :in (db) :where
-                       [:ScmParent {:scm {:val2 ?a}}])))
+    (is (= #{} (q :find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
         "nothing returned on fresh db.")
 
     (let [a1 (scmparent {:scm (scm {:val1 "a" :val2 1})})
@@ -707,9 +706,19 @@
             (is b))
           #_(is (not (:val1 (scm2 a-scm2)))))))
 
+    (testing "spec dispatch"
+      (let [scm2-type (->> (q :find ?type :in (db) :where
+                              [:Scm {:scm2 {:spec-tacular/spec ?type}}])
+                           ffirst)]
+        (is (= scm2-type :Scm2)))
+      (let [soe (create! {:conn *conn*} (scmownsenum {:enum (scm2 {:val1 42})}))]
+        (is (= (q :find ?type ?any :in (db) :where
+                  [:ScmOwnsEnum {:enum [?type ?any]}])
+               #{[:Scm2 (:enum soe)]}))))
+
     (testing "bad syntax" ; fully qualify for command line
       (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"invalid map"
+           clojure.lang.ExceptionInfo #"invalid clause rhs"
            (->> '(spark.sparkspec.datomic/q :find :Scm2 :in (db) :where [:Scm :scm2])
                 clojure.core/macroexpand prn)))
       (is (thrown-with-msg?
@@ -721,7 +730,7 @@
            (->> '(spark.sparkspec.datomic/q :find ?x :in (db) :where ["?x" {:y 5}])
                 clojure.core/macroexpand prn)))
       (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"could not find sub-spec"
+           clojure.lang.ExceptionInfo #"could not find item"
            (->> '(spark.sparkspec.datomic/q :find :Scm :in (db) :where [% {:y 5}])
                 clojure.core/macroexpand prn))))
 
