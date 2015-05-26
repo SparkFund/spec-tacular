@@ -3,27 +3,28 @@
   (:require [spark.sparkspec.grammar :refer [parse-spec parse-enum]]))
 
 (deftest test-valid-syntax
-  (is (= (parse-spec '(Link
-                       (:link
-                        [a :is-a :A]
-                        [b :is-many :B])
-                       [c :is-a :C :required]
-                       [d :is-many :D]))
-         #spark.sparkspec.spec.Spec
-         {:name :Link, 
-          :opts nil, 
-          :items [#spark.sparkspec.spec.Item{:name :a, :type [:one :A],:precondition nil, 
-                                             :required? nil,:unique? nil,:optional? nil, 
-                                             :identity? nil, :default-value nil, :link? true}
-                  #spark.sparkspec.spec.Item{:name :b, :type [:many :B], :precondition nil, 
-                                             :required? nil, :unique? nil, :optional? nil, 
-                                             :identity? nil, :default-value nil, :link? true}
-                  #spark.sparkspec.spec.Item{:name :c, :type [:one :C], :precondition nil, 
-                                             :required? true, :unique? nil, :optional? nil, 
-                                             :identity? nil, :default-value nil}
-                  #spark.sparkspec.spec.Item{:name :d, :type [:many :D], :precondition nil, 
-                                             :required? nil, :unique? nil, :optional? nil, 
-                                             :identity? nil, :default-value nil}]}))
+  (let [spec (parse-spec '(Link
+                           (:link
+                            [a :is-a :A]
+                            [b :is-many :B])
+                           [c :is-a :C :required]
+                           [d :is-many :D]))]
+    (is (= (:name spec) :Link))
+    (is (= (:opts spec) nil))
+    (is (= (:items spec)
+           [#spark.sparkspec.spec.Item{:name :a, :type [:one :A],:precondition nil, 
+                                       :required? nil,:unique? nil,:optional? nil, 
+                                       :identity? nil, :default-value nil, :link? true}
+            #spark.sparkspec.spec.Item{:name :b, :type [:many :B], :precondition nil, 
+                                       :required? nil, :unique? nil, :optional? nil, 
+                                       :identity? nil, :default-value nil, :link? true}
+            #spark.sparkspec.spec.Item{:name :c, :type [:one :C], :precondition nil, 
+                                       :required? true, :unique? nil, :optional? nil, 
+                                       :identity? nil, :default-value nil}
+            #spark.sparkspec.spec.Item{:name :d, :type [:many :D], :precondition nil, 
+                                       :required? nil, :unique? nil, :optional? nil, 
+                                       :identity? nil, :default-value nil}])))
+
 
   (is (= (parse-enum '(Foo :Bar :Baz))
          #spark.sparkspec.spec.EnumSpec{:name :Foo, :elements #{:Baz :Bar}})))

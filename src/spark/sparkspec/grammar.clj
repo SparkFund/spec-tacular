@@ -14,7 +14,7 @@
       ([name & items] :seq)
       (let [name  (keyword name)
             items (mapcat #(parse-item % loc) items)]
-        (map->Spec {:name name :items items}))
+        (map->Spec {:name name :items items :syntax (cons 'defspec stx)}))
       :else (throw (ex-info "expecting name followed by sequence of items" 
                             (merge loc {:syntax stx}))))))
 

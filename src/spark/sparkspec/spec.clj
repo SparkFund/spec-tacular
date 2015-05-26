@@ -1,8 +1,25 @@
-(ns spark.sparkspec.spec)
+(ns spark.sparkspec.spec
+  (:require [clojure.pprint :as pp]))
 
-(defrecord Spec [name opts items])
-#_(defmethod print-method Spec [v ^java.io.Writer w]
-    (.write w (str (:name v))))
+(defrecord Spec [name opts items syntax])
+
+(defmethod pp/simple-dispatch Spec [spec]
+  (let [stx (.syntax spec)]
+    (pp/pprint-logical-block
+     :prefix "(" :suffix ")"
+     (pp/simple-dispatch (symbol (str (first stx) " " (second stx) " ")))
+     (pp/pprint-indent :block 1)
+     (doseq [item-stx (rest (rest stx))]
+       (pp/pprint-newline :linear)
+       (if (= (first item-stx) :link)
+         (pp/pprint-logical-block
+          :prefix "(" :suffix ")"
+          (pp/simple-dispatch (symbol (str :link " ")))
+          (pp/pprint-indent :block 0)
+          (doseq [link (rest item-stx)]
+            (pp/pprint-newline :mandatory)
+            (pp/simple-dispatch link)))
+         (pp/simple-dispatch item-stx))))))
 
 (defrecord Item
     [name type precondition required? unique? optional? identity? default-value])
