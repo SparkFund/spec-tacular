@@ -706,11 +706,12 @@
 
 (t/defalias DatomicWhereClause (t/HVec [t/Any t/Keyword t/Any]))
 
+(t/ann set-type! [QueryTEnv t/Sym t/Keyword -> nil])
 (defn- set-type! [tenv x t]
   (if-let [t- (get @tenv x)]
     (when-not (= t t-)
       (throw (ex-info "retvars has two return types" {:type1 t :type2 t-})))
-    (swap! tenv assoc x t)))
+    (do (swap! tenv assoc x t) nil)))
 
 (t/ann expand-ident [QueryIdent QueryUEnv QueryTEnv ->
                      (t/HMap :mandatory {:var t/Sym :spec SpecT})])
@@ -736,6 +737,7 @@
     :else (throw (ex-info (str (type ident) " unsupported ident") {:syntax ident}))))
 
 (declare expand-clause expand-map)
+(t/ann ^:no-check expand-item [Item t/Keyword QueryMapVal t/Sym QueryUEnv QueryTEnv -> t/Any])
 (defn expand-item [item db-kw rhs x uenv tenv]
   (let [{[arity sub-spec-name] :type} item
         mk-where-clause (fn [rhs] [`'~x db-kw rhs])]
@@ -772,7 +774,7 @@
                 [[`'~r :spec-tacular/spec `'~l]
                  [`'~x db-kw `'~r]])
            :else ;; fall back to dynamic resolution
-           (throw (ex-info "bad" {:syntax rhs}))))
+           (throw (ex-info "dynamic resolution not yet supported" {:syntax rhs}))))
       :else [(mk-where-clause rhs)])))
 
 ;; map = {:kw (ident | clause | map | value),+}
@@ -803,14 +805,13 @@
                             (keep elements))
                 try-map (into {} try-all)
                 grouped (group-by #(type (second %)) try-map)]
-            (when (get grouped clojure.lang.PersistentList)
+            (when (empty? (get grouped clojure.lang.PersistentList))
               (throw (ex-info "does not conform to any possible enumerated spec"
                               {:syntax atmap :possible-specs elements
                                :errors (get grouped clojure.lang.ExceptionInfo)})))
             `('~'or ~@(get grouped clojure.lang.PersistentList))))))))
 
-(t/ann expand-clause [QueryClause QueryUEnv QueryTEnv 
-                      -> (t/ASeq DatomicWhereClause)])
+(t/ann expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any])
 (defn- expand-clause [clause uenv tenv]
   (let [[ident atmap] clause
         {:keys [var spec]} (expand-ident ident uenv tenv)]
@@ -870,16 +871,16 @@
         _        (annotate-patvars! clauses uenv tenv)]
     {:rets rets :clauses (second do-expr)}))
 
-(t/ann expand-query 
+(t/ann ^:no-check expand-query 
        [(t/List t/Sym) (t/List QueryClause) ->
-        (t/HMap :mandatory {:args (t/List t/Sym) :env QueryTEnv :clauses (t/ASeq DatomicWhereClause)})])
+        (t/HMap :mandatory {:args (t/List t/Sym) :env QueryTEnv :clauses t/Any})])
 (defn- expand-query [f wc]
   (t/let [tenv :- QueryTEnv (atom {}) 
           uenv :- QueryUEnv (atom {})]
     (let [{:keys [rets clauses]} (desugar-query f wc uenv tenv)
           clauses (doall (map (t/ann-form
                                #(expand-clause % uenv tenv) ;; side effects
-                               [QueryClause -> (t/ASeq DatomicWhereClause)])
+                               [QueryClause -> t/Any])
                               clauses))
           clauses `(concat ~@clauses)]
       (assert (= (count rets) (count f)) "internal error")
@@ -1083,6 +1084,6 @@
       (recursive-ctor (:name spec) em))))
 
 ;; wishlist
-;; (defn copy [])
+;; (defn copy []) or copy!
 ;; (defn dissoc! []) or delete! or remove!
-;; (defn cas [])
+;; (defn cas []) ? maybe as a helper

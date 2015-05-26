@@ -732,7 +732,12 @@
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"could not find item"
            (->> '(spark.sparkspec.datomic/q :find :Scm :in (db) :where [% {:y 5}])
-                clojure.core/macroexpand prn))))
+                clojure.core/macroexpand prn)))
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"does not conform"
+           (macroexpand
+            '(spark.sparkspec.datomic/q :find ?val :in (db) :where
+                                        [:ScmEnum {:val1 ?val}])))))
 
     (testing "bad data" ; db goes to shit after this -- should be last test
       (let [id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/val2 5]] (db)))]

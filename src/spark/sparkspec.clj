@@ -88,15 +88,16 @@
 (defn check-component!
   "checks the key and its value against the given spec"
   [spec k v]
-  (when-not (some #(= k (-> % :name keyword)) (:items spec))
-    (throw (ex-info (format "%s is not in the spec of %s" k (:name spec))
-                    {:keyword k :value v :spec spec})))
   (let [{iname :name
          [cardinality typ] :type
          required? :required?
-         precondition :precondition}
+         precondition :precondition
+         :as item}
         (get-item spec k)
         sname (:name spec)]
+    (when-not item
+      (throw (ex-info (format "%s is not in the spec of %s" k (:name spec))
+                      {:keyword k :value v :spec spec})))
     (when (and required? (not (some? v)))
       (throw (ex-info "missing required field" {:field iname :spec sname})))
     (when (and precondition (or required? v))
@@ -170,9 +171,9 @@
 (defn- make-name [spec append-fn]
   (symbol (append-fn (name (:name spec)))))
 
-(defn- mk-record [spec]
+(defn- mk-record [spec] ;; CODEWALK
   (let [gs (gensym), class-name (symbol (str "i_" (-> spec :name name)))
-        {rec :rec non-rec :non-rec} (group-by recursiveness (:items spec))
+        {:keys [non-rec]} (group-by recursiveness (:items spec))
         non-rec-kws (concat [:db-ref] (map :name non-rec))]
     `(do (deftype ~class-name [~'atmap ~'cache]
            clojure.lang.IRecord
