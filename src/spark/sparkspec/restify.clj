@@ -220,7 +220,7 @@
        (assert (not (spd/get-eid db sp)) "object must not already be in the db")
        (let [txs (spd/sp->transactions db sp)
              _ (log/info :msg "about to commit" :data txs)
-             eid (spd/commit-sp-transactions conn-ctx txs)
+             eid (spd/commit-sp-transactions! conn-ctx txs)
              url (str resource-route "/" eid)]
          (ring-resp/created url))))))
 
@@ -238,7 +238,7 @@
             db (d/db (:conn conn-ctx))
             new (from-json-friendly (:name spec) json)]
         (if (ent-of-type? (d/entity db id) spec)
-          (do (spd/commit-sp-transactions conn-ctx (spd/sp->transactions db new))
+          (do (spd/commit-sp-transactions! conn-ctx (spd/sp->transactions db new))
               (-> new (to-json-friendly) (ring-resp/response)))
           (error-response 404 "resource does not exist"))))))
 
@@ -255,7 +255,7 @@
             db (d/db (:conn (get-conn-ctx-fn)))
             ent (d/entity db id)]
         (if (ent-of-type? ent spec)
-          (do (spd/commit-sp-transactions (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
+          (do (spd/commit-sp-transactions! (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
               (ring-resp/response ""))
           (error-response 404 "resource does not exist"))))))
 
