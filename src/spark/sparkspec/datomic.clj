@@ -20,7 +20,7 @@
 (t/defalias Pattern (t/Map t/Any t/Any))
 (t/defalias Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
 (t/defalias ConnCtx (t/HMap :mandatory {:conn datomic.peer.LocalConnection}))
-(t/defalias DatomicEntity (t/HMap :mandatory {:db/id t/Num
+(t/defalias DatomicEntity (t/HMap :mandatory {:db/id Long
                                               :spec-tacular/spec t/Keyword}))
 
 ;; core types
@@ -39,7 +39,7 @@
 (t/ann ^:no-check datomic.api/tempid 
        [t/Keyword -> datomic.db.DbId])
 (t/ann ^:no-check datomic.api/entity 
-       [datomic.db.Db t/Num -> DatomicEntity])
+       [datomic.db.Db (t/U Long (t/HVec [t/Keyword t/Any])) -> DatomicEntity])
 (t/ann ^:no-check datomic.api/transact
        [Connection t/Any -> (t/Future t/Any)])
 
@@ -121,9 +121,11 @@
      (assert (or (nil? eid) (instance? Long eid)))
      (t/ann-form ; Seems like 'if' isn't typechecked correctly w/o annotation?
       (or eid
-          (if-let [id (some #(if-let [id (and (or (:identity? %) (:unique? %))
-                                              (get sp (:name %)))]
-                               [(db-keyword spec (:name %)) id])
+          (if-let [id (some (t/ann-form
+                             #(if-let [id (and (or (:identity? %) (:unique? %))
+                                               (get sp (:name %)))]
+                                [(db-keyword spec (:name %)) id])
+                             [Item -> (t/Option (t/HVec [t/Keyword t/Any]))])
                             (:items spec))]
             (if-let [em (db/entity db id)]
               (:db/id em))))
