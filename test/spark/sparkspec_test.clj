@@ -36,12 +36,7 @@
 
       (testing "has-spec?"
         (is (has-spec? good))
-        (is (not (has-spec? 5))))
-      (testing "get-basis"
-        (is (= (get-basis :TestSpec1) 
-               [:val1 :val2 :val3 :val4 :val5]))
-        (is (= (get-basis good)
-               [:val1 :val2 :val3 :val4 :val5]))))
+        (is (not (has-spec? 5)))))
 
     (is (= (count (into #{} [(testspec1 {:val1 5}) (testspec1 {:val1 5})])) 1)))
 

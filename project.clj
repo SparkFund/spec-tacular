@@ -4,7 +4,8 @@
   :license {:name "Apache License, Version 2.0"
             :url "http://www.apache.org/licenses/LICENSE-2.0.html"}
   :dependencies [[org.clojure/clojure "1.6.0"]
-                 [com.datomic/datomic-free "0.9.4556"]
+                 [com.datomic/datomic-free "0.9.5130"
+                  :exclusions [joda-time]]
                  [prismatic/schema "0.2.4"]
                  [io.pedestal/pedestal.jetty "0.3.0"]
                  [io.pedestal/pedestal.service "0.3.0"]
