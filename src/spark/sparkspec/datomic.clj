@@ -20,7 +20,7 @@
 (t/defalias Pattern (t/Map t/Any t/Any))
 (t/defalias Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
 (t/defalias ConnCtx (t/HMap :mandatory {:conn datomic.peer.LocalConnection}))
-(t/defalias DatomicEntity (t/HMap :mandatory {:db/id t/Num
+(t/defalias DatomicEntity (t/HMap :mandatory {:db/id Long
                                               :spec-tacular/spec t/Keyword}))
 
 ;; core types
@@ -39,7 +39,7 @@
 (t/ann ^:no-check datomic.api/tempid 
        [t/Keyword -> datomic.db.DbId])
 (t/ann ^:no-check datomic.api/entity 
-       [datomic.db.Db t/Num -> DatomicEntity])
+       [datomic.db.Db (t/U Long (t/HVec [t/Keyword t/Any])) -> DatomicEntity])
 (t/ann ^:no-check datomic.api/transact
        [Connection t/Any -> (t/Future t/Any)])
 
@@ -108,8 +108,8 @@
     (map ref->eid (db/q query db names))))
 
 (t/ann get-eid (t/IFn 
-                [datomic.db.DbId SpecInstance -> (t/Option Long)]
-                [datomic.db.DbId SpecInstance SpecT -> (t/Option Long)]))
+                [Database SpecInstance -> (t/Option Long)]
+                [Database SpecInstance SpecT -> (t/Option Long)]))
 (defn get-eid
   "Returns an EID associated with the data in the given spark type if
   it exists in the database. Looks up according to identity
@@ -117,38 +117,22 @@
   ([db sp] 
    (when (map? sp) (get-eid db sp (get-spec sp))))
   ([db sp spec]
-   (let [eid (or (:eid (meta sp)) (get-in sp [:db-ref :eid]))]
+   (let [eid (or (get-in sp [:db-ref :eid]) (:eid (meta sp)))]
      (assert (or (nil? eid) (instance? Long eid)))
      (t/ann-form ; Seems like 'if' isn't typechecked correctly w/o annotation?
       (or eid
-          (let [sname (datomic-ns spec)
-                idents (filter #(or (:identity? %) (:unique? %)) (:items spec))
-                query '[:find ?eid :in $ ?attr ?val :where [?eid ?attr ?val]]
-                eids
-                , (for [{iname :name [_ type] :type} :- Item idents]
-                    :- (t/Option (t/Vec (t/Vec t/Any)))
-                    (let [sub-sp (get sp iname)
-                          sub-val (if (primitive? type)
-                                    sub-sp
-                                    (when (map? sub-sp) (get-eid db sub-sp)))
-                          eid (when (some? sub-val)
-                                (db/q query db
-                                      (keyword (name sname) (name iname))
-                                      sub-val))]
-                      eid))]
-            (->> eids
-                 (filter (t/ann-form 
-                          not-empty
-                          [(t/Option (t/Vec (t/Vec t/Any))) -> (t/Option (t/NonEmptyVec (t/Vec t/Any))) 
-                           :filters {:then (is (t/NonEmptyVec (t/Vec t/Any)) 0)}]))
-                 (map (t/ann-form
-                       #(let [r (ffirst %)] (do (assert (instance? Long r))) r)
-                       [(t/Option (t/NonEmptyVec (t/Vec t/Any))) -> Long]))
-                 (first))))
+          (if-let [id (some (t/ann-form
+                             #(if-let [id (and (or (:identity? %) (:unique? %))
+                                               (get sp (:name %)))]
+                                [(db-keyword spec (:name %)) id])
+                             [Item -> (t/Option (t/HVec [t/Keyword t/Any]))])
+                            (:items spec))]
+            (if-let [em (db/entity db id)]
+              (:db/id em))))
       (t/Option Long)))))
 
-(t/ann ^:no-check db->sp [datomic.db.DbId (t/Map t/Any t/Any) -> SpecInstance])
-(defn db->sp
+(t/ann ^:no-check db->sp [Database (t/Map t/Any t/Any) -> SpecInstance])
+(defn db->sp ;; TODO -- this function is pointless now
   [db ent & [sp-type]]
   (if-not ent
     nil
@@ -179,7 +163,7 @@
 
 (t/ann ^:no-check get-by-eid (t/IFn [datomic.db.Db Long -> SpecInstance]
                                     [datomic.db.Db Long SpecT -> SpecInstance]))
-(defn get-by-eid
+(defn get-by-eid ;; TODO -- clean up uses of this function in user code
   "fetches the entire SpecInstance from the db for the given eid
    throws IllegalArgumentException when eid isn't found."
   [db eid & [sp-type]]
@@ -466,9 +450,9 @@
       (cons datomic-data @deletions)
       (meta datomic-data))))
 
-(t/ann ^:no-check commit-sp-transactions
+(t/ann ^:no-check commit-sp-transactions!
        [ConnCtx (t/ASeq t/Any) -> Long])
-(defn commit-sp-transactions
+(defn commit-sp-transactions!
   "if :transaction-log is specified in conn-ctx (a regular sp object),
    we attach its attributes to the transaction."
   [conn-ctx transaction]
@@ -491,7 +475,7 @@
         db (db/db (:conn conn-ctx))]
     (assert (not (get-eid db new-sp))
             "object must not already be in the db")
-    (commit-sp-transactions conn-ctx (sp->transactions db new-sp))))
+    (commit-sp-transactions! conn-ctx (sp->transactions db new-sp))))
 
 (t/ann ^:no-check masked-create-sp!
        [ConnCtx SpecInstance Mask -> Long])
@@ -507,7 +491,7 @@
         txns (with-meta
                (cons datomic-data @deletions)
                (meta datomic-data))]
-    (commit-sp-transactions conn-ctx txns)))
+    (commit-sp-transactions! conn-ctx txns)))
 
 (t/ann ^:no-check sp-filter-with-mask
        [Mask SpecT SpecInstance -> (t/Option SpecInstance)])
@@ -579,7 +563,7 @@
           txns  (with-meta
                   (cons datomic-data @deletions)
                   (meta datomic-data))]
-      (commit-sp-transactions conn-ctx txns))))
+      (commit-sp-transactions! conn-ctx txns))))
 
 ; TODO consider replocing the old "update-sp" etc with something more explicitly masked like this?
 (t/ann ^:no-check masked-update-sp!
@@ -594,7 +578,7 @@
         txns (with-meta
                (cons datomic-data @deletions)
                (meta datomic-data))]
-    (commit-sp-transactions conn-ctx txns)))
+    (commit-sp-transactions! conn-ctx txns)))
 
 (t/ann ^:no-check remove-eids [SpecInstance -> SpecInstance])
 (defn remove-eids
@@ -978,8 +962,8 @@
 
 (t/ann ^:no-check transaction-data-item
        [ConnCtx SpecT Long Item t/Any t/Any -> TransactionData])
-(defn transaction-data-item ;; CODEWALK
-  [conn-ctx parent-spec parent-eid
+(defn transaction-data-item
+  [db parent-spec parent-eid
    {iname :name required? :required? link? :link? [cardinality type] :type :as item}
    old new]
   (let [datomic-key (keyword (datomic-ns parent-spec) (name iname))]
@@ -990,7 +974,7 @@
                 ;; adding by reference
                 [[:db/add parent-eid datomic-key sub-eid]]
                 ;; adding by value
-                (do (when (and conn-ctx (get-eid (db/db (:conn conn-ctx)) i))
+                (do (when (and db (get-eid db i))
                       (throw (ex-info "entity already in database" {:entity i})))
                     (if (= (recursiveness item) :non-rec)
                       [[:db/add parent-eid datomic-key i]]
@@ -1000,7 +984,7 @@
                                        (get-spec i) sub-spec)]
                         (concat [[:db/add parent-eid datomic-key sub-eid]
                                  [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
-                                (transaction-data conn-ctx sub-spec {:db-ref {:eid sub-eid}} i)))))))
+                                (transaction-data db sub-spec {:db-ref {:eid sub-eid}} i)))))))
             (retract [i] ;; removes i from field datomic-key in entity eid
               (when (not i)
                 (throw (ex-info "cannot retract nil" {:spec (:name parent-spec) :old old :new new})))
@@ -1044,7 +1028,7 @@
 
 (t/ann ^:no-check transaction-data
        [ConnCtx SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
-(defn transaction-data [conn-ctx spec old-si updates]
+(defn transaction-data [db spec old-si updates]
   "Given a possibly nil, possibly out of date old entity.
    Returns the transaction data to do the desired updates to something of type spec."
   (let [eid (or (get-in old-si [:db-ref :eid])
@@ -1053,7 +1037,7 @@
       (throw (ex-info "spec missing" {:old old-si :updates updates})))
     (->> (for [{iname :name :as item} (:items spec)
                :when (contains? updates iname)]
-           (transaction-data-item conn-ctx spec eid item (iname old-si) (iname updates)))
+           (transaction-data-item db spec eid item (iname old-si) (iname updates)))
          (apply concat)
          (#(if (get-in old-si [:db-ref :eid]) %
                (cons [:db/add eid :spec-tacular/spec (:name spec)] %)))
@@ -1066,15 +1050,16 @@
    Get eid from object using :db-ref field.
    Aborts if the entity already exists in the database (use assoc! instead)."
   [conn-ctx new-si]
-  (let [db (db/db (:conn conn-ctx))
-        spec (get-spec new-si)]
-    (assert spec (str "could not find spec for " new-si))
-    (when (or (get new-si :db-ref) (get-eid db new-si))
-      (throw (ex-info "entity already in database" {:entity new-si})))
-    (let [data (transaction-data conn-ctx spec nil new-si)
-          eid  (commit-sp-transactions conn-ctx data)
-          em   (db/entity (db/db (:conn conn-ctx)) eid)]
-      (recursive-ctor (:name spec) em))))
+  (let [spec (or (get-spec new-si)
+                 (throw (ex-info (str "could not find spec") {:entity new-si})))
+        eid (let [db (db/db (:conn conn-ctx))]
+              (when (or (get new-si :db-ref) (get-eid db new-si))
+                (throw (ex-info "entity already in database" {:entity new-si})))
+              (some->> (transaction-data db spec nil new-si)
+                       (commit-sp-transactions! conn-ctx)))]
+    ;; db side effect has occurred
+    (some->> (db/entity (db/db (:conn conn-ctx)) eid)
+             (recursive-ctor (:name spec)))))
 
 (t/ann ^:no-check assoc! (t/All [a] [ConnCtx a t/Keyword t/Any -> a]))
 (defn assoc!
@@ -1085,13 +1070,13 @@
    Get eid from object using :db-ref field.
    Aborts if the entity does not exist in the database (use create!)."
   [conn-ctx si & {:as updates}]
-  (when-not (:db-ref si)
+  (when-not (get si :db-ref)
     (throw (ex-info "entity must be on database already" {:entity si})))
   (let [spec (get-spec si)
-        data (transaction-data conn-ctx spec si updates)
-        eid  (commit-sp-transactions conn-ctx data)
-        em   (db/entity (db/db (:conn conn-ctx)) eid)]
-    (recursive-ctor (:name spec) em)))
+        eid  (->> (transaction-data (db/db (:conn conn-ctx)) spec si updates)
+                  (commit-sp-transactions! conn-ctx))]
+    (->> (db/entity (db/db (:conn conn-ctx)) eid)
+         (recursive-ctor (:name spec)))))
 
 (t/ann ^:no-check update! (t/All [a] [ConnCtx a a -> a]))
 (defn update!
@@ -1099,7 +1084,8 @@
   (let [updates (mapcat (fn [[k v]] [k v]) si-new)]
     (if (empty? updates) si-old
         (if (not (even? (count updates)))
-          (throw (ex-info "bad updates" {:updates updates}))
+          (throw (ex-info "malformed updates -- expecting keyword-value pairs"
+                          {:updates updates}))
           (apply assoc! conn-ctx si-old updates)))))
 
 (t/ann ^:no-check refresh (t/All [a] [ConnCtx a -> a]))

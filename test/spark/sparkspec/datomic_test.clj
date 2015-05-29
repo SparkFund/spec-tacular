@@ -133,7 +133,7 @@
           (is (= res [[:db/retract 3 :scmlink/val1 2]]))))
       (testing "invalid"))))
 
-(deftest test-commit-sp-transactions
+(deftest test-commit-sp-transactions!
   (let [scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})})
         scm-non-nested (scm {:val1 "ho" :val2 56666})]
     (testing "new sp->transactions"
@@ -166,10 +166,10 @@
               e (db/entity (db) (ffirst query))]
           (is (scm? (db->sp (db) e :Scm))))))
 
-    (testing "commit-sp-transactions"
+    (testing "commit-sp-transactions!"
       (with-test-db simple-schema
         (let [tx1 (sp->transactions (db) scm-1)
-              eid (commit-sp-transactions {:conn *conn*} tx1)]
+              eid (commit-sp-transactions! {:conn *conn*} tx1)]
           (is (scm? (db->sp (db) (db/entity (db) eid) :Scm))
               "The eid we get back should be tied to what we put in."))))))
 
@@ -399,7 +399,7 @@
           "Can update to change an enum field from one to another")))
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm3) (scm3) (scm2 {:val1 123})]}))
-          eid (commit-sp-transactions {:conn *conn*} tx1)
+          eid (commit-sp-transactions! {:conn *conn*} tx1)
           sp (db->sp (db) (db/entity (db) eid))
           _ (is (= (count (db/q '[:find ?eid
                                   :where
@@ -417,10 +417,10 @@
           "can append more enums to a list of enums")))
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm2 {:val1 1}) (scm2 {:val1 2})]}))
-          eid (commit-sp-transactions {:conn *conn*} tx1)
+          eid (commit-sp-transactions! {:conn *conn*} tx1)
           sp (db->sp (db) (db/entity (db) eid))
           tx2 (sp->transactions (db) (assoc sp :enums [(scm2 {:val1 1})]))
-          eid2 (commit-sp-transactions {:conn *conn*} tx2)
+          eid2 (commit-sp-transactions! {:conn *conn*} tx2)
           ]
       (is (= (count (:enums (db->sp (db) (db/entity (db) eid2))))
              1)
@@ -715,6 +715,9 @@
         (is (= (q :find ?type ?any :in (db) :where
                   [:ScmOwnsEnum {:enum [?type ?any]}])
                #{[:Scm2 (:enum soe)]}))
+        (is (= (q :find [?type ...] :in (db) :where
+                  [:ScmOwnsEnum {:enum {:spec-tacular/spec ?type}}])
+               #{:Scm2}))
         (let [type :Scm2]
           (is (= (q :find :ScmOwnsEnum :in (db) :where
                     [% {:enum {:spec-tacular/spec type}}])
@@ -852,7 +855,17 @@
             _ (is (= (type (:enums e-soe))
                      clojure.lang.PersistentVector))
             a-soe (create! {:conn *conn*} e-soe)
-            _ (is (get-in (first (:enums a-soe)) [:db-ref :eid]))]))))
+            _ (is (get-in (first (:enums a-soe)) [:db-ref :eid]))])))
+  (testing "errors"
+    (with-test-db simple-schema
+      (let [s (scm {:val1 "5"})]
+        (create! {:conn *conn*} s)
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"entity already in database"
+             (create! {:conn *conn*} s)))
+        (is (thrown-with-msg?
+             clojure.lang.ExceptionInfo #"entity already in database"
+             (create! {:conn *conn*} (assoc s :val2 4))))))))
 
 (deftest test-create!
   (with-test-db simple-schema
