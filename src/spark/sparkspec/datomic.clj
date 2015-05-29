@@ -958,7 +958,7 @@
                               (db/entity ~db ~result) ~t-s)]
                       (recursive-ctor ~t-kw e#))
                     ~(err result t-s))))]
-    `(t/let [check# :- [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))]
+    `(t/let [check# :- [(t/Vec t/Any) ~'-> ~(if coll? (first type-syms) `(t/HVec ~(vec type-syms)))]
              ~(if coll?
                 `(fn [~(first args)]
                    ~(wrap (first args) (first type-kws) (first type-maps) (first type-syms)))
