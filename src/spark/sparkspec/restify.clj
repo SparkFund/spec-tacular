@@ -33,7 +33,7 @@
                                , [(:name item) (map #(explicitly-tag %) sub-sp)]
                                :else nil))))
                      (filter some?))]
-    (into (merge sp {:spec-tacular/spec (:name spec)}) sub-kvs)))
+    (into (merge (into {} sp) {:spec-tacular/spec (:name spec)}) sub-kvs)))
 
 (defn to-json-friendly
   "converts sp object to json representation with explicit spec tags
@@ -54,11 +54,12 @@
   [spec-name jf]
   (->> jf
        (walk/postwalk
-        (fn [o] (if (and (map? o) (get o :spec-tacular-spec))
-                  (-> o
-                      (assoc :spec-tacular/spec (keyword (get o :spec-tacular-spec)))
-                      (dissoc :spec-tacular-spec))
-                  o)))
+        (fn [o]
+          (if (and (map? o) (get o :spec-tacular-spec))
+               (-> o
+                   (assoc :spec-tacular/spec (keyword (get o :spec-tacular-spec)))
+                   (dissoc :spec-tacular-spec))
+               o)))
        (sp/recursive-ctor spec-name)))
 
 (defn- handler
