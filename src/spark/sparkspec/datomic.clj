@@ -756,6 +756,8 @@
                sub-atmap :- QueryMap rhs]
          `(conj ~(expand-map sub-atmap y (get-spec sub-spec-name) uenv tenv)
                 ~(mk-where-clause `'~y)))
+      (nil? rhs)
+      ,[[(list 'list ''missing? ''$ `'~x db-kw)]]
       (vector? rhs)
       ,(t/let [y (gensym "?tmp"), k (gensym "?kw")
                [l r] rhs
@@ -809,7 +811,23 @@
               (throw (ex-info "does not conform to any possible enumerated spec"
                               {:syntax atmap :possible-specs elements
                                :errors (get grouped clojure.lang.ExceptionInfo)})))
-            `('~'or ~@(get grouped clojure.lang.PersistentList))))))))
+            (when (not (symbol? maybe-spec))
+              (throw (ex-info "not supported" {:syntax maybe-spec})))
+            (if (::patvar (meta maybe-spec))
+              (let [opts (into {} (get grouped clojure.lang.PersistentList))]
+                (set-type! tenv maybe-spec :keyword)
+                `[['~x :spec-tacular/spec '~maybe-spec]
+                  (~'list ~''or ~@(map (fn [[kw stx]]
+                                         `(~'cons ~''and
+                                                  (~'concat [[(~'list ~''ground ~kw) '~maybe-spec]]
+                                                            ~stx)))
+                                       opts))])
+              `(let [opts# ~(into {} (get grouped clojure.lang.PersistentList))
+                     spec# ~maybe-spec]
+                 (conj (or (get opts# spec#)
+                           (throw (ex-info "does not conform to any possible enumerated spec"
+                                           {:computed-spec spec# :available-specs (keys opts#)})))
+                       ['~x :spec-tacular/spec spec#])))))))))
 
 (t/ann expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any])
 (defn- expand-clause [clause uenv tenv]
@@ -900,20 +918,25 @@
          partitions (partition-by (fn [stx] (some #(= stx %) keywords)) stx)]
      (match partitions ;; ((:find) (1 2 ....) (:in) (3) (:where) (4 5 ....))
        ([([:find] :seq) f ([:in] :seq) db ([:where] :seq) wc] :seq)
-       (do (when-not (every? #(or (symbol? %) (keyword? %)) f)
-             (throw (ex-info "expecting sequence of symbols and keywords" {:syntax f})))
+       (do (when-not (or (every? #(or (symbol? %) (keyword? %)) f)
+                         (match (first f) ([v '...] :seq) true :else false))
+             (throw (ex-info "expecting sequence of symbols and keywords, or collection syntax"
+                             {:syntax f})))
            (when-not (= (count db) 1)
              (throw (ex-info "expecting exactly one database expression" {:syntax db})))
            (when-not (every? vector? wc)
              (throw (ex-info "expecting sequence of vectors" {:syntax wc})))
            ;; TODO -- can do more syntax checking here
-           {:f f :db (first db) :wc wc})
+           {:f (match (first f) ([v '...] :seq) [v] :else f)
+            :coll? (match (first f) ([v '...] :seq) true :else false)
+            :db (first db)
+            :wc wc})
        :else
        (throw (ex-info "expecting keywords :find, :in, and :where followed by arguments"
                        {:syntax partitions}))))))
 
 (defmacro q [& stx]
-  (let [{:keys [f db wc]} (parse-query stx)
+  (let [{:keys [f db wc coll?]} (parse-query stx)
         {:keys [args env clauses]} (expand-query f wc)
         type-kws  (map #(get env %) args)
         type-maps (map get-type type-kws)
@@ -936,9 +959,15 @@
                       (recursive-ctor ~t-kw e#))
                     ~(err result t-s))))]
     `(t/let [check# :- [(t/Vec t/Any) ~'-> (t/HVec ~(vec type-syms))]
-             (fn [~(vec args)]
-               [~@(map wrap args type-kws type-maps type-syms)])]
-       (->> (db/q {:find '~args :in '~['$] :where ~clauses} ~db)
+             ~(if coll?
+                `(fn [~(first args)]
+                   ~(wrap (first args) (first type-kws) (first type-maps) (first type-syms)))
+                `(fn [~(vec args)]
+                   [~@(map wrap args type-kws type-maps type-syms)]))]
+       (->> (db/q {:find ~(if coll? `'([~(first args) ...]) `'~args)
+                   :in '~['$]
+                   :where ~clauses}
+                  ~db)
             (map check#) (set)))))
 
 ;; =============================================================================

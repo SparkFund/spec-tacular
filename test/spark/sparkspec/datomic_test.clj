@@ -606,7 +606,7 @@
 
 (deftest query-tests
   (is (= (parse-query '(:find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
-         {:f '[?a] :db '(db) :wc '[[:ScmParent {:scm {:val2 ?a}}]]}))
+         {:f '[?a] :db '(db) :wc '[[:ScmParent {:scm {:val2 ?a}}]] :coll? false}))
 
   (with-test-db simple-schema
     (is (= #{} (q :find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
@@ -714,7 +714,28 @@
       (let [soe (create! {:conn *conn*} (scmownsenum {:enum (scm2 {:val1 42})}))]
         (is (= (q :find ?type ?any :in (db) :where
                   [:ScmOwnsEnum {:enum [?type ?any]}])
-               #{[:Scm2 (:enum soe)]}))))
+               #{[:Scm2 (:enum soe)]}))
+        (let [type :Scm2]
+          (is (= (q :find :ScmOwnsEnum :in (db) :where
+                    [% {:enum {:spec-tacular/spec type}}])
+                 #{[soe]})))
+        (is (= (q :find ?type :in (db) :where
+                  [:ScmOwnsEnum {:enum {:spec-tacular/spec ?type}}])
+               (db/q '[:find ?type :in $ :where
+                       [?scmownsenum :spec-tacular/spec :ScmOwnsEnum]
+                       [?scmownsenum :scmownsenum/enum ?tmp]
+                       [?tmp :spec-tacular/spec ?type]
+                       (or [?tmp :spec-tacular/spec :Scm]
+                           [?tmp :spec-tacular/spec :Scm2]
+                           [?tmp :spec-tacular/spec :Scm2])]
+                     (db)))))
+      (let [e-scm (create! {:conn *conn*} (scm {:val1 "77"}))]
+        (is (= (q :find :Scm :in (db) :where
+                  [% {:val2 nil}])
+               #{[e-scm]}))
+        (is (= (q :find [:Scm ...] :in (db) :where
+                  [% {:val2 nil}])
+               #{e-scm}))))
 
     (testing "bad syntax" ; fully qualify for command line
       (is (thrown-with-msg?
