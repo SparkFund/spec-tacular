@@ -92,7 +92,10 @@
           seed-eid (ffirst (d/q query (db)))
           {:keys [status body]} (response-for server :get 
                                               (str "/testspec/" seed-eid))]
-      (is (-> body (json/parse-string true) testspec testspec?)))))
+      (is (-> body
+              (json/parse-string true)
+              (#(from-json-friendly :TestSpec %))
+              testspec?)))))
 
 (deftest ^:loud put-element
   (testing "when :old matches the DB, we commit the data"

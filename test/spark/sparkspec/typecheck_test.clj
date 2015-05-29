@@ -19,6 +19,10 @@
   [db]
   (sd/q :find ?a ?b :in db :where [:Scm {:val1 ?a :val2 ?b}]))
 
+(t/ann test-coll-query-typecheck [sd/Database -> (t/Set String)])
+(defn test-coll-query-typecheck [db]
+  (sd/q :find [?a ...] :in db :where [:Scm {:val1 ?a}]))
+
 (t/ann test-is-multi-vec ts/Scm)
 (def test-is-multi-vec
   (ts/scm {:multi ["hi"]}))
