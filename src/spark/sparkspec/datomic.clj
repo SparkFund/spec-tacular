@@ -961,7 +961,7 @@
 (t/defalias TransactionData (t/List (t/HVec [t/Keyword Long t/Keyword t/Any])))
 
 (t/ann ^:no-check transaction-data-item
-       [ConnCtx SpecT Long Item t/Any t/Any -> TransactionData])
+       [Database SpecT Long Item t/Any t/Any -> TransactionData])
 (defn transaction-data-item
   [db parent-spec parent-eid
    {iname :name required? :required? link? :link? [cardinality type] :type :as item}
@@ -1027,7 +1027,7 @@
                (apply concat)))))))
 
 (t/ann ^:no-check transaction-data
-       [ConnCtx SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
+       [Database SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
 (defn transaction-data [db spec old-si updates]
   "Given a possibly nil, possibly out of date old entity.
    Returns the transaction data to do the desired updates to something of type spec."
