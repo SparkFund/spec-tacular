@@ -30,3 +30,9 @@
 (t/ann test-is-multi-list ts/Scm)
 (def test-is-multi-list
   (ts/scm {:multi (list "hi")}))
+
+(t/ann test-coll-spec [sd/Database -> (t/Option ts/ScmEnum)])
+(defn test-coll-spec [db]
+  (-> (sd/q :find [:ScmOwnsEnum ...] :in db :where
+            [% {:enum {:spec-tacular/spec :Scm}}])
+      first :enum))

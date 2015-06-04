@@ -27,6 +27,7 @@
 
 (defspec ScmM
   [identity :is-a :string :unique :identity]
+  (:link [val :is-a :ScmEnum])
   (:link [vals :is-many :Scm2]))
 
 (defspec ScmParent
