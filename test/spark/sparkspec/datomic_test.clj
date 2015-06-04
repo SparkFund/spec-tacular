@@ -697,7 +697,13 @@
               (is (:identity asw2) "keyword access")
               (is (= (type (:vals asw2)) clojure.lang.PersistentVector) "keyword access")
               ;; (is (= asw2 esw) "equality")
-              ))))
+              )))
+
+        (testing "coll"
+          (let [ex (create! {:conn *conn*} (scmmwrap {:val {:val (scm {:val1 "foobar"})}}))]
+            (is (contains? (sd/q :find [:Scm ...] :in (db) :where
+                                 [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
+                           (get-in ex [:val :val]))))))
 
       (testing "absent field access"
         (let [eid (create-sp! {:conn *conn*} (scm2))
@@ -733,14 +739,14 @@
                            [?tmp :spec-tacular/spec :Scm2])]
                      (db)))))
       (let [e-scm (create! {:conn *conn*} (scm {:val1 "77"}))]
-        (is (= (q :find :Scm :in (db) :where
-                  [% {:val2 nil}])
-               #{[e-scm]}))
-        (is (= (q :find [:Scm ...] :in (db) :where
-                  [% {:val2 nil}])
-               #{e-scm}))))
+        (is (contains? (q :find :Scm :in (db) :where
+                          [% {:val2 nil}])
+                       [e-scm]))
+        (is (contains? (q :find [:Scm ...] :in (db) :where
+                          [% {:val2 nil}])
+                       e-scm))))
 
-    (testing "bad syntax" ; fully qualify for command line
+    (testing "bad syntax"             ; fully qualify for command line
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"invalid clause rhs"
            (->> '(spark.sparkspec.datomic/q :find :Scm2 :in (db) :where [:Scm :scm2])

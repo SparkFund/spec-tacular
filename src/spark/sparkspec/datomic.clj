@@ -759,6 +759,8 @@
                 (set-type! tenv r (:name spec))
                 [[`'~r :spec-tacular/spec `'~l]
                  [`'~x db-kw `'~r]])
+           (get @tenv l)
+           ,(expand-clause [[l (get @tenv l)] r] uenv tenv)
            :else ;; fall back to dynamic resolution
            (throw (ex-info "dynamic resolution not yet supported" {:syntax rhs}))))
       :else [(mk-where-clause rhs)])))
