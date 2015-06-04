@@ -693,7 +693,9 @@
 (t/ann set-type! [QueryTEnv t/Sym t/Keyword -> nil])
 (defn- set-type! [tenv x t]
   (if-let [t- (get @tenv x)]
-    (when-not (= t t-)
+    (when-not (or (= t t-)
+                  (if-let [elems (:elements (get-spec t))]
+                    (contains? elems t-)))
       (throw (ex-info "retvars has two return types" {:type1 t :type2 t-})))
     (do (swap! tenv assoc x t) nil)))
 
@@ -745,22 +747,23 @@
       (vector? rhs)
       ,(t/let [y (gensym "?tmp"), k (gensym "?kw")
                [l r] rhs
-               spec (get-spec sub-spec-name)]
+               spec (get-spec sub-spec-name)
+               spec (if (:elements spec)
+                      (get-spec sub-spec-name (get @tenv l))
+                      spec)]
          (cond
            (keyword? l)
            `(conj ~(expand-clause [[y l] r] uenv tenv)
                   ~(mk-where-clause `'~y))
            (and (::patvar (meta l)) (:items spec))
            ,(do (set-type! tenv l sub-spec-name)
-                `(conj ~(expand-clause [[y l] r] uenv tenv)
-                       ~(mk-where-clause `'~y)))
+                `(conj ~(expand-clause [[l (:name spec)] r] uenv tenv)
+                       ~(mk-where-clause `'~l)))
            (and (::patvar (meta l)) (::patvar (meta r)))
            ,(do (set-type! tenv l :keyword)
                 (set-type! tenv r (:name spec))
                 [[`'~r :spec-tacular/spec `'~l]
                  [`'~x db-kw `'~r]])
-           (get @tenv l)
-           ,(expand-clause [[l (get @tenv l)] r] uenv tenv)
            :else ;; fall back to dynamic resolution
            (throw (ex-info "dynamic resolution not yet supported" {:syntax rhs}))))
       :else [(mk-where-clause rhs)])))
@@ -786,7 +789,8 @@
           (keep atmap) (doall) (conj `concat))
       (let [maybe-spec (:spec-tacular/spec atmap)]
         (if (and (keyword? maybe-spec) (contains? elements maybe-spec))
-          (expand-map (dissoc atmap :spec-tacular/spec) x (get-spec maybe-spec) uenv tenv)
+          `(conj ~(expand-map (dissoc atmap :spec-tacular/spec) x (get-spec maybe-spec) uenv tenv)
+                 ['~x :spec-tacular/spec ~maybe-spec])
           (let [try-all (-> #(try {% (expand-map (dissoc atmap :spec-tacular/spec) x
                                                  (get-spec %) uenv tenv)}
                                   (catch clojure.lang.ExceptionInfo e {% e}))

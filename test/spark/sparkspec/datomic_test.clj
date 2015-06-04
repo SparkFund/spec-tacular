@@ -608,16 +608,16 @@
   (is (= (parse-query '(:find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
          {:f '[?a] :db '(db) :wc '[[:ScmParent {:scm {:val2 ?a}}]] :coll? false}))
 
-  (with-test-db simple-schema
-    (is (= #{} (q :find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
-        "nothing returned on fresh db.")
+  (testing "primitive data"
+    (with-test-db simple-schema
+      (is (= #{} (q :find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
+          "nothing returned on fresh db.")
 
-    (let [a1 (scmparent {:scm (scm {:val1 "a" :val2 1})})
-          a2 (scmparent {:scm (scm {:val1 "b" :val2 2})})]
-      (create-sp! {:conn *conn*} a1)
-      (create-sp! {:conn *conn*} a2))
-
-    (testing "primitive data"
+      (let [a1 (scmparent {:scm (scm {:val1 "a" :val2 1})})
+            a2 (scmparent {:scm (scm {:val1 "b" :val2 2})})]
+        (create-sp! {:conn *conn*} a1)
+        (create-sp! {:conn *conn*} a2))
+  
       (is (= #{[1] [2]}
              (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val2 ?a}}]))
@@ -642,9 +642,10 @@
       (is (= #{["b"]}
              (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val1 ?a :val2 ((fn [?a] ?a) 2)}}]))
-          "return variables respect lexical scope and don't clobber fns"))
+          "return variables respect lexical scope and don't clobber fns")))
 
-    (testing "compound data"
+  (testing "compound data"
+    (with-test-db simple-schema
       (let [e-scm2 (scm2 {:val1 5})
             e-scm  (scm {:val2 5 :scm2 e-scm2})
             e-scmp (scmparent {:scm e-scm})]
@@ -697,27 +698,28 @@
               (is (:identity asw2) "keyword access")
               (is (= (type (:vals asw2)) clojure.lang.PersistentVector) "keyword access")
               ;; (is (= asw2 esw) "equality")
-              )))
-
-        (testing "coll"
+              ))))
+      (testing "coll"
           (let [ex (create! {:conn *conn*} (scmmwrap {:val {:val (scm {:val1 "foobar"})}}))]
             (is (contains? (sd/q :find [:Scm ...] :in (db) :where
                                  [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
-                           (get-in ex [:val :val]))))))
-
+                           (get-in ex [:val :val])))))
       (testing "absent field access"
         (let [eid (create-sp! {:conn *conn*} (scm2))
               a-scm2 (recursive-ctor :Scm2 (db/entity (db) eid))]
           (let [b (not (:val1 (scm2 a-scm2)))] ;; lol printing it out draws an early error
             (is b))
-          #_(is (not (:val1 (scm2 a-scm2)))))))
+          #_(is (not (:val1 (scm2 a-scm2))))))))
 
-    (testing "spec dispatch"
-      (let [scm2-type (->> (q :find ?type :in (db) :where
+  (testing "spec dispatch"
+    (with-test-db simple-schema
+      (let [_ (create! {:conn *conn*} (scm {:scm2 (scm2 {:val1 22})}))
+            scm2-type (->> (q :find ?type :in (db) :where
                               [:Scm {:scm2 {:spec-tacular/spec ?type}}])
                            ffirst)]
         (is (= scm2-type :Scm2)))
-      (let [soe (create! {:conn *conn*} (scmownsenum {:enum (scm2 {:val1 42})}))]
+      #_(let [soe (create! {:conn *conn*}
+                         (scmownsenum {:enum (scm2 {:val1 42})}))]
         (is (= (q :find ?type ?any :in (db) :where
                   [:ScmOwnsEnum {:enum [?type ?any]}])
                #{[:Scm2 (:enum soe)]}))
@@ -738,15 +740,16 @@
                            [?tmp :spec-tacular/spec :Scm2]
                            [?tmp :spec-tacular/spec :Scm2])]
                      (db)))))
-      (let [e-scm (create! {:conn *conn*} (scm {:val1 "77"}))]
+      #_(let [e-scm (create! {:conn *conn*} (scm {:val1 "77"}))]
         (is (contains? (q :find :Scm :in (db) :where
                           [% {:val2 nil}])
                        [e-scm]))
         (is (contains? (q :find [:Scm ...] :in (db) :where
                           [% {:val2 nil}])
-                       e-scm))))
+                       e-scm)))))
 
-    (testing "bad syntax"             ; fully qualify for command line
+  (testing "bad syntax" ; fully qualify for command line
+    (with-test-db simple-schema
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"invalid clause rhs"
            (->> '(spark.sparkspec.datomic/q :find :Scm2 :in (db) :where [:Scm :scm2])
@@ -767,10 +770,17 @@
            clojure.lang.ExceptionInfo #"does not conform"
            (macroexpand
             '(spark.sparkspec.datomic/q :find ?val :in (db) :where
-                                        [:ScmEnum {:val1 ?val}])))))
+                                        [:ScmEnum {:val1 ?val}]))))))
 
-    (testing "bad data" ; db goes to shit after this -- should be last test
-      (let [id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/val2 5]] (db)))]
+  (with-test-db simple-schema
+    (create! {:conn *conn*} (scmownsenum {:enum (scm3)}))
+    (is (= (count (q :find [:ScmOwnsEnum ...] :in (db) :where
+                     [% {:enum {:spec-tacular/spec :Scm}}]))
+           0)))
+
+  (testing "bad data" ; db goes to shit after this -- should be last test
+    (with-test-db simple-schema
+      (let [id (get-in (create! {:conn *conn*} (scm {:val1 "baz"})) [:db-ref :eid])]
         (assert @(db/transact *conn* [[':db/add id :scm/scm2 123]]))
         (is (= id (ffirst (db/q '[:find ?scm :in $ :where [?scm :scm/scm2 123]] (db))))
             "insertion of bad scm2 ref should work")
