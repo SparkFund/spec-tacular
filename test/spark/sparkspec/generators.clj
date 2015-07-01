@@ -131,5 +131,5 @@
 (defn graph-generator [spec]
   (let [pre (atom {})
         sp-gen (mk-spec-generator (:name spec) pre)]
-    (gen/bind (gen/such-that #(> (count %) 3) (gen/vector sp-gen))
+    (gen/bind (gen/such-that #(> (count %) 3) (gen/not-empty (gen/vector sp-gen)) 50)
       #(gen/return {:expected %}))))

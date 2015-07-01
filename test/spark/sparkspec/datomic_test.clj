@@ -1169,12 +1169,12 @@
                (or (= created :skip) (check-update! conn-ctx created updates))))))))
 
 (ct/defspec gen-Scm2 10 (prop-check-components :Scm2))
-(ct/defspec get-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
-(ct/defspec get-ScmM 10 (prop-check-components :ScmM))
-(ct/defspec get-ScmParent 10 (prop-check-components :ScmParent))
-(ct/defspec get-ScmMWrap 10 (prop-check-components :ScmMWrap))
+(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
+(ct/defspec gen-ScmM 10 (prop-check-components :ScmM))
+(ct/defspec gen-ScmParent 10 (prop-check-components :ScmParent))
+(ct/defspec gen-ScmMWrap 10 (prop-check-components :ScmMWrap))
 (ct/defspec gen-Scm 20 (prop-check-components :Scm))
-(ct/defspec get-ScmLink 50 (prop-check-components :ScmLink))
+(ct/defspec gen-ScmLink 50 (prop-check-components :ScmLink))
 
 (defn prop-create-graph [spec-key]
   (let [spec (get-spec spec-key)
@@ -1187,7 +1187,7 @@
           (is (= {:count (count (unique-db-refs actual)) :entity actual}
                  {:count (count (unique-objs expected)) :entity expected})))))))
 
-(ct/defspec get-ScmOwnsEnum 10 (prop-create-graph :ScmOwnsEnum))
-(ct/defspec get-ScmM 10 (prop-create-graph :ScmM))
-(ct/defspec get-ScmMWrap 20 (prop-create-graph :ScmMWrap))
+(ct/defspec graph-ScmOwnsEnum 10 (prop-create-graph :ScmOwnsEnum))
+(ct/defspec graph-ScmM 10 (prop-create-graph :ScmM))
+(ct/defspec graph-ScmMWrap 20 (prop-create-graph :ScmMWrap))
 

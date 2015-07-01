@@ -1059,13 +1059,8 @@
                    (swap! tmps conj [updates eid])) %))
            (#(with-meta % (assoc (meta %) :eid eid)))))))
 
-(t/ann ^:no-check commit-sp-transactions! [ConnCtx (t/ASeq t/Any) -> t/Any])
-(defn transact-data!
-  [conn-ctx data]
-  @(db/transact (:conn conn-ctx) data))
-
-(defn create-graph!
-  [conn-ctx new-si-coll]
+(t/ann ^:no-check create-graph! (t/All [a] [ConnCtx a -> a]))
+(defn create-graph! [conn-ctx new-si-coll]
   (let [tmps  (atom [])
         specs (map get-spec new-si-coll)
         data  (let [db (db/db (:conn conn-ctx))]
@@ -1078,7 +1073,7 @@
                         new-si-coll specs))
         tmpids (map (comp :eid meta) data)
         data   (apply concat data)
-        txn-result (transact-data! conn-ctx data)]
+        txn-result @(db/transact (:conn conn-ctx) data)]
     ;; db side effect has occurred
     (let [db (db/db (:conn conn-ctx))]
       (into (empty new-si-coll)
@@ -1114,8 +1109,7 @@
          (recursive-ctor (:name spec)))))
 
 (t/ann ^:no-check update! (t/All [a] [ConnCtx a a -> a]))
-(defn update!
-  [conn-ctx si-old si-new]
+(defn update! [conn-ctx si-old si-new]
   (let [updates (mapcat (fn [[k v]] [k v]) si-new)]
     (if (empty? updates) si-old
         (if (not (even? (count updates)))
@@ -1124,8 +1118,7 @@
           (apply assoc! conn-ctx si-old updates)))))
 
 (t/ann ^:no-check refresh (t/All [a] [ConnCtx a -> a]))
-(defn refresh
-  [conn-ctx si]
+(defn refresh [conn-ctx si]
   (let [eid  (get-in si [:db-ref :eid])
         spec (get-spec si)]
     (when-not eid (throw (ex-info "entity without identity" {:entity si})))
