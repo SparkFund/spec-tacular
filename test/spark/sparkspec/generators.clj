@@ -27,31 +27,41 @@
    :bytes   (fn [_] gen/bytes)
    :ref     (fn [_] gen/simple-type-printable)})
 
-(defn spec-gen [spec spec-gen-env]
+(defn item-gen
+  [{iname :name [cardinality type-key] :type required :required? unique? :unique?}
+   spec-gen-env]
+  (let [generator ,((get spec-gen-env type-key) spec-gen-env)
+        maybe-optionize ,(if required identity #(gen/one-of [(gen/return nil) %]))
+        maybe-unique ,(if (and unique? (= type-key :string))
+                        #(gen/bind % (fn [s] (gen/return (str (str (gensym) s)))))
+                        identity)]
+    (assert generator (str "missing definition of sub-generator: "
+                           type-key))
+    [iname (-> (case cardinality
+                 :one generator
+                 :many (gen/bind (gen/vector generator)
+                         ;; distinct works for primitives but
+                         ;; not for spec instances for some reason
+                         (fn [coll] (gen/return (distinct coll)))))
+               maybe-unique
+               maybe-optionize)]))
+
+(defn spec-gen [spec spec-gen-env & [pre]]
   (if (:elements spec)
     (gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
-    (letfn [(foo [{nam :name [cardinality type-key] :type required :required? unique? :unique?}]
-              (let [generator ((get spec-gen-env type-key) spec-gen-env)
-                    maybe-optionize (if required identity
-                                        #(gen/one-of [(gen/return nil) %]))
-                    maybe-unique
-                    (if (and unique? (= type-key :string))
-                      #(gen/bind % (fn [s] (gen/return (str (str (gensym) s)))))
-                      identity)]
-                (assert generator (str "missing definition of sub-generator: "
-                                       type-key))
-                [nam (maybe-optionize
-                      (maybe-unique
-                       (case cardinality
-                         :one generator
-                         :many (gen/bind (gen/resize 2 (gen/vector generator))
-                                 ;; distinct works for primitives but
-                                 ;; not for spec instances for some reason
-                                 (fn [coll] (gen/return (distinct coll)))))))]))]
-      (let [kvs (->> (:items spec) (map foo) (filter identity))
-            mapgen (apply gen/hash-map (apply concat kvs))
-            factory (get-ctor (:name spec))]
-        (gen/fmap factory mapgen)))))
+    (gen/bind (gen/frequency [[8 (gen/return true)] [2 (gen/return false)]])
+      (fn [use-pre?]
+        (if-let [insts (and use-pre? pre (get @pre (:name spec)))]
+          (gen/return (rand-nth insts))
+          (let [kvs (->> (:items spec)
+                         (map #(item-gen % spec-gen-env)))
+                mapgen (apply gen/hash-map (apply concat kvs))
+                factory (get-ctor (:name spec))]
+            (gen/bind (gen/fmap factory mapgen)
+              (fn [sp]
+                (do (when (and pre sp)
+                      (swap! pre update-in [(:name spec)] #(conj % sp)))
+                    (gen/return sp))))))))))
 
 (defn spec-subset
   "generates a map from a generator but with just a subset of the keys.
@@ -73,12 +83,11 @@
   CAUTION this involves manually breaking any cycles in the spec dependency graph."
   [spec-key]
   (let [spec (get-spec spec-key)]
-    (if (:elements spec)
-      (:elements spec)
-      (->> (:items spec)
-           (filter (fn [{iname :name [cardinality sub-sp-nm] :type}] true))
-           (map #(-> % :type second))
-           (set)))))
+    (or (:elements spec)
+        (->> (:items spec)
+             (filter (fn [{iname :name [cardinality sub-sp-nm] :type}] true))
+             (map #(-> % :type second))
+             (set)))))
 
 (defn spec-dependencies
   "recursive dependencies for a collection of spec keys 
@@ -92,20 +101,20 @@
   "returns a map of keys->[env -> generator], including generators for all required deps.  
    Implementations in prim-gen-map (key->[env -> generator]) override auto-building
    of compound gens, but also provide gens for terminals like strings etc."
-  [spec-key-set prim-gen-map]
+  [spec-key-set prim-gen-map & [pre]]
   (let [deps (spec-dependencies spec-key-set)]
     (into {} (map (fn [d]
                     [d (if (contains? prim-gen-map d)
                          (get prim-gen-map d)
-                         (partial spec-gen (get-spec d)))])
+                         #(spec-gen (get-spec d) % pre))])
                   deps))))
 
 (defn mk-spec-generator
   "Generates a default generator for the given key.
    Uses prim-gens to implement generators for primitive types. 
    ex: (last (gen/sample (mk-spec-generator :Contact) 1))"
-  [spec-key]
-  (let [spec-gen-env (mk-spec-generators #{spec-key} prim-gens)]
+  [spec-key & [pre]]
+  (let [spec-gen-env (mk-spec-generators #{spec-key} prim-gens pre)]
     ((get spec-gen-env spec-key) spec-gen-env)))
 
 (defn instance-generator [spec]
@@ -118,3 +127,9 @@
                       (spec-subset sp-gen))
             (fn [sp-subset]
               (gen/return {:original sp :updates sp-subset}))))))))
+
+(defn graph-generator [spec]
+  (let [pre (atom {})
+        sp-gen (mk-spec-generator (:name spec) pre)]
+    (gen/bind (gen/such-that #(> (count %) 3) (gen/not-empty (gen/vector sp-gen)) 50)
+      #(gen/return {:expected %}))))
