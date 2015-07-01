@@ -744,7 +744,7 @@
                               [:Scm {:scm2 {:spec-tacular/spec ?type}}])
                            ffirst)]
         (is (= scm2-type :Scm2)))
-      #_(let [soe (create! {:conn *conn*}
+      (let [soe (create! {:conn *conn*}
                          (scmownsenum {:enum (scm2 {:val1 42})}))]
         (is (= (q :find ?type ?any :in (db) :where
                   [:ScmOwnsEnum {:enum [?type ?any]}])
@@ -761,10 +761,7 @@
                (db/q '[:find ?type :in $ :where
                        [?scmownsenum :spec-tacular/spec :ScmOwnsEnum]
                        [?scmownsenum :scmownsenum/enum ?tmp]
-                       [?tmp :spec-tacular/spec ?type]
-                       (or [?tmp :spec-tacular/spec :Scm]
-                           [?tmp :spec-tacular/spec :Scm2]
-                           [?tmp :spec-tacular/spec :Scm2])]
+                       [?tmp :spec-tacular/spec ?type]]
                      (db)))))
       #_(let [e-scm (create! {:conn *conn*} (scm {:val1 "77"}))]
         (is (contains? (q :find :Scm :in (db) :where

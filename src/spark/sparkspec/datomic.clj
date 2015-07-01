@@ -803,15 +803,22 @@
                                :errors (get grouped clojure.lang.ExceptionInfo)})))
             (when (not (symbol? maybe-spec))
               (throw (ex-info "not supported" {:syntax maybe-spec})))
-            (if (::patvar (meta maybe-spec))
-              (let [opts (into {} (get grouped clojure.lang.PersistentList))]
-                (set-type! tenv maybe-spec :keyword)
-                `[['~x :spec-tacular/spec '~maybe-spec]
-                  (~'list ~''or ~@(map (fn [[kw stx]]
-                                         `(~'cons ~''and
-                                                  (~'concat [[(~'list ~''ground ~kw) '~maybe-spec]]
-                                                            ~stx)))
-                                       opts))])
+            (cond
+              (::patvar (meta maybe-spec))
+              ,(let [opts (into {} (get grouped clojure.lang.PersistentList))]
+                 (set-type! tenv maybe-spec :keyword)
+                 `(conj (let [opts# ~opts]
+                          (if (every? empty? (vals opts#))
+                            []
+                            [(~'list ~''or ~@(map (fn [[kw stx]]
+                                                    `(~'cons ~''and
+                                                             (~'concat [[(~'list ~''ground ~kw)
+                                                                         '~maybe-spec]]
+                                                                       ~stx)))
+                                                  opts))
+                             ['~x :spec-tacular/spec '~maybe-spec]]))
+                        ['~x :spec-tacular/spec '~maybe-spec]))
+              :else
               `(let [opts# ~(into {} (get grouped clojure.lang.PersistentList))
                      spec# ~maybe-spec]
                  (conj (or (get opts# spec#)
@@ -956,7 +963,7 @@
                    [~@(map wrap args type-kws type-maps type-syms)]))]
        (->> (db/q {:find ~(if coll? `'([~(first args) ...]) `'~args)
                    :in '~['$]
-                   :where ~clauses}
+                   :where (reverse (distinct ~clauses))}
                   ~db)
             (map check#) (set)))))
 
