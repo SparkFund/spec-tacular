@@ -762,8 +762,8 @@
            (and (::patvar (meta l)) (::patvar (meta r)))
            ,(do (set-type! tenv l :keyword)
                 (set-type! tenv r (:name spec))
-                [[`'~r :spec-tacular/spec `'~l]
-                 [`'~x db-kw `'~r]])
+                [[`'~x db-kw `'~r]
+                 [`'~r :spec-tacular/spec `'~l]])
            :else ;; fall back to dynamic resolution
            (throw (ex-info "dynamic resolution not yet supported" {:syntax rhs}))))
       :else [(mk-where-clause rhs)])))
@@ -780,8 +780,8 @@
                   db-keyword (db-keyword spec kw)]
               (cond
                 item
-                `(conj ~(expand-item item db-keyword rhs x uenv tenv)
-                       ['~x :spec-tacular/spec ~(:name spec)])
+                `(concat [['~x :spec-tacular/spec ~(:name spec)]]
+                         ~(expand-item item db-keyword rhs x uenv tenv))
                 (= kw :spec-tacular/spec)
                 (do (set-type! tenv rhs :keyword)
                     [[`'~x :spec-tacular/spec `'~rhs]])
@@ -807,24 +807,25 @@
               (::patvar (meta maybe-spec))
               ,(let [opts (into {} (get grouped clojure.lang.PersistentList))]
                  (set-type! tenv maybe-spec :keyword)
-                 `(conj (let [opts# ~opts]
-                          (if (every? empty? (vals opts#))
-                            []
-                            [(~'list ~''or ~@(map (fn [[kw stx]]
-                                                    `(~'cons ~''and
-                                                             (~'concat [[(~'list ~''ground ~kw)
-                                                                         '~maybe-spec]]
-                                                                       ~stx)))
-                                                  opts))
-                             ['~x :spec-tacular/spec '~maybe-spec]]))
-                        ['~x :spec-tacular/spec '~maybe-spec]))
+                 `(concat
+                   [['~x :spec-tacular/spec '~maybe-spec]]
+                   (let [opts# ~opts]
+                     (if (every? empty? (vals opts#))
+                       []
+                       [(~'list ~''or ~@(map (fn [[kw stx]]
+                                               `(~'cons ~''and
+                                                        (~'concat [[(~'list ~''ground ~kw)
+                                                                    '~maybe-spec]]
+                                                                  ~stx)))
+                                             opts))]))))
               :else
               `(let [opts# ~(into {} (get grouped clojure.lang.PersistentList))
                      spec# ~maybe-spec]
-                 (conj (or (get opts# spec#)
-                           (throw (ex-info "does not conform to any possible enumerated spec"
-                                           {:computed-spec spec# :available-specs (keys opts#)})))
-                       ['~x :spec-tacular/spec spec#])))))))))
+                 (concat [['~x :spec-tacular/spec spec#]]
+                         (or (get opts# spec#)
+                             (throw (ex-info "does not conform to any possible enumerated spec"
+                                             {:computed-spec spec#
+                                              :available-specs (keys opts#)}))))))))))))
 
 (t/ann expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any])
 (defn- expand-clause [clause uenv tenv]
@@ -963,7 +964,7 @@
                    [~@(map wrap args type-kws type-maps type-syms)]))]
        (->> (db/q {:find ~(if coll? `'([~(first args) ...]) `'~args)
                    :in '~['$]
-                   :where (reverse (distinct ~clauses))}
+                   :where (distinct ~clauses)}
                   ~db)
             (map check#) (set)))))
 
