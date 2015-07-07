@@ -463,7 +463,7 @@
         tx @(db/transact (:conn conn-ctx) (concat transaction txn-log))
         eid (->> transaction meta :eid)
         entid (db/resolve-tempid (db/db (:conn conn-ctx)) (:tempids tx) eid)]
-    (or entid eid)))
+    (or entid eid (:tempids tx))))
 
 (t/ann ^:no-check create-sp!
        [ConnCtx SpecInstance -> Long])
@@ -762,8 +762,8 @@
            (and (::patvar (meta l)) (::patvar (meta r)))
            ,(do (set-type! tenv l :keyword)
                 (set-type! tenv r (:name spec))
-                [[`'~r :spec-tacular/spec `'~l]
-                 [`'~x db-kw `'~r]])
+                [[`'~x db-kw `'~r]
+                 [`'~r :spec-tacular/spec `'~l]])
            :else ;; fall back to dynamic resolution
            (throw (ex-info "dynamic resolution not yet supported" {:syntax rhs}))))
       :else [(mk-where-clause rhs)])))
@@ -780,8 +780,8 @@
                   db-keyword (db-keyword spec kw)]
               (cond
                 item
-                `(conj ~(expand-item item db-keyword rhs x uenv tenv)
-                       ['~x :spec-tacular/spec ~(:name spec)])
+                `(concat [['~x :spec-tacular/spec ~(:name spec)]]
+                         ~(expand-item item db-keyword rhs x uenv tenv))
                 (= kw :spec-tacular/spec)
                 (do (set-type! tenv rhs :keyword)
                     [[`'~x :spec-tacular/spec `'~rhs]])
@@ -803,21 +803,29 @@
                                :errors (get grouped clojure.lang.ExceptionInfo)})))
             (when (not (symbol? maybe-spec))
               (throw (ex-info "not supported" {:syntax maybe-spec})))
-            (if (::patvar (meta maybe-spec))
-              (let [opts (into {} (get grouped clojure.lang.PersistentList))]
-                (set-type! tenv maybe-spec :keyword)
-                `[['~x :spec-tacular/spec '~maybe-spec]
-                  (~'list ~''or ~@(map (fn [[kw stx]]
-                                         `(~'cons ~''and
-                                                  (~'concat [[(~'list ~''ground ~kw) '~maybe-spec]]
-                                                            ~stx)))
-                                       opts))])
+            (cond
+              (::patvar (meta maybe-spec))
+              ,(let [opts (into {} (get grouped clojure.lang.PersistentList))]
+                 (set-type! tenv maybe-spec :keyword)
+                 `(concat
+                   [['~x :spec-tacular/spec '~maybe-spec]]
+                   (let [opts# ~opts]
+                     (if (every? empty? (vals opts#))
+                       []
+                       [(~'list ~''or ~@(map (fn [[kw stx]]
+                                               `(~'cons ~''and
+                                                        (~'concat [[(~'list ~''ground ~kw)
+                                                                    '~maybe-spec]]
+                                                                  ~stx)))
+                                             opts))]))))
+              :else
               `(let [opts# ~(into {} (get grouped clojure.lang.PersistentList))
                      spec# ~maybe-spec]
-                 (conj (or (get opts# spec#)
-                           (throw (ex-info "does not conform to any possible enumerated spec"
-                                           {:computed-spec spec# :available-specs (keys opts#)})))
-                       ['~x :spec-tacular/spec spec#])))))))))
+                 (concat [['~x :spec-tacular/spec spec#]]
+                         (or (get opts# spec#)
+                             (throw (ex-info "does not conform to any possible enumerated spec"
+                                             {:computed-spec spec#
+                                              :available-specs (keys opts#)}))))))))))))
 
 (t/ann expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any])
 (defn- expand-clause [clause uenv tenv]
@@ -956,7 +964,7 @@
                    [~@(map wrap args type-kws type-maps type-syms)]))]
        (->> (db/q {:find ~(if coll? `'([~(first args) ...]) `'~args)
                    :in '~['$]
-                   :where ~clauses}
+                   :where (distinct ~clauses)}
                   ~db)
             (map check#) (set)))))
 
@@ -971,12 +979,15 @@
 (defn transaction-data-item
   [db parent-spec parent-eid
    {iname :name required? :required? link? :link? [cardinality type] :type :as item}
-   old new]
+   old new & [tmps]]
   (let [datomic-key (keyword (datomic-ns parent-spec) (name iname))]
     (letfn [(add [i] ;; adds i to field datomic-key in entity eid
               (when (not i)
                 (throw (ex-info "cannot add nil" {:spec (:name parent-spec) :old old :new new})))
-              (if-let [sub-eid (and link? (get-in i [:db-ref :eid]))]
+              (if-let [sub-eid (and link? (or (get-in i [:db-ref :eid])
+                                              (and tmps (some (fn [[k v]]
+                                                                (and (identical? k i) v))
+                                                              @tmps))))]
                 ;; adding by reference
                 [[:db/add parent-eid datomic-key sub-eid]]
                 ;; adding by value
@@ -985,12 +996,14 @@
                     (if (= (recursiveness item) :non-rec)
                       [[:db/add parent-eid datomic-key i]]
                       (let [sub-eid  (db/tempid :db.part/user)
+                            _ (when (and tmps link?)
+                                (swap! tmps conj [i sub-eid]))
                             sub-spec (get-spec (second (:type item)))
                             sub-spec (if (:elements sub-spec)
                                        (get-spec i) sub-spec)]
                         (concat [[:db/add parent-eid datomic-key sub-eid]
                                  [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
-                                (transaction-data db sub-spec {:db-ref {:eid sub-eid}} i)))))))
+                                (transaction-data db sub-spec {:db-ref {:eid sub-eid}} i tmps)))))))
             (retract [i] ;; removes i from field datomic-key in entity eid
               (when (not i)
                 (throw (ex-info "cannot retract nil" {:spec (:name parent-spec) :old old :new new})))
@@ -1034,20 +1047,48 @@
 
 (t/ann ^:no-check transaction-data
        [Database SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
-(defn transaction-data [db spec old-si updates]
+(defn transaction-data [db spec old-si updates & [tmps]]
   "Given a possibly nil, possibly out of date old entity.
    Returns the transaction data to do the desired updates to something of type spec."
-  (let [eid (or (get-in old-si [:db-ref :eid])
-                (db/tempid :db.part/user))]
-    (when-not spec
-      (throw (ex-info "spec missing" {:old old-si :updates updates})))
-    (->> (for [{iname :name :as item} (:items spec)
-               :when (contains? updates iname)]
-           (transaction-data-item db spec eid item (iname old-si) (iname updates)))
-         (apply concat)
-         (#(if (get-in old-si [:db-ref :eid]) %
-               (cons [:db/add eid :spec-tacular/spec (:name spec)] %)))
-         (#(with-meta % (assoc (meta %) :eid eid))))))
+  (if-let [eid (when (and (nil? old-si) tmps)
+                 (some (fn [[k v]] (and (identical? k updates) v)) @tmps))]
+    (with-meta [] {:eid eid})
+    (let [eid (or (get-in old-si [:db-ref :eid])
+                  (db/tempid :db.part/user))]
+      (when-not spec
+        (throw (ex-info "spec missing" {:old old-si :updates updates})))
+      (->> (for [{iname :name :as item} (:items spec)
+                 :when (contains? updates iname)]
+             (transaction-data-item db spec eid item (iname old-si) (iname updates) tmps))
+           (apply concat)
+           (#(if (get-in old-si [:db-ref :eid]) %
+                 (cons [:db/add eid :spec-tacular/spec (:name spec)] %)))
+           (#(do (when (and tmps (get-spec updates))
+                   (swap! tmps conj [updates eid])) %))
+           (#(with-meta % (assoc (meta %) :eid eid)))))))
+
+(t/ann ^:no-check create-graph! (t/All [a] [ConnCtx a -> a]))
+(defn create-graph! [conn-ctx new-si-coll]
+  (let [tmps  (atom [])
+        specs (map get-spec new-si-coll)
+        data  (let [db (db/db (:conn conn-ctx))]
+                (map (fn [si spec]
+                       (when-not spec
+                         (throw (ex-info "could not find spec" {:entity si})))
+                       (when (or (get si :db-ref) (get-eid db si))
+                         (throw (ex-info "entity already in database" {:entity si})))
+                       (transaction-data db spec nil si tmps))
+                        new-si-coll specs))
+        tmpids (map (comp :eid meta) data)
+        data   (apply concat data)
+        txn-result @(db/transact (:conn conn-ctx) data)]
+    ;; db side effect has occurred
+    (let [db (db/db (:conn conn-ctx))]
+      (into (empty new-si-coll)
+            (map #(some->> (db/resolve-tempid db (:tempids txn-result) %1)
+                           (db/entity db)
+                           (recursive-ctor (:name %2)))
+                 tmpids specs)))))
 
 (t/ann ^:no-check create! (t/All [a] [ConnCtx a -> a]))
 (defn create!
@@ -1056,16 +1097,7 @@
    Get eid from object using :db-ref field.
    Aborts if the entity already exists in the database (use assoc! instead)."
   [conn-ctx new-si]
-  (let [spec (or (get-spec new-si)
-                 (throw (ex-info (str "could not find spec") {:entity new-si})))
-        eid (let [db (db/db (:conn conn-ctx))]
-              (when (or (get new-si :db-ref) (get-eid db new-si))
-                (throw (ex-info "entity already in database" {:entity new-si})))
-              (some->> (transaction-data db spec nil new-si)
-                       (commit-sp-transactions! conn-ctx)))]
-    ;; db side effect has occurred
-    (some->> (db/entity (db/db (:conn conn-ctx)) eid)
-             (recursive-ctor (:name spec)))))
+  (first (create-graph! conn-ctx [new-si])))
 
 (t/ann ^:no-check assoc! (t/All [a] [ConnCtx a t/Keyword t/Any -> a]))
 (defn assoc!
@@ -1085,8 +1117,7 @@
          (recursive-ctor (:name spec)))))
 
 (t/ann ^:no-check update! (t/All [a] [ConnCtx a a -> a]))
-(defn update!
-  [conn-ctx si-old si-new]
+(defn update! [conn-ctx si-old si-new]
   (let [updates (mapcat (fn [[k v]] [k v]) si-new)]
     (if (empty? updates) si-old
         (if (not (even? (count updates)))
@@ -1095,8 +1126,7 @@
           (apply assoc! conn-ctx si-old updates)))))
 
 (t/ann ^:no-check refresh (t/All [a] [ConnCtx a -> a]))
-(defn refresh
-  [conn-ctx si]
+(defn refresh [conn-ctx si]
   (let [eid  (get-in si [:db-ref :eid])
         spec (get-spec si)]
     (when-not eid (throw (ex-info "entity without identity" {:entity si})))

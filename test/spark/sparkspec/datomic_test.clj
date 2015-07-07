@@ -5,17 +5,18 @@
         spark.sparkspec.spec
         spark.sparkspec.datomic
         spark.sparkspec.test-utils
-        spark.sparkspec.test-specs
         spark.sparkspec.generators)
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :as sd]
             [spark.sparkspec.schema :as schema]
+            [clojure.walk :as walk]
             [clojure.core.typed :as t]
             [clojure.tools.macro :as m]
             [clojure.test.check :as tc]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]
-            [clojure.test.check.clojure-test :as ct]))
+            [clojure.test.check.clojure-test :as ct]
+            [spark.sparkspec.test-specs :refer :all]))
 
 (def simple-schema
   (cons schema/spec-tactular-map
@@ -131,7 +132,32 @@
         (let [res (td a-scml (assoc a-scml :val1 nil))]
           (is (= (get-in a-scml [:val1 :db-ref :eid]) 2))
           (is (= res [[:db/retract 3 :scmlink/val1 2]]))))
-      (testing "invalid"))))
+      (testing "invalid")))
+
+  (testing "graph"
+    (let [s (scm {:val1 "string"})
+          eid (db/tempid :db.part/user)]
+      (is (= (meta (transaction-data nil (get-spec :Scm) nil s
+                                     (atom {s eid})))
+             {:eid eid})))
+
+    (let [s   (scm2 {:val1 42})
+          eid (db/tempid :db.part/user)]
+      (is (= (count (transaction-data nil (get-spec :ScmM) nil
+                                      {:val s :vals [s]}
+                                      (atom {})))
+             (count '[[:db/add id1 :spec-tacular/spec :ScmM] ;; edited out ids
+                      [:db/add id1 :scmm/val id2]
+                      [:db/add id2 :spec-tacular/spec :Scm2]
+                      [:db/add id2 :scm2/val1 42]
+                      [:db/add id1 :scmm/vals id2]]))))
+    (let [e1 (scmmwrap {:val nil, :name nil})
+          tmps (atom [])]
+      (with-test-db simple-schema
+        (let [db (db/db *conn*)]
+          (do (transaction-data db (get-spec e1) nil e1 tmps)
+              (is (= (transaction-data db (get-spec e1) nil e1 tmps)
+                     []))))))))
 
 (deftest test-commit-sp-transactions!
   (let [scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})})
@@ -718,7 +744,7 @@
                               [:Scm {:scm2 {:spec-tacular/spec ?type}}])
                            ffirst)]
         (is (= scm2-type :Scm2)))
-      #_(let [soe (create! {:conn *conn*}
+      (let [soe (create! {:conn *conn*}
                          (scmownsenum {:enum (scm2 {:val1 42})}))]
         (is (= (q :find ?type ?any :in (db) :where
                   [:ScmOwnsEnum {:enum [?type ?any]}])
@@ -735,10 +761,7 @@
                (db/q '[:find ?type :in $ :where
                        [?scmownsenum :spec-tacular/spec :ScmOwnsEnum]
                        [?scmownsenum :scmownsenum/enum ?tmp]
-                       [?tmp :spec-tacular/spec ?type]
-                       (or [?tmp :spec-tacular/spec :Scm]
-                           [?tmp :spec-tacular/spec :Scm2]
-                           [?tmp :spec-tacular/spec :Scm2])]
+                       [?tmp :spec-tacular/spec ?type]]
                      (db)))))
       #_(let [e-scm (create! {:conn *conn*} (scm {:val1 "77"}))]
         (is (contains? (q :find :Scm :in (db) :where
@@ -962,6 +985,155 @@
           sl-db (refresh-sl)
           _ (is (= (:val1 (:link1 sl-db)) "6"))])))
 
+(defn- unique-db-refs [inst]
+  (let [objs (atom (list))
+        add-if-unique!
+        ,(fn [x]
+           (when (get-spec x)
+             (when-not (some #(= (get-in x [:db-ref :eid])
+                                 (get-in % [:db-ref :eid]))
+                             @objs)
+               (swap! objs conj x))))]
+    (do (walk/prewalk #(do (add-if-unique! %) %) inst)
+        @objs)))
+
+(defn- unique-objs [inst]
+  (let [objs (atom (list))
+        add-if-unique!
+        ,(fn [x]
+           (when (get-spec x)
+             (when-not (some #(identical? % x) @objs)
+               (swap! objs conj x))))]
+    (do (walk/prewalk #(do (add-if-unique! %) %) inst)
+        @objs)))
+
+(defn- total-objs [inst]
+  (let [objs (atom (list))
+        add-if-unique!
+        ,(fn [x]
+           (when (get-spec x)
+             (swap! objs conj x)))]
+    (do (walk/prewalk #(do (add-if-unique! %) %) inst)
+        (count @objs))))
+
+(deftest test-create-graph!
+  (testing "unique-objs"
+    (let [e1 (scmmwrap {:val (scmm {:identity "G__195328)" :val (scm2 {:val1 1})})})]
+      (is (= (unique-objs [e1 e1])
+             (unique-objs [e1]))))
+    (let [e2 (scmm {:val (scm3 {})})]
+      (is (= (count (unique-objs (scmmwrap {:name "eg%Wnva" :val e2})))
+             (count (unique-objs (scmmwrap {:val e2}))))))
+    (let [e1 (scmmwrap #_"i_ScmMWrap@8628e9e2" {})
+          e2 (scmmwrap #_"i_ScmMWrap@f4df349a" {:name "ve?|xZP,c!dkj[S["})
+          e3 (scm2 #_"i_Scm2@4a7309ea" {:val1 4})
+          e4 (scmm #_"i_ScmM@9e816645"
+                   {:val e3,
+                    :identity "G__135311acmw>a&-"})
+          e5 (scmm #_"i_ScmM@c0fd11a2" {:val e3})
+          e6 (scmm #_"i_ScmM@873018c8" {})
+          e7 (scmmwrap #_"i_ScmMWrap@6006f507" {:name "esmkN&D}[.7"})
+          e8 (scmmwrap #_"i_ScmMWrap@eba78425" {:val e4 :name ""})
+          e9 (scmmwrap #_"i_ScmMWrap@538f19a"  {:val e6})]
+      (= (count (unique-objs
+                 [e1 e7 e1 e2 e1 e1 e8 e7 e9 e2
+                  (scmmwrap #_"i_ScmMWrap@8628e9a4" {:name "B"})
+                  (scmmwrap #_"i_ScmMWrap@a685f2a5" {:val e5 :name "oHRXw@wYjc"})
+                  (scmmwrap #_"i_ScmMWrap@456bfa84" {:val e5})
+                  e9 e1 e8]))
+         12)))
+
+  (testing "unique-db-refs"
+    (is (= (-> [(scmmwrap {:db-ref {:eid 1}})
+                (scmmwrap {:db-ref {:eid 2}})
+                (scmmwrap {:db-ref {:eid 3}
+                           :name "7+6"
+                           :val (scmm {:db-ref {:eid 4},
+                                       :val
+                                       (scm {:db-ref {:eid 5},
+                                             :val1 "G__92146",
+                                             :val2 -1,
+                                             :scm2 (scm2 {:db-ref {:eid 6}})}),
+                                       :vals
+                                       [(scm2 {:db-ref {:eid 6}})
+                                        (scm2 {:db-ref {:eid 7} :val1 0})]})})]
+               unique-db-refs count)
+           7))
+    (let [e1 (scmmwrap {})
+          expected [(scmmwrap {:val (scmm {:val (scm {:scm2 (scm2 {})})})})
+                    (scmmwrap {:val (scmm {:val (scm3 {})})})
+                    e1
+                    (scmmwrap {})
+                    (scmmwrap {})
+                    e1]]
+      (with-test-db simple-schema
+        (is (= (-> (create-graph! {:conn *conn*} expected)
+                   unique-db-refs count)
+               (-> [(scmmwrap {:db-ref {:eid 1}
+                               :val (scmm {:db-ref {:eid 2}
+                                           :val (scm {:db-ref {:eid 3}
+                                                      :scm2 (scm2 {:db-ref {:eid 4}})})})})
+                    (scmmwrap {:db-ref {:eid 5}
+                               :val (scmm {:db-ref {:eid 6}
+                                           :val (scm3 {:db-ref {:eid 7}})})})
+                    (scmmwrap {:db-ref {:eid 8}})
+                    (scmmwrap {:db-ref {:eid 9}})
+                    (scmmwrap {:db-ref {:eid 10}})
+                    (scmmwrap {:db-ref {:eid 8}})]
+                   unique-db-refs count)
+               10)))))
+  
+  (let [exs [(let [e (scm2 {:val1 1})]
+               {:expected [e e]})
+             (let [e1 (scmmwrap {:val (scmm {:identity "G__195328)"
+                                             :val (scm2 {:val1 1})})})
+                   e2 (scmm {:val (scm3 {})})]
+               {:expected [e1
+                           e1
+                           (scmmwrap {:name "eg%Wnva" :val e2})
+                           (scmmwrap {:val e2})]})
+
+             (let [e0 (scm {:multi [""] :val2 -5})
+                   e1 (scmmwrap {})
+                   e2 (scmmwrap {:val (scmm {:val e0 :identity "G__57958jHwJNU"})})
+                   e3 (scm2 {})]
+               {:expected
+                [(scmmwrap {:name "d"})
+                 e2
+                 (scmmwrap {:val (scmm {})})
+                 e2 e1 e1
+                 (scmmwrap {:val
+                            (scmm {:vals [e3]
+                                   :val e0
+                                   :identity "G__57885?-*k@xO"})
+                            :name ""})
+                 e1
+                 (scmmwrap {:val (scmm {:val e3 :identity "G__57884e"})})]})
+             (let [e1 (scmmwrap {})]
+               {:expected
+                [(scmmwrap {:val (scmm {:val (scm {:scm2 (scm2 {})})})})
+                 (scmmwrap {:val (scmm {:val (scm3 {})})})
+                 e1
+                 (scmmwrap {})
+                 (scmmwrap {})
+                 e1]})
+             #_(let [e0 (scmparent {})
+                     e3 (scm2 {})
+                     e1 (scmlink {:val1 e0
+                                  :link2 [e3]
+                                  :link1 (scm {:multi ["l\"[" "\"pCS"],
+                                               :val1 "G__34694"})})
+                     e2 (scmlink {:val1 e0,:link2 [e3]})]
+                 {:expected [(scmlink {}) e1 e2 e1 e2]})]]
+    (doseq [{:keys [expected]} exs]
+      (with-test-db simple-schema
+        (let [conn-ctx {:conn *conn*}
+              actual (create-graph! conn-ctx expected)
+              urefs  (unique-db-refs actual)
+              uobjs  (unique-objs expected)]
+          (is (= {:count (count urefs) :entity actual}
+                 {:count (count uobjs) :entity expected})))))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
 
@@ -986,18 +1158,33 @@
   [spec-key]
   (with-test-db simple-schema
     (let [spec     (get-spec spec-key)
-          gen      (instance-generator spec)
           fields   (map :name (:items spec))
           conn-ctx {:conn *conn*}]
-      (prop/for-all [{:keys [original updates]} gen]
+      (prop/for-all [{:keys [original updates]} (instance-generator spec)]
         (and (every? #(check-component! spec % (get original %)) fields)
              (when-let [created (check-create! conn-ctx original)]
                (or (= created :skip) (check-update! conn-ctx created updates))))))))
 
 (ct/defspec gen-Scm2 10 (prop-check-components :Scm2))
-(ct/defspec get-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
-(ct/defspec get-ScmM 10 (prop-check-components :ScmM))
-(ct/defspec get-ScmParent 10 (prop-check-components :ScmParent))
-(ct/defspec get-ScmMWrap 10 (prop-check-components :ScmMWrap))
+(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
+(ct/defspec gen-ScmM 10 (prop-check-components :ScmM))
+(ct/defspec gen-ScmParent 10 (prop-check-components :ScmParent))
+(ct/defspec gen-ScmMWrap 10 (prop-check-components :ScmMWrap))
 (ct/defspec gen-Scm 20 (prop-check-components :Scm))
-(ct/defspec get-ScmLink 50 (prop-check-components :ScmLink))
+(ct/defspec gen-ScmLink 50 (prop-check-components :ScmLink))
+
+(defn prop-create-graph [spec-key]
+  (let [spec (get-spec spec-key)
+        has-repeats? #(> (total-objs %) (count (unique-objs %)))
+        gen (graph-generator spec)]
+    (prop/for-all [{:keys [expected]} (gen/such-that has-repeats? gen 20)]
+      (with-test-db simple-schema
+        (let [conn-ctx {:conn *conn*}
+              actual (create-graph! conn-ctx expected)]
+          (is (= {:count (count (unique-db-refs actual)) :entity actual}
+                 {:count (count (unique-objs expected)) :entity expected})))))))
+
+(ct/defspec graph-ScmOwnsEnum 10 (prop-create-graph :ScmOwnsEnum))
+(ct/defspec graph-ScmM 10 (prop-create-graph :ScmM))
+(ct/defspec graph-ScmMWrap 20 (prop-create-graph :ScmMWrap))
+
