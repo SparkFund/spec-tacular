@@ -737,7 +737,19 @@
       ,(do (set-type! tenv rhs sub-spec-name)
            [(mk-where-clause `'~rhs)])
       (symbol? rhs)
-      ,[(mk-where-clause rhs)]
+      ,(let [sub-spec (get-spec sub-spec-name)
+             y (gensym "?tmp")]
+         `(let [rhs# ~rhs, rhs-spec# (get-spec rhs#)]
+            (if rhs-spec#
+              (if-let [eid# (get-in rhs# [:db-ref :eid])]
+                [['~x ~db-kw eid#]]
+                (if-let [item# (some #(and (:unique? %) %) (:items rhs-spec#))]
+                  (if-let [val# ((:name item#) rhs#)]
+                    [['~x ~db-kw '~y]
+                     ['~y (db-keyword rhs-spec# (:name item#)) val#]]
+                    (assert false))
+                  (assert false)))
+              ~[(mk-where-clause rhs)])))
       (keyword? rhs)
       ,(t/let [y (gensym "?tmp")]
          [(mk-where-clause `'~y)
@@ -801,16 +813,20 @@
                                   (catch clojure.lang.ExceptionInfo e {% e}))
                             (keep elements))
                 try-map (into {} try-all)
-                grouped (group-by #(type (second %)) try-map)]
-            (when (empty? (get grouped clojure.lang.PersistentList))
+                grouped (group-by
+                         #(if (or (= (type (second %)) clojure.lang.PersistentList)
+                                  (= (type (second %)) clojure.lang.Cons))
+                            :syntax :error)
+                         try-map)]
+            (when (empty? (get grouped :syntax))
               (throw (ex-info "does not conform to any possible enumerated spec"
                               {:syntax atmap :possible-specs elements
-                               :errors (get grouped clojure.lang.ExceptionInfo)})))
+                               :errors (get grouped :error)})))
             (when (not (symbol? maybe-spec))
               (throw (ex-info "not supported" {:syntax maybe-spec})))
             (cond
               (::patvar (meta maybe-spec))
-              ,(let [opts (into {} (get grouped clojure.lang.PersistentList))]
+              ,(let [opts (into {} (get grouped :syntax))]
                  (set-type! tenv maybe-spec :keyword)
                  `(concat
                    [['~x :spec-tacular/spec '~maybe-spec]]
@@ -824,7 +840,7 @@
                                                                   ~stx)))
                                              opts))]))))
               :else
-              `(let [opts# ~(into {} (get grouped clojure.lang.PersistentList))
+              `(let [opts# ~(into {} (get grouped :syntax))
                      spec# ~maybe-spec]
                  (concat [['~x :spec-tacular/spec spec#]]
                          (or (get opts# spec#)

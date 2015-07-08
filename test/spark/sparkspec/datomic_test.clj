@@ -790,7 +790,7 @@
            (->> '(spark.sparkspec.datomic/q :find :Scm :in (db) :where [% {:y 5}])
                 clojure.core/macroexpand prn)))
       (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"does not conform"
+           clojure.lang.ExceptionInfo #"not supported"
            (macroexpand
             '(spark.sparkspec.datomic/q :find ?val :in (db) :where
                                         [:ScmEnum {:val1 ?val}]))))))
@@ -1188,3 +1188,7 @@
 (ct/defspec graph-ScmM 10 (prop-create-graph :ScmM))
 (ct/defspec graph-ScmMWrap 20 (prop-create-graph :ScmMWrap))
 
+#_(let [se (scm {:val1 "abc"})] ;; TODO test
+    (clojure.pprint/pprint
+     (macroexpand
+      '(q :find [:ScmOwnsEnum ...] :in db :where [% {:enum se}]))))
