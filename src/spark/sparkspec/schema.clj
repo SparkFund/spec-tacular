@@ -131,13 +131,18 @@
   [stream :- java.io.PushbackReader] :- Schema
   (edn/read {:readers *data-readers*} stream))
 
+(t/ann ^:no-check write [Schema java.io.Writer -> nil])
 (t/defn write
   "writes a Schema to w"
-  [schema :- Schema, w :- java.io.Writer] :- nil
+  [schema w]
   (t/let [write :- [java.lang.String -> nil]
-          ,#(.write ^java.io.Writer w ^java.lang.String %)]
+          ,#(.write ^java.io.Writer w ^java.lang.String %)
+          sorted-cols :- Schema
+          (map #(into (sorted-map) %) schema)
+          sorted-rows :- Schema
+          (sort-by :db/ident (map #(into (sorted-map) %) sorted-cols))]
     (write "[")
-    (t/doseq [m :- EntityMap (cons spec-tactular-map schema)]
+    (t/doseq [m :- EntityMap (cons spec-tactular-map sorted-rows)]
       (write "\n")
       ;; regexp: #db/id[:db.part/db -1003792] ==> #db/id[:db.part/db]
       ;; TODO: is that regexp qualified enough?
