@@ -96,7 +96,7 @@
               (filter second)
               (into {}))))))
 
-(t/ann get-all-eids [datomic.db.DbId SpecT -> (t/ASeq Long)])
+(t/ann get-all-eids [datomic.db.Db SpecT -> (t/ASeq Long)])
 (defn get-all-eids
   "Retrives all of the eids described by the given spec from the database."
   [db spec]
@@ -171,12 +171,17 @@
               (str eid " is not an eid"))
       (db->sp db (db/entity db eid) sp-type)))
 
-(t/ann ^:no-check get-all-of-type [datomic.db.Db Long SpecT -> (t/ASeq SpecInstance)])
-(defn get-all-of-type
-  "Helper function that returns all items of a single spec"
+(defmacro get-all-by-spec
+  "Returns all the entities in db with the given spec.
+  If the spec is a keyword at compile-time, the resulting entity is cast to the correct type.
+  Otherwise, the resulting entity is a generic SpecInstance."
   [db spec]
-  (let [eids (get-all-eids db spec)]
-    (map (fn [eid] (recursive-ctor (:name spec) (db/entity db eid))) eids)))
+  `(let [eids# (get-all-eids ~db (get-spec ~spec))
+         eid->si# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
+                   (fn [eid#] (recursive-ctor (:name (get-spec ~spec)) (db/entity ~db eid#)))
+                   [Long ~'-> ~(if (keyword? spec) (:type-symbol (get-type spec))
+                                   `SpecInstance)])]
+     (map eid->si# eids#)))
 
 (t/ann ^:no-check build-transactions
        (t/IFn [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]
