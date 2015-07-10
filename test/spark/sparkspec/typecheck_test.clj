@@ -36,3 +36,8 @@
   (-> (sd/q :find [:ScmOwnsEnum ...] :in db :where
             [% {:enum {:spec-tacular/spec :Scm}}])
       first :enum))
+
+(t/ann test-get-all-by-spec-scmenum [sd/Database -> (t/ASeq ts/ScmEnum)])
+(defn test-get-all-by-spec-scmenum [db]
+  (sd/get-all-by-spec db :ScmEnum))
+
