@@ -617,7 +617,7 @@
           _ (is (= #{[1234]} r3) "we annotated the transaction that created the thing with val1 1234")
           _ (create-sp! {:conn *conn* :transaction-log (scm {:val1 "log2"})}
                         (scm2 {:val1 5678}))
-          _ (is (= 2 (count (get-all-of-type (db) (get-spec :Scm)))) "now have 2 logs")
+          _ (is (= 2 (count (get-all-by-spec (db) :Scm))) "now have 2 logs")
           [e2] (first (db/q '[:find ?e
                               :in $ ?v
                               :where
