@@ -249,11 +249,9 @@
              (bit-xor ~(hash class-name)
                       (clojure.lang.APersistentMap/mapHasheq (.without this# :db-ref))))
            (hashCode [this#]
-             (clojure.lang.APersistentMap/mapHash (.without this# :db-ref)))
+             (clojure.lang.APersistentMap/mapHash this#))
            (equals [this# ~gs]
-             (clojure.lang.APersistentMap/mapEquals
-              (.without this# :db-ref)
-              (.without this# :db-ref))))
+             (clojure.lang.APersistentMap/mapEquals this# ~gs)))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
            (.write w# (spec-instance->str ~spec v# '~(ns-name *ns*))))
