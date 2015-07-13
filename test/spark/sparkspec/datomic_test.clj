@@ -737,13 +737,12 @@
             (is b))
           #_(is (not (:val1 (scm2 a-scm2))))))))
 
-  (testing "spec dispatch"
+  (testing "complex dispatch"
     (with-test-db simple-schema
-      (let [_ (create! {:conn *conn*} (scm {:scm2 (scm2 {:val1 22})}))
-            scm2-type (->> (q :find ?type :in (db) :where
-                              [:Scm {:scm2 {:spec-tacular/spec ?type}}])
-                           ffirst)]
-        (is (= scm2-type :Scm2)))
+      (create! {:conn *conn*} (scm {:scm2 (scm2 {:val1 22})}))
+      (is (= (q :find ?type :in (db) :where
+                [:Scm {:scm2 {:spec-tacular/spec ?type}}])
+             #{[:Scm2]}))
       (let [soe (create! {:conn *conn*}
                          (scmownsenum {:enum (scm2 {:val1 42})}))]
         (is (= (q :find ?type ?any :in (db) :where
@@ -762,44 +761,53 @@
                        [?scmownsenum :spec-tacular/spec :ScmOwnsEnum]
                        [?scmownsenum :scmownsenum/enum ?tmp]
                        [?tmp :spec-tacular/spec ?type]]
-                     (db)))))
-      #_(let [e-scm (create! {:conn *conn*} (scm {:val1 "77"}))]
-        (is (contains? (q :find :Scm :in (db) :where
-                          [% {:val2 nil}])
-                       [e-scm]))
-        (is (contains? (q :find [:Scm ...] :in (db) :where
-                          [% {:val2 nil}])
-                       e-scm)))))
+                     (db))))
+        (is (= (let [si (:enum soe)]
+                 (q :find :ScmOwnsEnum :in (db) :where
+                    [% {:enum si}]))
+               (q :find :ScmOwnsEnum :in (db) :where
+                  [% {:enum (:enum soe)}])
+               #{[soe]}))))
+
+    (with-test-db simple-schema
+      (create! {:conn *conn*} (dog {:name "jack"}))
+      (create! {:conn *conn*} (cat {:name "zuzu"}))
+      (is (= (q :find :Animal :in (db) :where
+                [% {:name "zuzu"}])
+             #{[(cat {:name "zuzu"})]}))
+      (create! {:conn *conn*} (cat {:name "jack"}))
+      (is (= (q :find [:Animal ...] :in (db) :where
+                [% {:name "jack"}])
+             #{(cat {:name "jack"})
+               (dog {:name "jack"})}))))
 
   (testing "bad syntax" ; fully qualify for command line
     (with-test-db simple-schema
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"invalid clause rhs"
-           (->> '(spark.sparkspec.datomic/q :find :Scm2 :in (db) :where [:Scm :scm2])
-                clojure.core/macroexpand prn)))
+           (macroexpand '(spark.sparkspec.datomic/q :find :Scm2 :in (db)
+                                                    :where [:Scm :scm2])))
+          "using a (non-spec) keyword as a rhs")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"could not infer type"
-           (->> '(spark.sparkspec.datomic/q :find ?x :in (db) :where [?x {:y 5}])
-                clojure.core/macroexpand prn)))
+           (macroexpand '(spark.sparkspec.datomic/q :find ?x :in (db)
+                                                    :where [?x {:y 5}])))
+          "impossible to determine spec of x")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"unsupported ident"
-           (->> '(spark.sparkspec.datomic/q :find ?x :in (db) :where ["?x" {:y 5}])
-                clojure.core/macroexpand prn)))
+           (macroexpand '(spark.sparkspec.datomic/q :find ?x :in (db) :where
+                                                    ["?x" {:y 5}])))
+          "using a string as an ident")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"could not find item"
-           (->> '(spark.sparkspec.datomic/q :find :Scm :in (db) :where [% {:y 5}])
-                clojure.core/macroexpand prn)))
+           (macroexpand '(spark.sparkspec.datomic/q :find :Scm :in (db) :where
+                                                    [% {:y 5}])))
+          "trying to specify a field that is not in the spec")
       (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"does not conform"
-           (macroexpand
-            '(spark.sparkspec.datomic/q :find ?val :in (db) :where
-                                        [:ScmEnum {:val1 ?val}]))))))
-
-  (with-test-db simple-schema
-    (create! {:conn *conn*} (scmownsenum {:enum (scm3)}))
-    (is (= (count (q :find [:ScmOwnsEnum ...] :in (db) :where
-                     [% {:enum {:spec-tacular/spec :Scm}}]))
-           0)))
+           clojure.lang.ExceptionInfo #"not supported"
+           (macroexpand '(spark.sparkspec.datomic/q :find ?val :in (db) :where
+                                                    [:ScmEnum {:val1 ?val}])))
+          "trying to pull out a field from an enum with different field types")))
 
   (testing "bad data" ; db goes to shit after this -- should be last test
     (with-test-db simple-schema
@@ -1188,3 +1196,7 @@
 (ct/defspec graph-ScmM 10 (prop-create-graph :ScmM))
 (ct/defspec graph-ScmMWrap 20 (prop-create-graph :ScmMWrap))
 
+#_(let [se (scm {:val1 "abc"})] ;; TODO test
+    (clojure.pprint/pprint
+     (macroexpand
+      '(q :find [:ScmOwnsEnum ...] :in db :where [% {:enum se}]))))
