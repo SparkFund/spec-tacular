@@ -25,7 +25,7 @@
                           :optional {:elements (t/Map t/Keyword SpecT)}))
 
 (t/ann ^:no-check spark.sparkspec/primitive? [t/Keyword -> t/Bool])
-(t/ann ^:no-check spark.sparkspec/get-spec [(t/U SpecInstance t/Keyword) -> SpecT])
+(t/ann ^:no-check spark.sparkspec/get-spec [t/Any -> (t/Option SpecT)])
 (t/ann ^:no-check spark.sparkspec/get-ctor [t/Keyword -> [(t/Map t/Any t/Any) -> SpecInstance]])
 (t/ann ^:no-check spark.sparkspec/get-type [(t/U SpecInstance t/Keyword) -> (t/Map t/Keyword t/Any)])
 

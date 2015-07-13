@@ -115,7 +115,9 @@
   it exists in the database. Looks up according to identity
   items. Returns nil if not found."
   ([db sp] 
-   (when (map? sp) (get-eid db sp (get-spec sp))))
+   (when (map? sp)
+     (when-let [spec (get-spec sp)]
+       (get-eid db sp spec))))
   ([db sp spec]
    (let [eid (or (get-in sp [:db-ref :eid]) (:eid (meta sp)))]
      (assert (or (nil? eid) (instance? Long eid)))
@@ -176,7 +178,9 @@
   If the spec is a keyword at compile-time, the resulting entity is cast to the correct type.
   Otherwise, the resulting entity is a generic SpecInstance."
   [db spec]
-  `(let [eids# (get-all-eids ~db (get-spec ~spec))
+  `(let [spec# (get-spec ~spec)
+         _# (assert spec#)
+         eids# (get-all-eids ~db spec#)
          eid->si# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
                    (fn [eid#] (recursive-ctor (:name (get-spec ~spec)) (db/entity ~db eid#)))
                    [Long ~'-> ~(if (keyword? spec) (:type-symbol (get-type spec))
@@ -777,9 +781,12 @@
             (if rhs-spec#
               (if-let [eid# (get-in rhs# [:db-ref :eid])]
                 [['~x ~db-kw eid#]]
-                (let [item# (some #(and (:unique? %) %) (:items rhs-spec#))
-                      val#  (and item# ((:name item#) rhs#))]
-                  (when-not (and item# (some? val#))
+                (t/let [item# :- (t/Option Item)
+                        ,(some (t/ann-form #(if (:unique? %) %)
+                                           [Item ~'-> (t/Option Item)]) ;; core.typed srs
+                               (:items rhs-spec#))
+                        val#  :- t/Any (and item# ((:name item#) rhs#))]
+                  (if (and item# (some? val#))
                     [['~x ~db-kw '~y]
                      ['~y (db-keyword rhs-spec# (:name item#)) val#]]
                     (throw (ex-info "Cannot uniquely describe the given value"
