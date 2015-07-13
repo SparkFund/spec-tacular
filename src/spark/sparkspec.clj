@@ -247,11 +247,13 @@
            clojure.lang.IHashEq
            (hasheq [this#]
              (bit-xor ~(hash class-name)
-                      (clojure.lang.APersistentMap/mapHasheq this#)))
+                      (clojure.lang.APersistentMap/mapHasheq (.without this# :db-ref))))
            (hashCode [this#]
-             (clojure.lang.APersistentMap/mapHash this#))
+             (clojure.lang.APersistentMap/mapHash (.without this# :db-ref)))
            (equals [this# ~gs]
-             (clojure.lang.APersistentMap/mapEquals this# ~gs)))
+             (clojure.lang.APersistentMap/mapEquals
+              (.without this# :db-ref)
+              (.without this# :db-ref))))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
            (.write w# (spec-instance->str ~spec v# '~(ns-name *ns*))))
@@ -359,8 +361,8 @@
       sp
       (let [sub-kvs
             ,(keep (fn [{iname :name [arity sub-spec-name] :type :as item}]
-                     (if (not (primitive? sub-spec-name))
-                       (if-let [sub-sp (get sp iname)]
+                     (when-not (primitive? sub-spec-name)
+                       (when-let [sub-sp (get sp iname)]
                          [iname (case arity
                                   :one (recursive-ctor sub-spec-name sub-sp)
                                   :many (map #(recursive-ctor sub-spec-name %) sub-sp))])))
@@ -419,8 +421,8 @@
   (let [elements (:elements spec)]
     `(defmethod get-spec ~(:name spec) [o# & [rest#]]
        (if-let [rest-spec# (and rest# (get-spec rest#))]
-         (if (some #(= (:name rest-spec#) %) [~@elements])
-           rest-spec# (throw (ex-info "spec mismatch" {:objects (cons o# rest#)})))
+         (if (some #(= (:name rest-spec#) %) [~@elements]) rest-spec#
+             (throw (ex-info "spec mismatch" {:objects (cons o# rest#)})))
          ~spec))))
 
 (defn- mk-enum-get-map-ctor [spec]

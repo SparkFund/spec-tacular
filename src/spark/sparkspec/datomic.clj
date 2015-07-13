@@ -736,20 +736,6 @@
       (::patvar (meta rhs))
       ,(do (set-type! tenv rhs sub-spec-name)
            [(mk-where-clause `'~rhs)])
-      (symbol? rhs)
-      ,(let [sub-spec (get-spec sub-spec-name)
-             y (gensym "?tmp")]
-         `(let [rhs# ~rhs, rhs-spec# (get-spec rhs#)]
-            (if rhs-spec#
-              (if-let [eid# (get-in rhs# [:db-ref :eid])]
-                [['~x ~db-kw eid#]]
-                (if-let [item# (some #(and (:unique? %) %) (:items rhs-spec#))]
-                  (if-let [val# ((:name item#) rhs#)]
-                    [['~x ~db-kw '~y]
-                     ['~y (db-keyword rhs-spec# (:name item#)) val#]]
-                    (assert false))
-                  (assert false)))
-              ~[(mk-where-clause rhs)])))
       (keyword? rhs)
       ,(t/let [y (gensym "?tmp")]
          [(mk-where-clause `'~y)
@@ -783,7 +769,22 @@
                  [`'~r :spec-tacular/spec `'~l]])
            :else ;; fall back to dynamic resolution
            (throw (ex-info "dynamic resolution not yet supported" {:syntax rhs}))))
-      :else [(mk-where-clause rhs)])))
+      :else
+      ;; We have a "thing" that eventually resolves into a value.
+      ,(let [sub-spec (get-spec sub-spec-name)
+             y (gensym "?tmp")]
+         `(let [rhs# ~rhs, rhs-spec# (get-spec rhs#)]
+            (if rhs-spec#
+              (if-let [eid# (get-in rhs# [:db-ref :eid])]
+                [['~x ~db-kw eid#]]
+                (let [item# (some #(and (:unique? %) %) (:items rhs-spec#))
+                      val#  (and item# ((:name item#) rhs#))]
+                  (when-not (and item# (some? val#))
+                    [['~x ~db-kw '~y]
+                     ['~y (db-keyword rhs-spec# (:name item#)) val#]]
+                    (throw (ex-info "Cannot uniquely describe the given value"
+                                    {:syntax ~rhs :value rhs#})))))
+              ~[(mk-where-clause rhs)]))))))
 
 ;; map = {:kw (ident | clause | map | value),+}
 (t/ann ^:no-check expand-map [QueryMap t/Sym SpecT QueryUEnv QueryTEnv -> t/Any])
@@ -822,8 +823,6 @@
               (throw (ex-info "does not conform to any possible enumerated spec"
                               {:syntax atmap :possible-specs elements
                                :errors (get grouped :error)})))
-            (when (not (symbol? maybe-spec))
-              (throw (ex-info "not supported" {:syntax maybe-spec})))
             (cond
               (::patvar (meta maybe-spec))
               ,(let [opts (into {} (get grouped :syntax))]
@@ -831,22 +830,26 @@
                  `(concat
                    [['~x :spec-tacular/spec '~maybe-spec]]
                    (let [opts# ~opts]
-                     (if (every? empty? (vals opts#))
-                       []
-                       [(~'list ~''or ~@(map (fn [[kw stx]]
-                                               `(~'cons ~''and
-                                                        (~'concat [[(~'list ~''ground ~kw)
-                                                                    '~maybe-spec]]
-                                                                  ~stx)))
-                                             opts))]))))
-              :else
+                     (if (every? empty? (vals opts#)) []
+                         [(~'list ~''or ~@(map (fn [[kw stx]]
+                                                 `(~'cons ~''and
+                                                          (~'concat [[(~'list ~''ground ~kw)
+                                                                      '~maybe-spec]]
+                                                                    ~stx)))
+                                               opts))]))))
+              (symbol? maybe-spec)
               `(let [opts# ~(into {} (get grouped :syntax))
                      spec# ~maybe-spec]
                  (concat [['~x :spec-tacular/spec spec#]]
                          (or (get opts# spec#)
                              (throw (ex-info "does not conform to any possible enumerated spec"
                                              {:computed-spec spec#
-                                              :available-specs (keys opts#)}))))))))))))
+                                              :available-specs (keys opts#)})))))
+              (and (nil? maybe-spec) (nil? (get grouped :error)))
+              `(let [opts# ~(into {} (get grouped :syntax))]
+                 [(cons ~''or (map (fn [[kw# stx#]] (cons ~''and stx#)) opts#))])
+              :else (throw (ex-info "Query syntax not supported"
+                                    {:syntax atmap :errors (get grouped :error)})))))))))
 
 (t/ann expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any])
 (defn- expand-clause [clause uenv tenv]
