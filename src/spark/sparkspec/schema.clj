@@ -94,7 +94,7 @@
 (t/defn from-spec
   "Generates a Schema to represent the given spec"
   [spec :- (t/U SpecT t/Keyword)] :- Schema
-  (let [si (or (get-spec spec) spec)]
+  (let [si (if (keyword? spec) (get-spec spec) spec)]
     (assert si (str "cannot find spec for " spec))
     (t/for [item :- Item (:items si)] :- EntityMap
            (item->schema-map si item))))

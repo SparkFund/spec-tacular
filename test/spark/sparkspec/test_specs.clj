@@ -45,3 +45,12 @@
 (defspec ScmMWrap
   [name :is-a :string]
   (:link [val :is-a :ScmM]))
+
+(defspec Dog
+  [name :is-a :string])
+
+(defspec Cat
+  [name :is-a :string])
+#_(defspec Cat [name :is-a string]) ;; TODO
+
+(defenum Animal :Dog :Cat)
