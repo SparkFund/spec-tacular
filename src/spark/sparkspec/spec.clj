@@ -1,5 +1,8 @@
 (ns spark.sparkspec.spec
-  (:require [clojure.pprint :as pp]))
+  (:require [clojure.pprint :as pp]
+            [clj-time.core :as time]
+            [clj-time.format :as timef]
+            [clj-time.coerce :as timec]))
 
 (defrecord Spec [name opts items syntax])
 
@@ -45,6 +48,7 @@
            [:double Double `Double double]
            [:bigdec java.math.BigDecimal `java.math.BigDecimal bigdec]
            [:instant java.util.Date `java.util.Date nil]
+           [:calendarday org.joda.time.DateTime `org.joda.time.DateTime timec/to-date-time]
            [:uuid java.util.UUID `java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
            [:uri java.net.URI `java.net.URI nil]
            [:bytes Bytes `Bytes nil]

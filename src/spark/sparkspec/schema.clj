@@ -78,7 +78,9 @@
    {:db/id          (d/tempid :db.part/db)
     :db/ident       (keyword (datomic-ns spec) (name iname))
     :db/valueType   (if (primitive? type)
-                      (keyword "db.type" (name type))
+                      (if (= type :calendarday)
+                        (keyword "db.type" "instant")
+                        (keyword "db.type" (name type)))
                       :db.type/ref)
     :db/cardinality (case cardinality
                       :one :db.cardinality/one
