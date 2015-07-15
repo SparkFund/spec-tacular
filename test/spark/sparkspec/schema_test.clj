@@ -104,25 +104,33 @@
                           (delta old new))
         "removing an entry from schema")))
 
+(defspec Birthday
+  [date :is-a :calendarday])
+
 (def ns-schema (from-namespace *ns*))
 
 (deftest test-from-namespace
-  (let [[a b both] (diff [{:db/ident :person/name,
-                           :db/valueType :db.type/string,
-                           :db/cardinality :db.cardinality/one,
-                           :db/doc "",
-                           :db.install/_attribute :db.part/db}
-                          {:db/unique :db.unique/value,
-                           :db/ident :exspec/var1,
-                           :db/valueType :db.type/string,
-                           :db/cardinality :db.cardinality/one,
-                           :db/doc "",
-                           :db.install/_attribute :db.part/db}
-                          {:db/ident :house/occupants,
-                           :db/valueType :db.type/ref,
-                           :db/cardinality :db.cardinality/many,
-                           :db/doc "",
-                           :db.install/_attribute :db.part/db}]
-                         ns-schema)]
-    (is (nil? a) "no missing entries")
-    (is (nil? b) "no extra entries")))
+  (let [[missing extra both]
+        (diff [{:db/ident :person/name,
+                :db/valueType :db.type/string,
+                :db/cardinality :db.cardinality/one,
+                :db/doc "",
+                :db.install/_attribute :db.part/db}
+               {:db/unique :db.unique/value,
+                :db/ident :exspec/var1,
+                :db/valueType :db.type/string,
+                :db/cardinality :db.cardinality/one,
+                :db/doc "",
+                :db.install/_attribute :db.part/db}
+               {:db/ident :house/occupants,
+                :db/valueType :db.type/ref,
+                :db/cardinality :db.cardinality/many,
+                :db/doc "",
+                :db.install/_attribute :db.part/db}
+               {:db/ident :birthday/date,
+                :db/valueType :db.type/instant,
+                :db/cardinality :db.cardinality/one,
+                :db/doc ""}]
+              ns-schema)]
+    (is (nil? missing) "no missing entries")
+    (is (nil? extra) "no extra entries")))

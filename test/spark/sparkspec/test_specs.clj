@@ -54,3 +54,6 @@
 #_(defspec Cat [name :is-a string]) ;; TODO
 
 (defenum Animal :Dog :Cat)
+
+(defspec Birthday
+  [date :is-a :calendarday])
