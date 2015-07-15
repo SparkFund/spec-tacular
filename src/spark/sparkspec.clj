@@ -76,11 +76,11 @@
 
 (defmethod get-spec-class :default [_] nil)
 
-(defmulti database-coersion
-  "returns the coersion function that maps an object of a known database
+(defmulti database-coercion
+  "returns the coercion function that maps an object of a known database
    type (like datomic.query.EntityMap) to a map that can be used by recursive-ctor"
   (fn [o] (type o)))
-(defmethod database-coersion :default [_] nil)
+(defmethod database-coercion :default [_] nil)
 
 (doseq [[k v] type-map]
   (defmethod get-spec-class k [_] (:type v)))
@@ -349,7 +349,7 @@
   "walks a nested map structure, constructing proper instances from nested values.
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
   (let [spec (get-spec spec-name orig-sp)
-        sp   (or (database-coersion orig-sp) orig-sp)]
+        sp   (or (database-coercion orig-sp) orig-sp)]
     (when-not (and spec sp)
       (throw (ex-info (str "cannot create " (name spec-name)) {:sp orig-sp})))
     (when-not (instance? clojure.lang.IPersistentMap sp)

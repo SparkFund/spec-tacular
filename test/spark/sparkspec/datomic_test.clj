@@ -9,6 +9,7 @@
   (:require [datomic.api :as db]
             [spark.sparkspec.datomic :as sd]
             [spark.sparkspec.schema :as schema]
+            [clj-time.core :as time]
             [clojure.walk :as walk]
             [clojure.core.typed :as t]
             [clojure.tools.macro :as m]
@@ -22,7 +23,7 @@
   (cons schema/spec-tactular-map
         (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
 
-(deftest test-entity-coersion
+(deftest test-entity-coercion
   (with-test-db simple-schema
     @(db/transact *conn* [{:db/id (db/tempid :db.part/user)
                            :spec-tacular/spec :Scm
@@ -33,9 +34,9 @@
           scm-em   (db/entity (db) scm-eid)
           scm2-eid (ffirst (db/q '[:find ?v :where [?v :spec-tacular/spec :Scm2]] (db)))
           scm2-em  (db/entity (db) scm2-eid)]
-      (is (= (:scm2 (database-coersion scm-em)) scm2-em))
-      (is (= (:val1 (database-coersion scm2-em)) 42))
-      (is (= (recursive-ctor :Scm2 (:scm2 (database-coersion scm-em)))
+      (is (= (:scm2 (database-coercion scm-em)) scm2-em))
+      (is (= (:val1 (database-coercion scm2-em)) 42))
+      (is (= (recursive-ctor :Scm2 (:scm2 (database-coercion scm-em)))
              (scm2 {:val1 42}))))))
 
 (deftest test-transaction-data
@@ -1141,6 +1142,14 @@
               uobjs  (unique-objs expected)]
           (is (= {:count (count urefs) :entity actual}
                  {:count (count uobjs) :entity expected})))))))
+
+(deftest test-calendar-day
+  (with-test-db simple-schema
+    (let [bday (create! {:conn *conn*} (birthday {:date (time/date-time 2015 7 24)}))]
+      (is (= (:date bday) (time/date-time 2015 7 24)))
+      (is (= (q :find ?date :in (db) :where
+                [:Birthday {:date ?date}])
+             #{[(time/date-time 2015 7 24)]})))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing

@@ -7,7 +7,8 @@
         [clojure.set :only [rename-keys difference]]
         [clojure.core.typed.unsafe :only [ignore-with-unchecked-cast]])
   (:import clojure.lang.MapEntry)
-  (:require [clojure.core.typed :as t :refer [for]]
+  (:require [clj-time.coerce :as timec]
+            [clojure.core.typed :as t :refer [for]]
             [clojure.data :only diff]
             [clojure.tools.macro :as m]
             [clojure.walk :as walk]
@@ -77,11 +78,11 @@
       ,(make-keyword (name (:name a)))
       :else (throw (ex-info "cannot make db-keyword" {:spec spec :attr a})))))
 
-(t/ann ^:no-check database-coersion [DatomicEntity -> (t/Map t/Keyword t/Any)])
+(t/ann ^:no-check database-coercion [DatomicEntity -> (t/Map t/Keyword t/Any)])
 (t/tc-ignore
  ;; the returned map may be missing valid keys, but it will definitely
  ;; be of the correct spec and won't have completely invalid kws
- (defmethod database-coersion datomic.query.EntityMap [em]
+ (defmethod database-coercion datomic.query.EntityMap [em]
    (let [spec (get-spec em)]
      (do (when (not spec)
            (throw (ex-info "bad entity in database" {:entity em})))
@@ -980,8 +981,11 @@
                  (throw (ex-info (str "missing information about " result)
                                  {:type t-kw :type-sym t-s :syntax stx})))
                (if (primitive? t-kw)
-                 `(if (instance? ~t-s ~result) ~result
-                      ~(err result t-s))
+                 (if (= t-kw :calendarday)
+                   `(if (instance? java.util.Date ~result) (timec/to-date-time ~result)
+                        ~(err result t-s))
+                   `(if (instance? ~t-s ~result) ~result
+                        ~(err result t-s)))
                  `(if (instance? java.lang.Long ~result)
                     (let [e# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
                               (db/entity ~db ~result) ~t-s)]
@@ -1025,7 +1029,9 @@
                 (do (when (and db (get-eid db i))
                       (throw (ex-info "entity already in database" {:entity i})))
                     (if (= (recursiveness item) :non-rec)
-                      [[:db/add parent-eid datomic-key i]]
+                      (let [i (if (= type :calendarday) (timec/to-date i) i)]
+                        ;; TODO: throw exception if 
+                        [[:db/add parent-eid datomic-key i]])
                       (let [sub-eid  (db/tempid :db.part/user)
                             _ (when (and tmps link?)
                                 (swap! tmps conj [i sub-eid]))
