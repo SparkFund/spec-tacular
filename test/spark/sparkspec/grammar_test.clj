@@ -39,6 +39,9 @@
   (is (thrown? clojure.lang.ExceptionInfo
                (parse-spec '(Foo :nonsense))))
 
+  (is (thrown? clojure.lang.ExceptionInfo
+               (parse-spec '(Person [name :is-a string]))))
+
   ;; TODO
   #_(is (thrown? clojure.lang.ExceptionInfo
                  (parse-spec '(Foo [bar :is-a :Bar] [bar :is-a :Bar]))))

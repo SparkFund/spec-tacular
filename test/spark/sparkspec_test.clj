@@ -108,7 +108,10 @@
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
                         (esparent {:es {:foo (testspec1 {:val1 1})}}))
-      "nested ctor fails properly with enums"))
+      "nested ctor fails properly with enums")
+
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"spec instance\(s\) not in enum spec"
+                        (es {:foo (a {})}))))
 
 ;; forward enum reference
 (defenum EnumFoo :EnumForward)

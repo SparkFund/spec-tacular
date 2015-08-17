@@ -420,7 +420,8 @@
     `(defmethod get-spec ~(:name spec) [o# & [rest#]]
        (if-let [rest-spec# (and rest# (get-spec rest#))]
          (if (some #(= (:name rest-spec#) %) [~@elements]) rest-spec#
-             (throw (ex-info "spec mismatch" {:objects (cons o# rest#)})))
+             (throw (ex-info "trying to construct an enum out of spec instance(s) not in enum spec"
+                             {:objects (cons o# rest#) :spec ~spec})))
          ~spec))))
 
 (defn- mk-enum-get-map-ctor [spec]
