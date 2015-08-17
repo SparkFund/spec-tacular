@@ -777,22 +777,24 @@
       :else
       ;; We have a "thing" that eventually resolves into a value.
       ,(let [sub-spec (get-spec sub-spec-name)
-             y (gensym "?tmp")]
-         `(let [rhs# ~rhs, rhs-spec# (get-spec rhs#)]
+             y (gensym "?tmp")
+             z (gensym)]
+         `(let [~z ~(if (= sub-spec-name :calendarday) `(timec/to-date ~rhs) rhs)
+                rhs-spec# (get-spec ~z)]
             (if rhs-spec#
-              (if-let [eid# (get-in rhs# [:db-ref :eid])]
+              (if-let [eid# (get-in ~z [:db-ref :eid])]
                 [['~x ~db-kw eid#]]
                 (t/let [item# :- (t/Option Item)
                         ,(some (t/ann-form #(if (:unique? %) %)
                                            [Item ~'-> (t/Option Item)]) ;; core.typed srs
                                (:items rhs-spec#))
-                        val#  :- t/Any (and item# ((:name item#) rhs#))]
+                        val#  :- t/Any (and item# ((:name item#) ~z))]
                   (if (and item# (some? val#))
                     [['~x ~db-kw '~y]
                      ['~y (db-keyword rhs-spec# (:name item#)) val#]]
                     (throw (ex-info "Cannot uniquely describe the given value"
-                                    {:syntax ~rhs :value rhs#})))))
-              ~[(mk-where-clause rhs)]))))))
+                                    {:syntax ~rhs :value ~z})))))
+              ~[(mk-where-clause z)]))))))
 
 ;; map = {:kw (ident | clause | map | value),+}
 (t/ann ^:no-check expand-map [QueryMap t/Sym SpecT QueryUEnv QueryTEnv -> t/Any])
