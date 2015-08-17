@@ -785,7 +785,7 @@
   (testing "bad syntax" ; fully qualify for command line
     (with-test-db simple-schema
       (is (thrown-with-msg?
-           clojure.lang.ExceptionInfo #"invalid clause rhs"
+           clojure.lang.ExceptionInfo #"Invalid clause rhs"
            (macroexpand '(spark.sparkspec.datomic/q :find :Scm2 :in (db)
                                                     :where [:Scm :scm2])))
           "using a (non-spec) keyword as a rhs")

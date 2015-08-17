@@ -863,11 +863,24 @@
 
 (t/ann expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any])
 (defn- expand-clause [clause uenv tenv]
-  (let [[ident atmap] clause
-        {:keys [var spec]} (expand-ident ident uenv tenv)]
-    (cond
-      (map? atmap) (expand-map atmap var spec uenv tenv)
-      :else (throw (ex-info "invalid clause rhs" {:syntax atmap})))))
+  (cond
+    (vector? clause)
+    ,(let [[ident atmap] clause
+           {:keys [var spec]} (expand-ident ident uenv tenv)]
+       (cond
+         (map? atmap) (expand-map atmap var spec uenv tenv)
+         :else (throw (ex-info "Invalid clause rhs" {:syntax clause}))))
+    (seq? clause)
+    ,(let [[head & clauses] clause]
+       (case head
+         'not-join
+         ,(let [[vars & clauses] clauses
+                clauses (map #(expand-clause % uenv tenv) clauses)]
+            `[(cons ~''not-join (cons '~vars (concat ~@clauses)))])
+         :else (throw (ex-info "unsupported sequence head"
+                               {:syntax clause}))))
+    :else (throw (ex-info "invalid clause type, expecting vector or sequence"
+                          {:type (type clause) :syntax clause}))))
 
 (t/ann annotate-retvars! 
        [(t/List (t/U t/Sym t/Keyword)) QueryUEnv QueryTEnv -> t/Any])
@@ -956,8 +969,8 @@
                              {:syntax f})))
            (when-not (= (count db) 1)
              (throw (ex-info "expecting exactly one database expression" {:syntax db})))
-           (when-not (every? vector? wc)
-             (throw (ex-info "expecting sequence of vectors" {:syntax wc})))
+           (when-not (every? #(or (vector? %) (list? %)) wc)
+             (throw (ex-info "expecting sequence of vectors or lists" {:syntax wc})))
            ;; TODO -- can do more syntax checking here
            {:f (match (first f) ([v '...] :seq) [v] :else f)
             :coll? (match (first f) ([v '...] :seq) true :else false)
@@ -1019,7 +1032,7 @@
    old new & [tmps]]
   (let [datomic-key (keyword (datomic-ns parent-spec) (name iname))]
     (letfn [(add [i] ;; adds i to field datomic-key in entity eid
-              (when (not i)
+              (when-not (some? i)
                 (throw (ex-info "cannot add nil" {:spec (:name parent-spec) :old old :new new})))
               (if-let [sub-eid (and link? (or (get-in i [:db-ref :eid])
                                               (and tmps (some (fn [[k v]]
@@ -1029,7 +1042,8 @@
                 [[:db/add parent-eid datomic-key sub-eid]]
                 ;; adding by value
                 (do (when (and db (get-eid db i))
-                      (throw (ex-info "entity already in database" {:entity i})))
+                      (throw (ex-info "Unique entity already in database, cannot add by value."
+                                      {:entity i :parent-spec parent-spec :field iname})))
                     (if (= (recursiveness item) :non-rec)
                       (let [i (if (= type :calendarday) (timec/to-date i) i)]
                         ;; TODO: throw exception if 
