@@ -1135,17 +1135,20 @@
                        (when (or (get si :db-ref) (get-eid db si))
                          (throw (ex-info "entity already in database" {:entity si})))
                        (transaction-data db spec nil si tmps))
-                        new-si-coll specs))
+                     new-si-coll specs))
         tmpids (map (comp :eid meta) data)
         data   (apply concat data)
         txn-result @(db/transact (:conn conn-ctx) data)]
     ;; db side effect has occurred
-    (let [db (db/db (:conn conn-ctx))]
-      (into (empty new-si-coll)
-            (map #(some->> (db/resolve-tempid db (:tempids txn-result) %1)
-                           (db/entity db)
-                           (recursive-ctor (:name %2)))
-                 tmpids specs)))))
+    (let [db (db/db (:conn conn-ctx))
+          db-si-coll (map #(some->> (db/resolve-tempid db (:tempids txn-result) %1)
+                                    (db/entity db)
+                                    (recursive-ctor (:name %2)))
+                          tmpids specs)
+          constructor (condp #(%1 %2) new-si-coll
+                        set? set, list? list, vector? vec, seq? seq
+                        (throw (ex-info "Cannot recreate" {:type (type new-si-coll)})))]
+      (constructor db-si-coll))))
 
 (t/ann ^:no-check create! (t/All [a] [ConnCtx a -> a]))
 (defn create!

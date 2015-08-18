@@ -1141,7 +1141,7 @@
     (doseq [{:keys [expected]} exs]
       (with-test-db simple-schema
         (let [conn-ctx {:conn *conn*}
-              actual (create-graph! conn-ctx expected)
+              actual (create-graph! conn-ctx (seq expected))
               urefs  (unique-db-refs actual)
               uobjs  (unique-objs expected)]
           (is (= {:count (count urefs) :entity actual}
