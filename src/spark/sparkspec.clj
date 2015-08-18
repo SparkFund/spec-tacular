@@ -276,7 +276,7 @@
   (let [ctor-name (resolved-ctor-name spec ns)]
     (letfn [(write-value [v link?]
               (if-let [ref (and link? (get v :db-ref))]
-                (str "(" ctor-name " " {:db-ref ref} ")")
+                (str "(" (resolved-ctor-name (get-spec v) ns) " " {:db-ref ref} ")")
                 (with-out-str (print-method v *out*))))
             (write-item [{iname :name link? :link? [c t] :type :as item}]
               (when (contains? si iname)
