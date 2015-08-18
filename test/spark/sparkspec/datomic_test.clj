@@ -992,7 +992,11 @@
           ;; changing the Scm also changes the Scm in :link1
           _ (assoc! {:conn *conn*} s-db :val1 "6")
           sl-db (refresh-sl)
-          _ (is (= (:val1 (:link1 sl-db)) "6"))])))
+          _ (is (= (:val1 (:link1 sl-db)) "6"))
+
+          ;; assoc!ing an absurd field should throw an error
+          _ (is (thrown-with-msg? clojure.lang.ExceptionInfo #"keys not in the spec"
+                                  (assoc! {:conn *conn*} s-db :blah 5)))])))
 
 (defn- unique-db-refs [inst]
   (let [objs (atom (list))

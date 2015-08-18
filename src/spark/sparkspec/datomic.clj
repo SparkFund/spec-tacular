@@ -1110,6 +1110,10 @@
                   (db/tempid :db.part/user))]
       (when-not spec
         (throw (ex-info "spec missing" {:old old-si :updates updates})))
+      (let [diff (clojure.set/difference (disj (set (keys updates)) :db-ref)
+                                         (set (map :name (:items spec))))]
+        (when-not (empty? diff)
+          (throw (ex-info "Cannot add keys not in the spec." {:keys diff}))))
       (->> (for [{iname :name :as item} (:items spec)
                  :when (contains? updates iname)]
              (transaction-data-item db spec eid item (iname old-si) (iname updates) tmps))
