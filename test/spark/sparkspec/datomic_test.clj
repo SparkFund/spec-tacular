@@ -808,7 +808,12 @@
            clojure.lang.ExceptionInfo #"not supported"
            (macroexpand '(spark.sparkspec.datomic/q :find ?val :in (db) :where
                                                     [:ScmEnum {:val1 ?val}])))
-          "trying to pull out a field from an enum with different field types")))
+          "trying to pull out a field from an enum with different field types")
+
+      (is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"nil"
+           (let [nil-val nil] (q :find :Scm :in (db) :where [% {:val1 nil-val}])))
+          "having a runtime nil field is unacceptabbbllee")))
 
   (testing "bad data" ; db goes to shit after this -- should be last test
     (with-test-db simple-schema

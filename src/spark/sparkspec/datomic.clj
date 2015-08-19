@@ -781,6 +781,9 @@
              z (gensym)]
          `(let [~z ~(if (= sub-spec-name :calendarday) `(timec/to-date ~rhs) rhs)
                 rhs-spec# (get-spec ~z)]
+            (when (nil? ~z)
+              (throw (ex-info "Maps cannot have nil values at runtime"
+                              {:field ~sub-spec-name :syntax '~rhs})))
             (if rhs-spec#
               (if-let [eid# (get-in ~z [:db-ref :eid])]
                 [['~x ~db-kw eid#]]
