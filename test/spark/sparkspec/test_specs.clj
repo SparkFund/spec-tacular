@@ -51,7 +51,6 @@
 
 (defspec Cat
   [name :is-a :string])
-#_(defspec Cat [name :is-a string]) ;; TODO
 
 (defenum Animal :Dog :Cat)
 
