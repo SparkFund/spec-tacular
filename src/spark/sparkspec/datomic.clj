@@ -2,14 +2,13 @@
   (:refer-clojure :exclude [for remove assoc!])
   (:use spark.sparkspec.spec
         spark.sparkspec
-        clojure.data
         [clojure.string :only [lower-case]]
         [clojure.set :only [rename-keys difference]]
         [clojure.core.typed.unsafe :only [ignore-with-unchecked-cast]])
   (:import clojure.lang.MapEntry)
   (:require [clj-time.coerce :as timec]
             [clojure.core.typed :as t :refer [for]]
-            [clojure.data :only diff]
+            [clojure.data :as data]
             [clojure.tools.macro :as m]
             [clojure.walk :as walk]
             [clojure.core.match :refer [match]]))
@@ -233,7 +232,7 @@
                   (if is-many
                     (let [old-eids (set (map (partial get-eid db) ival-db))
                           new-eids (set (map (partial get-eid db) ival))
-                          [_ deletes _] (diff new-eids old-eids)]
+                          [_ deletes _] (data/diff new-eids old-eids)]
                       (swap! deletions concat (map retract deletes))
                       (set (map #(build-transactions db % mask deletions sub-spec)
                                 ival)))
@@ -245,7 +244,7 @@
                   (if is-many
                     (let [old-eids (set (map (partial get-eid db) ival-db))
                           new-eids (set (map (partial get-eid db) ival))
-                          [adds deletes _] (diff new-eids old-eids)]
+                          [adds deletes _] (data/diff new-eids old-eids)]
                       (swap! deletions concat (map retract deletes))
                       adds)
                     (if (some? ival)
@@ -254,7 +253,7 @@
                         (do (swap! deletions conj (retract ival-db)) nil)
                         nil))))
                 (if is-many
-                  (let [[adds deletes] (diff ival ival-db)]
+                  (let [[adds deletes] (data/diff ival ival-db)]
                     (swap! deletions concat (map retract deletes))
                     adds)
                   (if (some? ival)
@@ -1079,7 +1078,7 @@
         (= (recursiveness item) :non-rec)
         ,(do (when-not (apply distinct? nil new)
                (throw (ex-info "adding identical" {:new new})))
-             (let [[adds deletes both] (diff (set new) (set old))]
+             (let [[adds deletes both] (data/diff (set new) (set old))]
                (concat (mapcat retract deletes)
                        (mapcat add adds))))
         :else
