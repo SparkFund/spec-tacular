@@ -552,3 +552,12 @@
     [(keep-column #(nth % 0))
      (keep-column #(nth % 1))
      (keep-column #(nth % 2))]))
+
+(defn identical-keys [si]
+  "Takes any number of spec instances and returns the keys that they
+  all share in common.  Good for error messages."
+  (->> (for [key (doall (distinct (mapcat keys si)))
+             :when (apply = (map key si))]
+         [key (key (first si))])
+       (into {})))
+
