@@ -3,7 +3,6 @@
         clojure.test
         spark.sparkspec.generators)
   (:require [clojure.core.typed :as t]
-            [clojure.data :refer [diff]]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
@@ -119,7 +118,7 @@
 
 (def ns-specs (namespace->specs *ns*))
 (deftest test-namespace->specs
-  (let [[a b both] (diff
+  (let [[a b both] (clojure.data/diff
                     (into #{} (map :name ns-specs))
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testenum :ES :ESParent :EnumFoo :EnumForward :A :B})]
@@ -184,3 +183,28 @@
 (ct/defspec gen-ESParent  100 (prop-check-components :ESParent))
 (ct/defspec gen-TestSpec6 100 (prop-check-components :TestSpec6))
 (ct/defspec gen-Link      100 (prop-check-components :Link))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; diff
+
+(defspec Human
+  [name :is-a :string]
+  [age :is-a :long]
+  [pets :is-many :Animal])
+
+(deftest test-diff
+  (let [peter (human {:name "Peter" :age 17})
+        paul  (human {:name "Paul"  :age 18})
+        #_mary  #_(human {:name "Mary"  :age 18 :pets [(dog {:name "George"}) (cat {:name "Ringo"})]})]
+    (is (= (diff peter paul)
+           [{:name "Peter" :age 17} {:name "Paul" :age 18} {}]))
+    (is (= (diff peter (human {:name "Peter" :age 25}))
+           [{:age 17} {:age 25} {:name "Peter"}]))
+    (is (= (diff peter (human {:age 25}))
+           [{:name "Peter" :age 17} {:age 25} {}]))
+
+    #_(is (= (diff mary (human {:name "Mary" :age 18 :pets [(cat {:name "Ringo"}) (dog {:name "George"})]}))
+             [{} {} {:age 18,
+                     :name "Mary",
+                     :pets #{(cat {:name "Ringo"}) (dog {:name "George"})}}]))))

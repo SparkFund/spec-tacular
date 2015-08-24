@@ -1,6 +1,6 @@
 (ns spark.sparkspec.schema
   (:refer-clojure :exclude [read-string read assoc!])
-  (:use spark.sparkspec
+  (:use [spark.sparkspec :exclude [diff]]
         spark.sparkspec.spec
         spark.sparkspec.datomic
         [clojure.string :only [lower-case]])

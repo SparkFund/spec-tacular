@@ -1,8 +1,8 @@
 (ns spark.sparkspec.schema-test
   (:refer-clojure :exclude [read-string read])
   (:use clojure.test
-        spark.sparkspec
         spark.sparkspec.spec
+        [spark.sparkspec :exclude [diff]]
         spark.sparkspec.schema
         spark.sparkspec.test-utils)
   (:require [datomic.api :as d]
