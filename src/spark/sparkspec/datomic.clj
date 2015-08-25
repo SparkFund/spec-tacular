@@ -179,8 +179,11 @@
   Otherwise, the resulting entity is a generic SpecInstance."
   [db spec]
   `(let [spec# (get-spec ~spec)
+         db# ~db
          _# (when-not spec#
               (throw (ex-info (str "Could not find spec for " ~spec) {:syntax '~spec})))
+         _# (when-not (instance? datomic.db.Db db#)
+              (throw (ex-info (str "Expecting database") {:given db#})))
          eids# (get-all-eids ~db spec#)
          eid->si# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
                    (fn [eid#] (recursive-ctor (:name (get-spec ~spec)) (db/entity ~db eid#)))
