@@ -6,6 +6,7 @@
             [spark.sparkspec.grammar :refer [parse-spec parse-enum]]
             [spark.sparkspec.spec :refer :all]
             [clojure.string :refer [join]] ;; TODO
+            [clj-time.core :as time]
             [clojure.pprint :as pp])
   (:import (clojure.lang ASeq)))
 
@@ -257,9 +258,15 @@
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
            (.write w# (spec-instance->str ~spec v# '~(ns-name *ns*))))
          (defmethod pp/simple-dispatch ~class-name [v#]
-           (pp/pprint-logical-block
-            :prefix (str "(" (resolved-ctor-name ~spec '~(ns-name *ns*)) " ") :suffix ")"
-            (pp/simple-dispatch (merge (.atmap v#) (deref (.cache v#)))))))))
+           (let [pp-fn# pp/*print-pprint-dispatch*]
+             (pp/with-pprint-dispatch
+               (fn [obj#]
+                 (if (instance? org.joda.time.DateTime obj#)
+                   (pp/simple-dispatch (date-time-dispatch obj#))
+                   (pp-fn# obj#)))
+               (pp/pprint-logical-block
+                :prefix (str "(" (resolved-ctor-name ~spec '~(ns-name *ns*)) " ") :suffix ")"
+                (pp/simple-dispatch (merge (.atmap v#) (deref (.cache v#)))))))))))
 
 (defn resolved-ctor-name [spec ns]
   (let [ctor-name (make-name spec lower-case)]
@@ -272,13 +279,24 @@
         (str alias "/" ctor-name)
         (str ns    "/" ctor-name)))))
 
+(defn date-time-dispatch [dt]
+  (let [time-ns (find-ns 'clj-time.core)
+        maybe-refer (some #(when (= (second %) time-ns) (first %)) (ns-aliases *ns*))]
+    (list (symbol (str (or maybe-refer 'clj-time.core))
+                  "date-time")
+          (time/year dt)
+          (time/month dt)
+          (time/day dt))))
+
 (defn spec-instance->str [spec si ns]
   "returns a string representation of spec instance si suitable for printing"
   (let [ctor-name (resolved-ctor-name spec ns)]
     (letfn [(write-value [v link?]
               (if-let [ref (and link? (get v :db-ref))]
                 (str "(" (resolved-ctor-name (get-spec v) ns) " " {:db-ref ref} ")")
-                (with-out-str (print-method v *out*))))
+                (if (instance? org.joda.time.DateTime v)
+                  (with-out-str (print-method (date-time-dispatch v) *out*))
+                  (with-out-str (print-method v *out*)))))
             (write-item [{iname :name link? :link? [c t] :type :as item}]
               (when (contains? si iname)
                 (->> (if-let [v (iname si)]
