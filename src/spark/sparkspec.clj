@@ -461,8 +461,8 @@
 (defn- mk-huh [spec]
   (let [huh (make-name spec #(str (lower-case %) "?"))
         class-name (make-name spec #(str "i_" %))]
-    `(defn ~huh [o#] 
-       (instance? ~class-name o#))))
+    `(do (t/ann ~huh [t/Any ~'-> t/Bool])
+         (defn ~huh [o#] (instance? ~class-name o#)))))
 
 (defn- mk-enum-huh [spec]
   (let [huh (make-name spec #(str (lower-case %) "?"))]
