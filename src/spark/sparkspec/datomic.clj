@@ -179,13 +179,22 @@
   Otherwise, the resulting entity is a generic SpecInstance."
   [db spec]
   `(let [spec# (get-spec ~spec)
-         _# (assert spec#)
+         db# ~db
+         _# (when-not spec#
+              (throw (ex-info (str "Could not find spec for " ~spec) {:syntax '~spec})))
+         _# (when-not (instance? datomic.db.Db db#)
+              (throw (ex-info (str "Expecting database") {:given db#})))
          eids# (get-all-eids ~db spec#)
          eid->si# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
                    (fn [eid#] (recursive-ctor (:name (get-spec ~spec)) (db/entity ~db eid#)))
                    [Long ~'-> ~(if (keyword? spec) (:type-symbol (get-type spec))
                                    `SpecInstance)])]
      (map eid->si# eids#)))
+
+(defn count-all-by-spec [db spec]
+  (assert (keyword? spec) "expecting spec name")
+  (assert (instance? datomic.db.Db db) "expecting database")
+  (ffirst (db/q {:find ['(count ?eid)] :in '[$] :where [['?eid :spec-tacular/spec spec]]} db)))
 
 (t/ann ^:no-check build-transactions
        (t/IFn [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]
