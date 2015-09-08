@@ -191,6 +191,11 @@
                                    `SpecInstance)])]
      (map eid->si# eids#)))
 
+(defn count-all-by-spec [db spec]
+  (assert (keyword? spec) "expecting spec name")
+  (assert (instance? datomic.db.Db db) "expecting database")
+  (ffirst (db/q {:find ['(count ?eid)] :in '[$] :where [['?eid :spec-tacular/spec spec]]} db)))
+
 (t/ann ^:no-check build-transactions
        (t/IFn [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]
               [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) SpecT -> (t/Map t/Keyword t/Any)]))
