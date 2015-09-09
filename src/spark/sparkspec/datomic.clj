@@ -701,7 +701,7 @@
 (t/defalias QueryIdent  (t/U t/Keyword t/Sym (t/HVec [t/Sym t/Keyword])))
 (t/defalias QueryUEnv   (t/Atom1 (t/Map t/Sym t/Sym)))
 (t/defalias QueryTEnv   (t/Atom1 (t/Map t/Sym t/Keyword)))
-(t/defalias QueryClause (t/HVec [QueryIdent QueryMap]))
+(t/defalias QueryClause (t/U '[QueryIdent QueryMap] '[(t/List t/Any)]))
 (t/defalias QueryMapVal (t/U QueryIdent QueryClause QueryMap))
 (t/defalias QueryMap    (t/Map t/Keyword QueryMapVal))
 (t/defalias QueryMapVec (t/HVec [t/Keyword QueryMapVal]))
@@ -872,15 +872,24 @@
               :else (throw (ex-info "Query syntax not supported"
                                     {:syntax atmap :errors (get grouped :error)})))))))))
 
-(t/ann expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any])
+(t/ann ^:no-check expand-clause [QueryClause QueryUEnv QueryTEnv -> t/Any]) ;; meta
 (defn- expand-clause [clause uenv tenv]
   (cond
     (vector? clause)
-    ,(let [[ident atmap] clause
-           {:keys [var spec]} (expand-ident ident uenv tenv)]
-       (cond
-         (map? atmap) (expand-map atmap var spec uenv tenv)
-         :else (throw (ex-info "Invalid clause rhs" {:syntax clause}))))
+    ,(cond
+       (= (count clause) 1)
+       ,[[(->> (rest (first clause))
+               (map (fn [x] (if (::patvar (meta x))
+                              `(with-meta '~x ~(merge (meta x) {:tag `'~(:type-symbol (get-type (get @tenv x)))}))
+                              x)))
+               (cons `'~(ffirst clause))
+               (cons 'list))]]
+       (= (count clause) 2)
+       ,(let [[ident atmap] clause
+              {:keys [var spec]} (expand-ident ident uenv tenv)]
+          (cond
+            (map? atmap) (expand-map atmap var spec uenv tenv)
+            :else (throw (ex-info "Invalid clause rhs" {:syntax clause})))))
     (seq? clause)
     ,(let [[head & clauses] clause]
        (case head
