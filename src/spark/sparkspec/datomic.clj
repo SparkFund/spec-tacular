@@ -1144,8 +1144,8 @@
                    (swap! tmps conj [updates eid])) %))
            (#(with-meta % (assoc (meta %) :eid eid)))))))
 
-(t/ann ^:no-check create-graph (t/All [a] [ConnCtx a -> a]))
-(defn create-graph [conn-ctx new-si-coll]
+(t/ann ^:no-check graph-transaction-data [ConnCtx t/Any -> TransactionData])
+(defn graph-transaction-data [conn-ctx new-si-coll]
   (let [tmps  (atom [])
         specs (map get-spec new-si-coll)
         data  (let [db (db/db (:conn conn-ctx))]
@@ -1160,15 +1160,15 @@
         data   (apply concat data)
         txn-id (db/tempid :db.part/tx)
         data (if-let [tl (:transaction-log conn-ctx)]
-                  (->> (sp->transactions (db/db (:conn conn-ctx)) tl) ; hijack db/id to point to txn.
-                       (map #(assoc % :db/id txn-id))
-                       (concat data))
-                  data)]
+               (->> (sp->transactions (db/db (:conn conn-ctx)) tl) ; hijack db/id to point to txn.
+                    (map #(assoc % :db/id txn-id))
+                    (concat data))
+               data)]
     (with-meta data {:tmpids tmpids :specs specs})))
 
 (t/ann ^:no-check create-graph! (t/All [a] [ConnCtx a -> a]))
 (defn create-graph! [conn-ctx new-si-coll]
-  (let [data (create-graph conn-ctx new-si-coll)        
+  (let [data (graph-transaction-data conn-ctx new-si-coll)        
         {:keys [tmpids specs]} (meta data)
         txn-result @(db/transact (:conn conn-ctx) data)]    
     ;; db side effect has occurred
