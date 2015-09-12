@@ -1110,8 +1110,6 @@
         ;; -- new entities won't have eids, so just give them something unique
         ;;    to key on and add them
         (let [by-eids (group-by #(get-in % [:db-ref :eid] (gensym)) (concat old new))]
-          (when-not (apply distinct? nil new)
-            (throw (ex-info "adding identical" {:new new})))
           (->> (for [[_ [e1 & [e2]]] by-eids]
                  (if e2 []
                      (if (some #(identical? e1 %) old)

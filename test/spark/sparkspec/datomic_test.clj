@@ -824,11 +824,6 @@
 
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo #"bad entity in database"
-             (recursive-ctor :Scm (db/entity (db) id)))
-            "cant make an Scm out of it")
-
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo #"bad entity in database"
              (:scm2 (recursive-ctor :Scm (db/entity (db) id))))
             "cant get an Scm2 out of it")
 
@@ -1007,6 +1002,7 @@
   (let [objs (atom (list))
         add-if-unique!
         ,(fn [x]
+           (assert (not (instance? datomic.query.EntityMap x)))
            (when (get-spec x)
              (when-not (some #(= (get-in x [:db-ref :eid])
                                  (get-in % [:db-ref :eid]))

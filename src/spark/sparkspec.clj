@@ -184,7 +184,7 @@
                      :else (let [res# (let [{[arity# type#] :type :as item#} (get-item ~spec k#)]
                                         (case arity#
                                           :one (recursive-ctor type# val#)
-                                          :many (vec (map #(recursive-ctor type# %) val#))))]
+                                          :many (mapv #(recursive-ctor type# %) val#)))]
                              (do (swap! ~'cache assoc k# res#) res#))))))
            (valAt [~'this ~'k]
              (.valAt ~'this ~'k nil))
@@ -217,7 +217,7 @@
                      (new clojure.lang.MapEntry :db-ref ref#))
                    ~@(for [{iname :name :as item} (:items spec)]
                        `(when (contains? ~gs ~iname)
-                          (new clojure.lang.MapEntry ~iname (~iname ~gs))))]
+                          (.entryAt ~gs ~iname)))]
                   (filter identity)
                   (seq)))
            (empty [this#]
@@ -227,8 +227,7 @@
                (when (and required?# (not v#))
                  (throw (ex-info "attempt to delete a required field" {:instance this# :field k#})))
                (when (and (= arity# :many) (not (every? identity v#)))
-                 (throw (ex-info "invalid value for arity :many"
-                                 {:entity this# :field k# :value v#})))
+                 (throw (ex-info "invalid value for arity :many" {:entity this# :field k# :value v#})))
                (new ~class-name
                     (reduce
                      (fn [m# [k1# v1#]] (assoc m# k1# v1#))
@@ -236,8 +235,12 @@
                     (atom {}))))
            (containsKey [this# k#]
              (not (identical? this# (.valAt ~'atmap k# this#))))
-           (iterator [this#]
-             (.iterator ~'atmap))
+           (iterator [~gs]
+             (.iterator
+              (reduce
+               (fn [m# [k1# v1#]]
+                 (assoc m# k1# (.valAt ~gs k1#)))
+               (deref ~'cache) ~'atmap)))
            (cons [this# e#]
              (if (map? e#)
                (reduce (fn [m# [k# v#]] (assoc m# k# v#)) this# e#)
@@ -248,8 +251,12 @@
              (new ~class-name (dissoc ~'atmap k#) (atom {})))
            clojure.lang.IHashEq
            (hasheq [this#]
-             (bit-xor ~(hash class-name)
-                      (clojure.lang.APersistentMap/mapHasheq (.without this# :db-ref))))
+             (let [m# (dissoc ~'atmap :db-ref)]
+               (->> (reduce
+                     (fn [m# [k# v#]] (assoc m# k# (.valAt this# k#)))
+                     m# m#)
+                    (clojure.lang.APersistentMap/mapHasheq)
+                    (bit-xor ~(hash class-name)))))
            (hashCode [this#]
              (clojure.lang.APersistentMap/mapHash this#))
            (equals [this# ~gs]
@@ -358,8 +365,12 @@
                          defaults (keys sp))
         sp-map   (dissoc sp-map :spec-tacular/spec)
         actual-kws   (keys (dissoc sp :spec-tacular/spec :db-ref))
-        required-kws (keep #(if (:required? %) (:name %)) items)]
-    (do (doseq [kw (concat required-kws actual-kws)]
+        required-kws (keep #(if (:required? %) (:name %)) items)
+        rec-kws      (set (keep (fn [{iname :name [arity sub-spec-name] :type}]
+                                  (when-not (primitive? sub-spec-name) iname))
+                                items))]
+    (do (doseq [kw (concat required-kws actual-kws)
+                :when (not (contains? rec-kws kw))]
           (check-component! spec kw (get sp-map kw)))
         (map-ctor sp-map))))
 
@@ -368,6 +379,7 @@
   "walks a nested map structure, constructing proper instances from nested values.
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
   (let [spec (get-spec spec-name orig-sp)
+        db-sp (database-coercion orig-sp)
         sp   (or (database-coercion orig-sp) orig-sp)]
     (when-not (and spec sp)
       (throw (ex-info (str "cannot create " (name spec-name)) {:sp orig-sp})))
@@ -377,13 +389,12 @@
           (instance? spec-class sp))
       sp
       (let [sub-kvs
-            ,(keep (fn [{iname :name [arity sub-spec-name] :type :as item}]
-                     (when-not (primitive? sub-spec-name)
-                       (when-let [sub-sp (get sp iname)]
-                         [iname (case arity
-                                  :one (recursive-ctor sub-spec-name sub-sp)
-                                  :many (map #(recursive-ctor sub-spec-name %) sub-sp))])))
-                   (:items spec))]
+            ,(for [{iname :name [arity sub-spec-name] :type :as item} (:items spec)
+                   :when (not (primitive? sub-spec-name))
+                   :let [sub-sp (get sp iname)]
+                   :when (some? sub-sp)]
+               (let [f (if db-sp identity (partial recursive-ctor sub-spec-name))]
+                 [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))]
         (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs))))))
 
 (defn- mk-checking-ctor [spec]
