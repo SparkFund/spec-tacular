@@ -1142,7 +1142,7 @@
                    (swap! tmps conj [updates eid])) %))
            (#(with-meta % (assoc (meta %) :eid eid)))))))
 
-(t/ann ^:no-check graph-transaction-data [ConnCtx t/Any -> TransactionData])
+(t/ann ^:no-check graph-transaction-data [ConnCtx t/Coll -> TransactionData])
 (defn graph-transaction-data [conn-ctx new-si-coll]
   (let [tmps  (atom [])
         specs (map get-spec new-si-coll)
@@ -1163,6 +1163,12 @@
                     (concat data))
                data)]
     (with-meta data {:tmpids tmpids :specs specs})))
+
+(t/ann ^:no-check instance-transaction-data [ConnCtx t/Any -> TransactionData])
+(defn instance-transaction-data [conn-ctx new-si]
+  (let [data (graph-transaction-data conn-ctx [new-si])
+        {:keys [tmpids specs]} (meta data)]
+    (with-meta data {:tmpid (first tmpids) :spec (first specs)})))
 
 (t/ann ^:no-check create-graph! (t/All [a] [ConnCtx a -> a]))
 (defn create-graph! [conn-ctx new-si-coll]

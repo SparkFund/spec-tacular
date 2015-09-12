@@ -853,6 +853,10 @@
 (deftest test-create!1
   (with-test-db simple-schema
     (let [e-soe (scmownsenum {:enums [(scm3) (scm2 {:val1 123})]})
+          data (instance-transaction-data {:conn *conn*} e-soe)
+          _ (is (= (count data) 6))
+          _ (is (= (keys (meta data)) [:tmpid :spec]))
+          _ (is (= (:spec (meta data)) (get-spec :ScmOwnsEnum)))
           a-soe (create! {:conn *conn*} e-soe)]
       (is (not (empty? (:enums a-soe))))))
   (with-test-db simple-schema
