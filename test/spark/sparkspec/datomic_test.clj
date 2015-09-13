@@ -824,11 +824,6 @@
 
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo #"bad entity in database"
-             (recursive-ctor :Scm (db/entity (db) id)))
-            "cant make an Scm out of it")
-
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo #"bad entity in database"
              (:scm2 (recursive-ctor :Scm (db/entity (db) id))))
             "cant get an Scm2 out of it")
 
@@ -858,6 +853,10 @@
 (deftest test-create!1
   (with-test-db simple-schema
     (let [e-soe (scmownsenum {:enums [(scm3) (scm2 {:val1 123})]})
+          data (instance-transaction-data {:conn *conn*} e-soe)
+          _ (is (= (count data) 6))
+          _ (is (= (keys (meta data)) [:tmpid :spec]))
+          _ (is (= (:spec (meta data)) (get-spec :ScmOwnsEnum)))
           a-soe (create! {:conn *conn*} e-soe)]
       (is (not (empty? (:enums a-soe))))))
   (with-test-db simple-schema
@@ -1007,6 +1006,7 @@
   (let [objs (atom (list))
         add-if-unique!
         ,(fn [x]
+           (assert (not (instance? datomic.query.EntityMap x)))
            (when (get-spec x)
              (when-not (some #(= (get-in x [:db-ref :eid])
                                  (get-in % [:db-ref :eid]))
