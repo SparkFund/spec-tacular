@@ -749,7 +749,8 @@
       (::patvar (meta rhs))
       ,(do (set-type! tenv rhs sub-spec-name)
            [(mk-where-clause `'~rhs)])
-      (keyword? rhs)
+      (and (keyword? rhs)
+           (get-spec rhs))
       ,(t/let [y (gensym "?tmp")]
          [(mk-where-clause `'~y)
           [`'~y :spec-tacular/spec rhs]])

@@ -46,6 +46,9 @@
   [name :is-a :string]
   (:link [val :is-a :ScmM]))
 
+(defspec ScmKw
+  [item :is-a :keyword])
+
 (defspec Dog
   [name :is-a :string])
 

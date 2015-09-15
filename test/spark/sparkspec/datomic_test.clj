@@ -669,7 +669,12 @@
       (is (= #{["b"]}
              (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val1 ?a :val2 ((fn [?a] ?a) 2)}}]))
-          "return variables respect lexical scope and don't clobber fns")))
+          "return variables respect lexical scope and don't clobber fns"))
+    (with-test-db simple-schema
+      (sd/create! {:conn *conn*} (scmkw {:item :test}))
+      (is (= #{[(scmkw {:item :test})]}
+             (q :find :ScmKw :in (db) :where
+                [% {:item :test}])))))
 
   (testing "compound data"
     (with-test-db simple-schema
