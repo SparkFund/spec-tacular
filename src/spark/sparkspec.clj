@@ -202,12 +202,12 @@
                         `(let [~v1 (~iname ~'this), ~v2 (~iname ~'o)]
                            ~(case arity
                               :one `(= ~(remove-ref v1) ~(remove-ref v2))
-                              :many `(and (every?
+                              :many `(and (= (count ~v1) (count ~v2))
+                                          (every?
                                            (fn [~l]
                                              (some (fn [~m] (= ~(remove-ref l) ~(remove-ref m)))
                                                    ~v1))
-                                           ~v2)
-                                          (= (count ~v1) (count ~v2)))))))))
+                                           ~v2))))))))
            (entryAt [this# k#]
              (let [v# (.valAt this# k# this#)]
                (when-not (identical? this# v#)
@@ -224,7 +224,7 @@
              (throw (UnsupportedOperationException. (str "can't create empty " ~(:name spec)))))
            (assoc [this# k# v#] ;; TODO
              (let [{[arity# type#] :item required?# :required? :as item#} (get-item ~spec k#)]
-               (when (and required?# (not v#))
+               (when (and required?# (not (some? v#)))
                  (throw (ex-info "attempt to delete a required field" {:instance this# :field k#})))
                (when (and (= arity# :many) (not (every? identity v#)))
                  (throw (ex-info "invalid value for arity :many" {:entity this# :field k# :value v#})))
