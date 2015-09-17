@@ -205,7 +205,7 @@
   the given atomic list of deletions when appropriate."
   [db sp mask deletions & [spec]]
   (let [spec (or spec (get-spec sp))
-        [spec mask] (if (:elements spec) ; Need to pick which enum branch to pick in the mask.
+        [spec mask] (if (:elements spec) ; Need to pick which union branch to pick in the mask.
                       (let [sub-name (:name (get-spec sp))]
                         [(get-spec (get-in spec [:elements sub-name]))
                          (get mask sub-name)])
@@ -224,7 +224,7 @@
                      is-many (= cardinality :many)
                      ival (iname sp)
                      ival (if (or link? (not (:db-ref ival))) ival (dissoc ival :db-ref))
-                     sub-spec (get-spec type) ; Not necessarily ival's spec: could be an enum.
+                     sub-spec (get-spec type) ; Not necessarily ival's spec: could be an union.
                      mask (iname mask)
                      ival-db (iname db-value)
                      datomic-key (keyword (datomic-ns spec) (name iname))
@@ -283,7 +283,7 @@
   "union (join) taken w.r.t. a lattice of 'specificity' eg -- nil < true < {:item ...} 
    (recall 'true' means the mask consisting only of the db-ref)
    keys are combined and their values are recursively summed.
-   Enums and Records can be summed the same, as we represent both with maps."
+   Unions and Records can be summed the same, as we represent both with maps."
   ([] nil)
   ([m] m)
   ([ma mb]
@@ -307,12 +307,12 @@
                                  (not-empty sp)
                                  true)))
       (if (:elements spec)
-        (let [enum-mask (fn [sp-item]
+        (let [union-mask (fn [sp-item]
                           (let [sub-spec-name (:name (get-spec sp-item))]
                             {sub-spec-name (item-mask sub-spec-name sp-item)}))]
           (if (and (coll? sp) (not (map? sp)))
-            (reduce union-masks (map enum-mask sp)) ; only recover mask from the particular enum types used by the instance
-            (enum-mask sp)))
+            (reduce union-masks (map union-mask sp)) ; only recover mask from the particular union types used by the instance
+            (union-mask sp)))
         (let [field-mask
               , (fn [sp-item]
                   (if (= [:db-ref] (keys sp-item))
@@ -323,7 +323,7 @@
                                                         (get sp-item iname))]))
                                   (:items spec)))))]
           (if (and (coll? sp) (not (map? sp)))
-            (reduce union-masks (map field-mask sp)) ; only recover mask from the particular enum types used by the instance
+            (reduce union-masks (map field-mask sp)) ; only recover mask from the particular union types used by the instance
             (field-mask sp))))
       true)))
 
@@ -346,13 +346,13 @@
               true)])
          (into {}))))
 
-(t/ann ^:no-check shallow-plus-enums-mask [SpecT -> Mask])
-(defn shallow-plus-enums-mask
+(t/ann ^:no-check shallow-plus-unions-mask [SpecT -> Mask])
+(defn shallow-plus-unions-mask
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Only lets top-level and is-component fields
-  through As well, expands toplevel enums and any enum members which
+  through As well, expands toplevel unions and any union members which
   have only primitive fields(intended to catch common cases like
-  'status' enums where the options have no interesting fields)."
+  'status' unions where the options have no interesting fields)."
   [spec]
   (let [is-leaf? (fn [sp-name]
                    (let [spec (get-spec sp-name)]
@@ -371,7 +371,7 @@
              (let [sub-sp (get-spec typ)]
                [iname
                 (if (:elements sub-sp)
-                  (shallow-plus-enums-mask sub-sp) ;toplevel enums can be leaf-expanded
+                  (shallow-plus-unions-mask sub-sp) ;toplevel unions can be leaf-expanded
                   true)]))
            (into {})))))
 
@@ -385,7 +385,7 @@
   [sp spec]
   (if (:elements spec)
     (let [sub-sp (get-spec sp)]
-      {(:name sub-sp) (new-components-mask sp sub-sp)}) ; only need to specify the actual type for the enum branch.
+      {(:name sub-sp) (new-components-mask sp sub-sp)}) ; only need to specify the actual type for the union branch.
     (if (get-in sp [:db-ref :eid])
       true ;treat as a ref, already in db
       (if-let [spec (get-spec sp)]
@@ -617,12 +617,12 @@
                                  (not-empty sp)
                                  true)))
       (if (:elements spec)
-        (let [enum-remove (fn [sp-item]
+        (let [union-remove (fn [sp-item]
                             (remove-identity-items (:name (get-spec sp-item))
                                                    sp-item))]
           (if (and (coll? sp) (not (map? sp)))
-            (into (empty sp) (map enum-remove sp))
-            (enum-remove sp)))
+            (into (empty sp) (map union-remove sp))
+            (union-remove sp)))
         (let [item-remove
               , (fn [sp-item]
                   (reduce 
@@ -842,7 +842,7 @@
                             :syntax :error)
                          try-map)]
             (when (empty? (get grouped :syntax))
-              (throw (ex-info "does not conform to any possible enumerated spec"
+              (throw (ex-info "does not conform to any possible unioned spec"
                               {:syntax atmap :possible-specs elements
                                :errors (get grouped :error)})))
             (cond
@@ -864,7 +864,7 @@
                      spec# ~maybe-spec]
                  (concat [['~x :spec-tacular/spec spec#]]
                          (or (get opts# spec#)
-                             (throw (ex-info "does not conform to any possible enumerated spec"
+                             (throw (ex-info "does not conform to any possible unioned spec"
                                              {:computed-spec spec#
                                               :available-specs (keys opts#)})))))
               (and (nil? maybe-spec) (nil? (get grouped :error)))

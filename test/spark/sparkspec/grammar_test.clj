@@ -1,6 +1,6 @@
 (ns spark.sparkspec.grammar-test
   (:use clojure.test)
-  (:require [spark.sparkspec.grammar :refer [parse-spec parse-enum]]))
+  (:require [spark.sparkspec.grammar :refer [parse-spec parse-union]]))
 
 (deftest test-valid-syntax
   (let [spec (parse-spec '(Link
@@ -26,8 +26,8 @@
                                        :identity? nil, :default-value nil}])))
 
 
-  (is (= (parse-enum '(Foo :Bar :Baz))
-         #spark.sparkspec.spec.EnumSpec{:name :Foo, :elements #{:Baz :Bar}})))
+  (is (= (parse-union '(Foo :Bar :Baz))
+         #spark.sparkspec.spec.UnionSpec{:name :Foo, :elements #{:Baz :Bar}})))
 
 (deftest test-invalid-syntax
   (is (thrown? clojure.lang.ExceptionInfo
@@ -47,4 +47,4 @@
                  (parse-spec '(Foo [bar :is-a :Bar] [bar :is-a :Bar]))))
 
   #_(is (thrown? clojure.lang.ExceptionInfo
-                 (parse-enum '(Foo 5)))))
+                 (parse-union '(Foo 5)))))

@@ -3,7 +3,7 @@
   (:require [clojure.core.typed :as t]
             [clojure.string :refer [lower-case]]
             [clojure.data :as data]
-            [spark.sparkspec.grammar :refer [parse-spec parse-enum]]
+            [spark.sparkspec.grammar :refer [parse-spec parse-union]]
             [spark.sparkspec.spec :refer :all]
             [clojure.string :refer [join]] ;; TODO
             [clj-time.core :as time]
@@ -54,8 +54,8 @@
     :else (class o)))
 
 (defmulti get-spec
-  "If the given item is a Spec/EnumSpec or was defined by a
-  Spec/EnumSpec, returns the Spec/EnumSpec, otherwise nil."
+  "If the given item is a Spec/UnionSpec or was defined by a
+  Spec/UnionSpec, returns the Spec/UnionSpec, otherwise nil."
   resolve-fn)
 
 (defmethod get-spec :default [_] nil) ;; TODO
@@ -74,7 +74,7 @@
 
 (defmulti get-spec-class
   "returns the class of the record type representing the given spec name, 
-   or nil (if it is an enum spec, it won't have a corresponding class)"
+   or nil (if it is an union spec, it won't have a corresponding class)"
   identity)
 
 (defmethod get-spec-class :default [_] nil)
@@ -126,10 +126,10 @@
   true)
 
 (defn check-complete! 
-  "checks all fields of a record-sp (not enum), 
+  "checks all fields of a record-sp (not union), 
    throws exception if required field is missing."
   [spec sp]
-  (do (assert (nil? (:elements spec)) "spec cannot be an enum")
+  (do (assert (nil? (:elements spec)) "spec cannot be an union")
       (doseq [{iname :name :as item} (:items spec)]
         (check-component! spec iname (get sp iname)))
       sp))
@@ -314,7 +314,7 @@
                 (join " "))
            "})"))))
 
-(defn spec->enum-type [spec]
+(defn spec->union-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
 
 (defn spec->record-type [spec]
@@ -334,7 +334,7 @@
       :optional ~(into {} opts)))) ;; TODO: aren't there required fields?
 
 (defn spec->type [spec]
-  (if (:elements spec) (spec->enum-type spec) (spec->record-type spec)))
+  (if (:elements spec) (spec->union-type spec) (spec->record-type spec)))
 
 (defn- mk-type-alias
   "defines an core.typed alias named after the given spec's name"
@@ -438,22 +438,22 @@
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
        (defmethod get-map-ctor ~(symbol (str "i_" (name (:name spec)))) [_#] ~fac-sym))))
 
-;; when calling get-spec on an enum, try using the extra args to narrow down the spec
+;; when calling get-spec on an union, try using the extra args to narrow down the spec
 ;; i.e. it's not always `spec` being returned if we can do better
-(defn- mk-enum-get-spec [spec]
+(defn- mk-union-get-spec [spec]
   (let [elements (:elements spec)]
     `(defmethod get-spec ~(:name spec) [o# & [rest#]]
        (if-let [rest-spec# (and rest# (get-spec rest#))]
          (if (some #(= (:name rest-spec#) %) [~@elements]) rest-spec#
-             (throw (ex-info "trying to construct an enum out of spec instance(s) not in enum spec"
+             (throw (ex-info "trying to construct an union out of spec instance(s) not in union spec"
                              {:objects (cons o# rest#) :spec ~spec})))
          ~spec))))
 
-(defn- mk-enum-get-map-ctor [spec]
+(defn- mk-union-get-map-ctor [spec]
   (let [fac-sym (symbol (str "map->i_" (name (:name spec)) "-fixed"))]
     `(do
-       ;; the "map ctor" for an enum means it's arg needs to 
-       ;; be a tagged map or a record type of one of the enum's ctors.
+       ;; the "map ctor" for an union means it's arg needs to 
+       ;; be a tagged map or a record type of one of the union's ctors.
        (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tacular/spec (:name spec))) [o# h#]
          (let [subspec-name# (:name (get-spec o#))]
            (assert subspec-name#
@@ -470,7 +470,7 @@
     `(do (t/ann ~huh [t/Any ~'-> t/Bool])
          (defn ~huh [o#] (instance? ~class-name o#)))))
 
-(defn- mk-enum-huh [spec]
+(defn- mk-union-huh [spec]
   (let [huh (make-name spec #(str (lower-case %) "?"))]
     `(defn ~huh [o#] (contains? ~(:elements spec) (:name (get-spec o#))))))
 
@@ -486,17 +486,17 @@
          ~(mk-get-spec s)
          ~(mk-get-spec-class s))))
 
-(defmacro defenum [& stx]
-  (let [s (parse-enum stx)]
+(defmacro defunion [& stx]
+  (let [s (parse-union stx)]
     `(do ~(let [spec-name (:name s)
                 spec-sym  (-> s :name name symbol)]
             `(def ~(with-meta spec-sym 
                      (assoc (meta spec-sym) :spec-tacular/spec spec-name))
                ~spec-name))
          ~(mk-type-alias s)
-         ~(mk-enum-get-map-ctor s)
-         ~(mk-enum-get-spec s)
-         ~(mk-enum-huh s))))
+         ~(mk-union-get-map-ctor s)
+         ~(mk-union-get-spec s)
+         ~(mk-union-huh s))))
 
 (defn inspect-spec
   "Produces a json-friendly nested-map representation of a spec.
@@ -504,14 +504,14 @@
   [spec-name mask & [resource-prefix-str schema-prefix-str]]
   (let [spec (get-spec spec-name)
         spec-type (if (:elements spec)
-                    :enum
+                    :union
                     (if (primitive? spec-name)
                       :primitive
                       :record))
         resource-kv (when (and resource-prefix-str (= :record spec-type))
                       {:resource-url (str resource-prefix-str "/"
                                       (lower-case (name spec-name)))})
-        inspect-kv (when (and schema-prefix-str (#{:record :enum} spec-type))
+        inspect-kv (when (and schema-prefix-str (#{:record :union} spec-type))
                      {:schema-url (str schema-prefix-str "/"
                                           (lower-case (name spec-name)))})]
     (when mask
@@ -521,9 +521,9 @@
        inspect-kv
        resource-kv
        (if (map? mask)
-         (if (= :enum spec-type)
+         (if (= :union spec-type)
            {:expanded true
-            :enum-elements (->> (:elements spec)
+            :union-elements (->> (:elements spec)
                                 (map #(inspect-spec % (get mask %) resource-prefix-str schema-prefix-str))
                                 (filter some?))}
            (let [items

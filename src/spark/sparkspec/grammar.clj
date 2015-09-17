@@ -49,13 +49,13 @@
       :else (throw (ex-info "invalid options" (merge loc {:syntax stx}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; ENUM
+;; UNION
 
-(defn parse-enum [stx & [loc]]
+(defn parse-union [stx & [loc]]
   (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
     (match stx
       ([name & specs] :seq)
       (let [name (keyword name)]
-        (map->EnumSpec {:name name :elements (into #{} specs)}))
+        (map->UnionSpec {:name name :elements (into #{} specs)}))
       :else (throw (ex-info "expecting name followed by sequence of specs" 
                             (merge loc {:syntax stx}))))))
