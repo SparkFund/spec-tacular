@@ -192,23 +192,16 @@
            clojure.lang.IPersistentMap
            (equiv ~'[this o]
              (and (instance? ~class-name ~'o)
-                  (let [ref1# (get ~'this :db-ref), ref2# (get ~'o :db-ref)]
-                    (or (not ref1#) (not ref2#)
-                        (= ref1# ref2#)))
+                  (let [ref1# (.valAt ~'this :db-ref nil), ref2# (.valAt ~'o :db-ref nil)]
+                    (= ref1# ref2#))
                   ~@(for [{iname :name [arity sub-sp-nm] :type link? :link? :as item}
                           (:items spec)]
-                      (let [v1 (gensym), v2 (gensym), l (gensym), m (gensym)
-                            remove-ref #(if (or link? (primitive? sub-sp-nm))
-                                          % `(dissoc ~% :db-ref))]
+                      (let [v1 (gensym), v2 (gensym), l (gensym), m (gensym)]
                         `(let [~v1 (~iname ~'this), ~v2 (~iname ~'o)]
                            ~(case arity
-                              :one `(= ~(remove-ref v1) ~(remove-ref v2))
+                              :one `(= ~v1 ~v2)
                               :many `(and (= (count ~v1) (count ~v2))
-                                          (every?
-                                           (fn [~l]
-                                             (some (fn [~m] (= ~(remove-ref l) ~(remove-ref m)))
-                                                   ~v1))
-                                           ~v2))))))))
+                                          (every? (fn [~l] (some (fn [~m] (= ~l ~m)) ~v1)) ~v2))))))))
            (entryAt [this# k#]
              (let [v# (.valAt this# k# this#)]
                (when-not (identical? this# v#)
@@ -600,9 +593,24 @@
   [si]
   (walk/prewalk (fn [si] (if (get-spec si) (dissoc si :db-ref) si)) si))
 
+(defn spec-refless= [x y]
+  (if-let [x-spec (get-spec x)]
+    (and (= x-spec (get-spec y))
+         (for [{iname :name [arity _] :type} (:items x-spec)]
+           (let [v1 (iname x), v2 (iname y)]
+             (case arity
+               :one (spec-refless= x y)
+               :many (and (= (count ~v1) (count ~v2))
+                          (every? (fn [l] (some (fn [m] (spec-refless= l m)) v1)) v2))))))
+    (= x y)))
+
 (defn refless=
   "Given any walkable collection, returns true if the two collections
-  would be = if no spec instances had :db-refs. "
+  would be = if no spec instances had :db-refs."
   [x y]
-  (let [refless-coll (partial walk/postwalk #(if (get-spec %) (dissoc % :db-ref) %))]
-    (= (refless-coll x) (refless-coll y))))
+  (cond
+    (and (get-spec x) (get-spec y))
+    (spec-refless= x y)
+    :else
+    (let [refless-coll (partial walk/postwalk #(if (get-spec %) (dissoc % :db-ref) %))]
+      (= (refless-coll x) (refless-coll y)))))

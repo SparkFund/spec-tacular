@@ -36,8 +36,8 @@
           scm2-em  (db/entity (db) scm2-eid)]
       (is (= (:scm2 (database-coercion scm-em)) scm2-em))
       (is (= (:val1 (database-coercion scm2-em)) 42))
-      (is (= (recursive-ctor :Scm2 (:scm2 (database-coercion scm-em)))
-             (scm2 {:val1 42}))))))
+      (is (refless= (recursive-ctor :Scm2 (:scm2 (database-coercion scm-em)))
+                    (scm2 {:val1 42}))))))
 
 (deftest test-transaction-data
   (testing "Scm2"
@@ -695,8 +695,8 @@
         
         (let [a-scm (ffirst (q :find :Scm :in (db) :where [% {:scm2 [:Scm2 {:val1 5}]}]))]
           (testing "equality on returned entities"
-            (is (= a-scm e-scm))
-            (is (= e-scm a-scm))))
+            (is (refless= a-scm e-scm))
+            (is (refless= e-scm a-scm))))
         
         (let [[a-scm a-scm2]
               ,(->> (q :find :Scm :Scm2 :in (db) :where
@@ -704,8 +704,8 @@
                     first)]
           (testing "equality on returned sub-entities"
             (is (= (:scm2 a-scm) a-scm2))
-            (is (= a-scm2 e-scm2))
-            (is (= a-scm  e-scm)))
+            (is (refless= a-scm2 e-scm2))
+            (is (refless= a-scm  e-scm)))
           (is (not (:val1 a-scm)))
           (is (map? (:db-ref (:scm2 a-scm)))
               "allow :db-ref keyword access on sub-entities"))
@@ -715,8 +715,8 @@
                 scmm-eid (create-sp! {:conn *conn*} e-scmm)
                 a-scmm1 (ffirst (q :find :ScmM :in (db) :where [% {:identity "hi"}]))
                 a-scmm2 (recursive-ctor :ScmM (db/entity (db) scmm-eid))]
-            (is (= a-scmm1 e-scmm))
-            (is (= a-scmm2 e-scmm)))
+            (is (refless= a-scmm1 e-scmm))
+            (is (refless= a-scmm2 e-scmm)))
 
           (let [esw (scmmwrap 
                      {:name "scmwrap"
@@ -887,24 +887,24 @@
             ;; make one enum first
             e-soe (assoc soe :enums (map #(create! {:conn *conn*} %) [se1]))
             a-soe (create! {:conn *conn*} e-soe)
-            _ (is (= (first (:enums a-soe)) se1))
-            _ (is (= a-soe e-soe))
+            _ (is (refless= (first (:enums a-soe)) se1))
+            _ (is (refless= a-soe e-soe))
 
             ;; make all enums first
             e-soe (assoc soe :enums (map #(create! {:conn *conn*} %) [se2 se3]))
             a-soe (create! {:conn *conn*} e-soe)
-            _ (is (= a-soe e-soe))
+            _ (is (refless= a-soe e-soe))
 
             ;; dont make any enum first
             e-soe (scmownsenum {:enums [se4]})
             a-soe (create! {:conn *conn*} e-soe)
-            _ (is (= (first (:enums a-soe)) se4))
-            _ (is (= a-soe e-soe))
+            _ (is (refless= (first (:enums a-soe)) se4))
+            _ (is (refless= a-soe e-soe))
 
             ;; dont make any enum first
             e-soe (scmownsenum {:enums [se5 se6]})
             a-soe (create! {:conn *conn*} e-soe)
-            _ (is (= a-soe e-soe))
+            _ (is (refless= a-soe e-soe))
 
             ;; lazy seq
             e-soe (-> (scmownsenum {})
@@ -940,7 +940,7 @@
                          :val1  (scmparent {:scm (scm {:val1 "8" :scm2 {:val1 4}})})})
                (scmlink{:val1 (scmparent{:scm (scm {:multi ["$" "J~"]  :val2 3 :val1 "K"})})
                         :link1 (scm {:scm2 (scm2 {}) :multi [] :val2 -5 :val1 "Z"})})]]
-      (doseq [ex exs] (is (= (create! {:conn *conn*} ex) ex) (str ex))))))
+      (doseq [ex exs] (is (refless= (create! {:conn *conn*} ex) ex) (str ex))))))
 
 (deftest test-update!
   (with-test-db simple-schema
@@ -964,10 +964,10 @@
                 :expected (scmownsenum {:enums [(scm {:val2 53})]})}]]
       (doseq [{:keys [original updates expected] :as ex} exs]
         (let [actual (create! {:conn *conn*} original)]
-          (is (= actual original)
+          (is (refless= actual original)
               (str "create!\n" (with-out-str (clojure.pprint/pprint ex))))
           (let [actual (update! {:conn *conn*} actual updates)]
-            (is (= actual expected)
+            (is (refless= actual expected)
                 (str "update!\n" (with-out-str (clojure.pprint/pprint ex))))))))))
 
 (deftest test-link
@@ -1154,8 +1154,8 @@
               actual (create-graph! conn-ctx (seq expected))
               urefs  (unique-db-refs actual)
               uobjs  (unique-objs expected)]
-          (is (= {:count (count urefs) :entity actual}
-                 {:count (count uobjs) :entity expected})))))))
+          (is (refless= {:count (count urefs) :entity actual}
+                        {:count (count uobjs) :entity expected})))))))
 
 (deftest test-calendar-day
   (with-test-db simple-schema
@@ -1170,7 +1170,7 @@
 
 (defn check-create! [conn-ctx original]
   (let [actual (create! conn-ctx original)]
-    (if (= actual original) actual
+    (if (refless= actual original) actual
         (throw (ex-info "creation mismatch: output doesn't reflect input" 
                         {:actual actual :expected original})))))
 
@@ -1180,7 +1180,7 @@
   [conn-ctx original updates]
   (let [expected (merge original updates)
         actual   (update! conn-ctx original updates)]
-    (if (= expected actual) actual
+    (if (refless= expected actual) actual
         (throw (ex-info "update mismatch, output is not equivalent to input"
                         {:original original :updates updates :actual actual})))))
 
@@ -1212,8 +1212,8 @@
       (with-test-db simple-schema
         (let [conn-ctx {:conn *conn*}
               actual (create-graph! conn-ctx expected)]
-          (is (= {:count (count (unique-db-refs actual)) :entity actual}
-                 {:count (count (unique-objs expected)) :entity expected})))))))
+          (is (refless= {:count (count (unique-db-refs actual)) :entity actual}
+                        {:count (count (unique-objs expected)) :entity expected})))))))
 
 (ct/defspec graph-ScmOwnsEnum 10 (prop-create-graph :ScmOwnsEnum))
 (ct/defspec graph-ScmM 10 (prop-create-graph :ScmM))
