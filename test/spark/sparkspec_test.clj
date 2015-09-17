@@ -66,7 +66,7 @@
     (is (testspec1? (testspec1 {:val1 1 :val5 (testspec3)}))))
 
   (testing "links are not checked"
-    (let [ts1 (i_TestSpec1. {::bad-key true} (atom {}))]
+    (let [ts1 (i_TestSpec1. {::bad-key true} (atom {}) nil)]
       (is (testspec2 {:ts1 ts1})))))
 
 (defspec TestSpec4
@@ -116,15 +116,6 @@
 (defenum EnumFoo :EnumForward)
 (defspec EnumForward)
 
-(def ns-specs (namespace->specs *ns*))
-(deftest test-namespace->specs
-  (let [[a b both] (clojure.data/diff
-                    (into #{} (map :name ns-specs))
-                    #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
-                      :testenum :ES :ESParent :EnumFoo :EnumForward :A :B})]
-    (is (nil? b) "no missing specs")
-    (is (nil? a) "no extra specs")))
-
 (defspec TestSpec6
   [enum :is-many :EnumFoo])
 
@@ -155,9 +146,13 @@
     (is (link? l))
     (is (not (:ts3 l))))
 
-  (let [l1 (link {:ts3 (assoc (testspec3) :db-ref 1)})
-        l2 (link {:ts3 (assoc (testspec3) :db-ref 2)})]
-    (is (= l1 l2) "equality on by-value fields should ignore :db-ref")))
+  (let [l1 (link {:ts3 (assoc (testspec3) :db-ref 1)})]
+    (is (= (refless l1)
+           (link {:ts3 (testspec3)}))))
+  
+  (let [l1 (link {:ts3 (testspec3 {:db-ref 1}) :db-ref 3})
+        l2 (link {:ts3 (testspec3 {:db-ref 2}) :db-ref 4})]
+    (is (refless= [[[l1]]] [[[l2]]]) "refless equality")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
@@ -208,3 +203,18 @@
              [{} {} {:age 18,
                      :name "Mary",
                      :pets #{(cat {:name "Ringo"}) (dog {:name "George"})}}]))))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; ns
+
+(def ns-specs (namespace->specs *ns*))
+(deftest test-namespace->specs
+  (let [[a b both] (clojure.data/diff
+                    (into #{} (map :name ns-specs))
+                    #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
+                      :testenum :ES :ESParent :EnumFoo :EnumForward :A :B
+                      :Link :Human :TestSpec6})]
+    (is (nil? b) "no missing specs")
+    (is (nil? a) "no extra specs")))
+
