@@ -7,6 +7,7 @@
             [spark.sparkspec.spec :refer :all]
             [clojure.string :refer [join]] ;; TODO
             [clj-time.core :as time]
+            [clojure.walk :as walk]
             [clojure.pprint :as pp])
   (:import (clojure.lang ASeq)))
 
@@ -162,17 +163,17 @@
   (symbol (str "i_" (-> spec :name name))))
 (defn- spec->huh [])
 
-(defn- mk-record [spec] ;; CODEWALK
+(defn- mk-record [spec]
   (let [gs (gensym), class-name (spec->class spec)
         {:keys [non-rec]} (group-by recursiveness (:items spec))
         non-rec-kws (cons :db-ref (map :name non-rec))]
-    `(do (deftype ~class-name [~'atmap ~'cache]
+    `(do (deftype ~class-name [~'atmap ~'cache ~'db-hash]
            clojure.lang.IRecord
-           clojure.lang.IObj 
+           clojure.lang.IObj
            ;; user doesn't get the map out again so it's fine to put the meta on it
            ;; stipulation -- meta of the SpecInstance is initially inherited from meta of the map
            (meta [this#] (meta ~'atmap))
-           (withMeta [this# ~gs] (new ~class-name (with-meta ~'atmap ~gs) (atom {})))
+           (withMeta [this# ~gs] (new ~class-name (with-meta ~'atmap ~gs) (atom {}) ~'db-hash))
            clojure.lang.ILookup
            (valAt [this# k# not-found#]
              (or (k# (deref ~'cache))
@@ -232,7 +233,8 @@
                     (reduce
                      (fn [m# [k1# v1#]] (assoc m# k1# v1#))
                      ~'atmap (conj (deref ~'cache) [k# v#])) ;; order important - k#/v# win
-                    (atom {}))))
+                    (atom {})
+                    nil)))
            (containsKey [this# k#]
              (not (identical? this# (.valAt ~'atmap k# this#))))
            (iterator [~gs]
@@ -248,19 +250,18 @@
                  (assoc this# (first e#) (second e#))
                  (throw (ex-info (str "don't know how to cons " e#) {:this this# :e e#})))))
            (without [this# k#]
-             (new ~class-name (dissoc ~'atmap k#) (atom {})))
+             (new ~class-name (dissoc ~'atmap k#) (atom {}) nil))
            clojure.lang.IHashEq
            (hasheq [this#]
-             (let [m# (dissoc ~'atmap :db-ref)]
-               (->> (reduce
-                     (fn [m# [k# v#]] (assoc m# k# (.valAt this# k#)))
-                     m# m#)
-                    (clojure.lang.APersistentMap/mapHasheq)
-                    (bit-xor ~(hash class-name)))))
-           (hashCode [this#]
-             (clojure.lang.APersistentMap/mapHash this#))
+             (let [sub-hash# (or ~'db-hash
+                                 (->> (reduce (fn [m# [k# v#]] (assoc m# k# (.valAt this# k#)))
+                                              ~'atmap ~'atmap)
+                                      (clojure.lang.APersistentMap/mapHasheq)))]
+               (bit-xor ~(hash class-name) sub-hash#)))
+           #_(hashCode [this#] ;; I'm not sure what hashCode does that hasheq doesn't
+               (clojure.lang.APersistentMap/mapHash this#))
            (equals [this# ~gs]
-             (clojure.lang.APersistentMap/mapEquals this# ~gs)))
+             (= this# ~gs)))
          
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
            (.write w# (spec-instance->str ~spec v# '~(ns-name *ns*))))
@@ -354,7 +355,7 @@
 (defn non-recursive-ctor
   "builds an instance from another, checking fields, but children
    must all be primitive, non-recursive values or already spark types"
-  [map-ctor spec sp]
+  [map-ctor spec sp h]
   (let [items (:items spec)
         defaults (reduce (fn [m {name :name dv :default-value}]
                            (if (some? dv) (assoc m (keyword name) (if (ifn? dv) (dv) dv)) m))
@@ -372,10 +373,10 @@
     (do (doseq [kw (concat required-kws actual-kws)
                 :when (not (contains? rec-kws kw))]
           (check-component! spec kw (get sp-map kw)))
-        (map-ctor sp-map))))
+        (map-ctor sp-map h))))
 
 (t/ann ^:no-check recursive-ctor (t/All [a] [t/Keyword a -> a]))
-(defn recursive-ctor [spec-name orig-sp]
+(defn recursive-ctor [spec-name orig-sp & [h]]
   "walks a nested map structure, constructing proper instances from nested values.
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
   (let [spec (get-spec spec-name orig-sp)
@@ -395,7 +396,8 @@
                    :when (some? sub-sp)]
                (let [f (if db-sp identity (partial recursive-ctor sub-spec-name))]
                  [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))]
-        (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs))))))
+        (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs)
+                            (when db-sp h))))))
 
 (defn- mk-checking-ctor [spec]
   "For use in macros, creates a constructor that checks
@@ -439,7 +441,7 @@
   (let [class-ctor (str "i_" (name (:name spec)))
         fac-sym    (symbol (str class-ctor "-fixed"))]
     `(do
-       (defn ~fac-sym [o#] (~(symbol (str class-ctor ".")) o# (atom {})))
+       (defn ~fac-sym [o# h#] (~(symbol (str class-ctor ".")) o# (atom {}) h#))
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
        (defmethod get-map-ctor ~(symbol (str "i_" (name (:name spec)))) [_#] ~fac-sym))))
 
@@ -459,13 +461,13 @@
     `(do
        ;; the "map ctor" for an enum means it's arg needs to 
        ;; be a tagged map or a record type of one of the enum's ctors.
-       (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tacular/spec (:name spec))) [o#]
+       (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tacular/spec (:name spec))) [o# h#]
          (let [subspec-name# (:name (get-spec o#))]
            (assert subspec-name#
                    (str "could not find spec for "o#))
            (assert (contains? ~(:elements spec) subspec-name#) 
                    (str subspec-name#" is not an element of "~(:name spec)))
-           ((get-map-ctor subspec-name#) o#)))
+           ((get-map-ctor subspec-name#) o# h#)))
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
        (defmethod get-map-ctor ~(symbol (name (:name spec))) [_#] ~fac-sym))))
 
@@ -590,3 +592,17 @@
          [key (key (first si))])
        (into {})))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn refless
+  "Returns a version of the given spec instance with no :db-refs on
+  any of its fields"
+  [si]
+  (walk/prewalk (fn [si] (if (get-spec si) (dissoc si :db-ref) si)) si))
+
+(defn refless=
+  "Given any walkable collection, returns true if the two collections
+  would be = if no spec instances had :db-refs. "
+  [x y]
+  (let [refless-coll (partial walk/postwalk #(if (get-spec %) (dissoc % :db-ref) %))]
+    (= (refless-coll x) (refless-coll y))))

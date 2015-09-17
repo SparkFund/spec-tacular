@@ -672,9 +672,9 @@
           "return variables respect lexical scope and don't clobber fns"))
     (with-test-db simple-schema
       (sd/create! {:conn *conn*} (scmkw {:item :test}))
-      (is (= #{[(scmkw {:item :test})]}
-             (q :find :ScmKw :in (db) :where
-                [% {:item :test}])))))
+      (is (refless= #{[(scmkw {:item :test})]}
+                    (q :find :ScmKw :in (db) :where
+                       [% {:item :test}])))))
 
   (testing "compound data"
     (with-test-db simple-schema
@@ -778,14 +778,14 @@
     (with-test-db simple-schema
       (create! {:conn *conn*} (dog {:name "jack"}))
       (create! {:conn *conn*} (cat {:name "zuzu"}))
-      (is (= (q :find :Animal :in (db) :where
-                [% {:name "zuzu"}])
-             #{[(cat {:name "zuzu"})]}))
+      (is (refless= (q :find :Animal :in (db) :where
+                       [% {:name "zuzu"}])
+                    #{[(cat {:name "zuzu"})]}))
       (create! {:conn *conn*} (cat {:name "jack"}))
-      (is (= (q :find [:Animal ...] :in (db) :where
-                [% {:name "jack"}])
-             #{(cat {:name "jack"})
-               (dog {:name "jack"})}))))
+      (is (refless= (q :find [:Animal ...] :in (db) :where
+                       [% {:name "jack"}])
+                    #{(cat {:name "jack"})
+                      (dog {:name "jack"})}))))
 
   (testing "bad syntax" ; fully qualify for command line
     (with-test-db simple-schema
