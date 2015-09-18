@@ -29,7 +29,7 @@ the following in return:
 ## Quick Start
 
 ```clojure
-[spec-tacular "0.5.0"] ;; cutting edge; not stable
+[spec-tacular "0.5.0"] ;; unstable
 ```
 
 ```maven
@@ -45,7 +45,7 @@ the following in return:
 ### Creating Specs
 
 ```clojure
-(require '[spark.spec-tacular :as sp :refer [defspec]])
+(require '[spark.spec-tacular :as sp :refer [defspec defunion]])
 
 ;; Sets up a House entity containing a mandantory color and optionally
 ;; a Mailbox. It may also link in any number of Occupants.
