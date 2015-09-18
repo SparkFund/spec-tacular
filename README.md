@@ -6,22 +6,22 @@ between Clojure and Datomic a more convenient, safe, and place to live.
 Define your Datomic schemas using spec-tactular's spec DSL and receive
 the following in return:
 
-* *Representation of Datomic entities as maps* that verify (upon
+* **Representation of Datomic entities as maps** that verify (upon
    creation and association) that entity attributes have the correct
    fields, and in turn, the correct types
    
-* *core.typed aliases for each spec*
+* **core.typed aliases for each spec**
 
-* *Specialized query language* with a map-like syntax that allows
+* **Specialized query language** with a map-like syntax that allows
    queries to be expressed with domain-specific spec keywords instead
    of Datomic attribute-keywords.  Entities returned from queries are
    lazily constructed and can be used in typed code without extra
    casts.
 
-* *Simple transaction interface with Datomic*, using `create!` as a
+* **Simple transaction interface with Datomic**, using `create!` as a
    constructor, and `assoc!` as an update function.
 
-*WARNING:* spec-tactular is under active development, and makes no
+***WARNING:*** spec-tactular is under active development, and makes no
  claims of stability.  It currently anticipates single-threaded,
  single-peer interactions with Datomic, and may act strangely if
  either of those invariants are broken.
@@ -106,10 +106,8 @@ the following in return:
 ```clojure
 ;; Use the House schema to create a database and connection
 (def conn-ctx {:conn (schema/to-database! (schema/from-namespace *ns*))})
-```
 
-Then, we can create a red house,
-```clojure
+;; Create a red house:
 (def h (sd/create! conn-ctx (house {:color "Red"})))
 
 ;; Some quick semantics:
@@ -119,10 +117,8 @@ Then, we can create a red house,
 (assoc h :random-kw 42)                ;; => error
 (set [h h])                            ;; => #{h}
 (set [h (house {:color "Red"})])       ;; => #{h (house {:color "Red"})}
-```
 
-Let some people move in,
-```clojure
+;; Let some people move in:
 (def joe     (sd/create! conn-ctx (person {:name "Joe" :age 32})))
 (def bernard (sd/create! conn-ctx (person {:name "Bernard" :age 25})))
 
@@ -131,18 +127,14 @@ Let some people move in,
 
 h ;; => is still the simple red house
 (sd/refresh conn-ctx h) ;; => new-h
-```
+;; In most cases, you can forego the `refresh` and just use the return
+;; value of `assoc!`
 
-In most cases, you can forego the `refresh` and just use the return
-value of `assoc!`.
-
-Bernard and Joe get a cat, who hates both of them,
-```clojure
+;; Bernard and Joe get a cat, who hates both of them,
 (def zuzu (sd/create! conn-ctx (cat {:hates (:occupants new-h)})))
 (sd/assoc! conn-ctx h :occupants (conj (:occupants new-h) zuzu))
-```
-then they build a mailbox, and try to put it up in another House,
-```clojure
+
+;; They build a mailbox, and try to put it up in another House:
 (let [mb (mailbox {:has-mail? false})
       h1 (sd/assoc! conn-ctx h :mailbox mb)
       h2 (sd/create! conn-ctx (house {:color "Blue" :mailbox mb}))]
@@ -152,7 +144,12 @@ then they build a mailbox, and try to put it up in another House,
   ....)
 ````
 
+### Queries
+
+TODO
+
 ## License
 
 Copyright © 2014-2015 SparkFund Community Investment
+
 Distributed under the Apache License Version 2.0
