@@ -18,7 +18,7 @@
 
 (defspec Scm3)
 
-(defenum ScmEnum :Scm2 :Scm3 :Scm)
+(defunion ScmEnum :Scm2 :Scm3 :Scm)
 
 (defspec ScmOwnsEnum
   (:link
@@ -55,7 +55,7 @@
 (defspec Cat
   [name :is-a :string])
 
-(defenum Animal :Dog :Cat)
+(defunion Animal :Dog :Cat)
 
 (defspec Birthday
   [date :is-a :calendarday])

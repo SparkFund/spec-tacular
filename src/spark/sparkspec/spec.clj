@@ -27,7 +27,7 @@
 (defrecord Item
     [name type precondition required? unique? optional? identity? default-value])
 
-(defrecord EnumSpec [name elements])
+(defrecord UnionSpec [name elements])
 
 ;;;; There is no existing Java class for a primitive byte array
 (def Bytes (class (byte-array [1 2])))

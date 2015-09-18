@@ -89,35 +89,35 @@
 (defspec B [a :is-a :A])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; enums
+;; unions
 
-(defenum testenum :TestSpec2 :TestSpec3)
-(defspec ES [foo :is-a :testenum])
+(defunion testunion :TestSpec2 :TestSpec3)
+(defspec ES [foo :is-a :testunion])
 (defspec ESParent [es :is-a :ES])
 
-(deftest test-defenum
-  (is (some? (get-spec :testenum)))
-  (is (= (get-spec :testenum {:spec-tacular/spec :TestSpec2})
+(deftest test-defunion
+  (is (some? (get-spec :testunion)))
+  (is (= (get-spec :testunion {:spec-tacular/spec :TestSpec2})
          (get-spec :TestSpec2)))
   
-  (is (testenum? (testspec2 {})))
-  (is (instance? spark.sparkspec.spec.EnumSpec (get-spec testenum)))
+  (is (testunion? (testspec2 {})))
+  (is (instance? spark.sparkspec.spec.UnionSpec (get-spec testunion)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
   (is (thrown? clojure.lang.ExceptionInfo (check-component! (get-spec :ES) :foo :nope)))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
                         (esparent {:es {:foo (testspec1 {:val1 1})}}))
-      "nested ctor fails properly with enums")
+      "nested ctor fails properly with unions")
 
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"spec instance\(s\) not in enum spec"
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"spec instance\(s\) not in union spec"
                         (es {:foo (a {})}))))
 
-;; forward enum reference
-(defenum EnumFoo :EnumForward)
-(defspec EnumForward)
+;; forward union reference
+(defunion UnionFoo :UnionForward)
+(defspec UnionForward)
 
 (defspec TestSpec6
-  [enum :is-many :EnumFoo])
+  [union :is-many :UnionFoo])
 
 (defspec Link
   (:link
@@ -173,7 +173,7 @@
 (ct/defspec gen-TestSpec2 100 (prop-check-components :TestSpec2))
 (ct/defspec gen-TestSpec4 100 (prop-check-components :TestSpec4))
 (ct/defspec gen-TestSpec5 100 (prop-check-components :TestSpec5))
-(ct/defspec gen-testenum  100 (prop-check-components :testenum))
+(ct/defspec gen-testunion 100 (prop-check-components :testunion))
 (ct/defspec gen-ES        100 (prop-check-components :ES))
 (ct/defspec gen-ESParent  100 (prop-check-components :ESParent))
 (ct/defspec gen-TestSpec6 100 (prop-check-components :TestSpec6))
@@ -213,7 +213,7 @@
   (let [[a b both] (clojure.data/diff
                     (into #{} (map :name ns-specs))
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
-                      :testenum :ES :ESParent :EnumFoo :EnumForward :A :B
+                      :testunion :ES :ESParent :UnionFoo :UnionForward :A :B
                       :Link :Human :TestSpec6})]
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))
