@@ -644,7 +644,7 @@
             a2 (scmparent {:scm (scm {:val1 "b" :val2 2})})]
         (create-sp! {:conn *conn*} a1)
         (create-sp! {:conn *conn*} a2))
-  
+      
       (is (= #{[1] [2]}
              (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val2 ?a}}]))
@@ -732,10 +732,10 @@
               ;; (is (= asw2 esw) "equality")
               ))))
       (testing "coll"
-          (let [ex (create! {:conn *conn*} (scmmwrap {:val {:val (scm {:val1 "foobar"})}}))]
-            (is (contains? (sd/q :find [:Scm ...] :in (db) :where
-                                 [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
-                           (get-in ex [:val :val])))))
+        (let [ex (create! {:conn *conn*} (scmmwrap {:val {:val (scm {:val1 "foobar"})}}))]
+          (is (contains? (sd/q :find [:Scm ...] :in (db) :where
+                               [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
+                         (get-in ex [:val :val])))))
       (testing "absent field access"
         (let [eid (create-sp! {:conn *conn*} (scm2))
               a-scm2 (recursive-ctor :Scm2 (db/entity (db) eid))]
@@ -777,42 +777,42 @@
 
     (with-test-db simple-schema
       (create! {:conn *conn*} (dog {:name "jack"}))
-      (create! {:conn *conn*} (cat {:name "zuzu"}))
+      (create! {:conn *conn*} (mouse {:name "zuzu"}))
       (is (refless= (q :find :Animal :in (db) :where
                        [% {:name "zuzu"}])
-                    #{[(cat {:name "zuzu"})]}))
-      (create! {:conn *conn*} (cat {:name "jack"}))
+                    #{[(mouse {:name "zuzu"})]}))
+      (create! {:conn *conn*} (mouse {:name "jack"}))
       (is (refless= (q :find [:Animal ...] :in (db) :where
                        [% {:name "jack"}])
-                    #{(cat {:name "jack"})
+                    #{(mouse {:name "jack"})
                       (dog {:name "jack"})}))))
 
   (testing "bad syntax" ; fully qualify for command line
     (with-test-db simple-schema
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"Invalid clause rhs"
-           (macroexpand '(spark.sparkspec.datomic/q :find :Scm2 :in (db)
-                                                    :where [:Scm :scm2])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find :Scm2 :in (db)
+                                                       :where [:Scm :scm2])))
           "using a (non-spec) keyword as a rhs")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"could not infer type"
-           (macroexpand '(spark.sparkspec.datomic/q :find ?x :in (db)
-                                                    :where [?x {:y 5}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find ?x :in (db)
+                                                       :where [?x {:y 5}])))
           "impossible to determine spec of x")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"unsupported ident"
-           (macroexpand '(spark.sparkspec.datomic/q :find ?x :in (db) :where
-                                                    ["?x" {:y 5}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find ?x :in (db) :where
+                                                       ["?x" {:y 5}])))
           "using a string as an ident")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"could not find item"
-           (macroexpand '(spark.sparkspec.datomic/q :find :Scm :in (db) :where
-                                                    [% {:y 5}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find :Scm :in (db) :where
+                                                       [% {:y 5}])))
           "trying to specify a field that is not in the spec")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"not supported"
-           (macroexpand '(spark.sparkspec.datomic/q :find ?val :in (db) :where
-                                                    [:ScmEnum {:val1 ?val}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find ?val :in (db) :where
+                                                       [:ScmEnum {:val1 ?val}])))
           "trying to pull out a field from an enum with different field types")
 
       (is (thrown-with-msg?

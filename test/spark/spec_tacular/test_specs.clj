@@ -52,10 +52,10 @@
 (defspec Dog
   [name :is-a :string])
 
-(defspec Cat
+(defspec Mouse
   [name :is-a :string])
 
-(defunion Animal :Dog :Cat)
+(defunion Animal :Dog :Mouse)
 
 (defspec Birthday
   [date :is-a :calendarday])

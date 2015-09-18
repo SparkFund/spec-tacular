@@ -250,10 +250,10 @@
   "Creates a fresh db with schema installed; returns db"
   ([schema :- Schema] :- Connection
    (let [connection (fresh-db!)]
-     (do @(d/transact connection schema) connection)))
+     (do @(d/transact connection (cons spec-tactular-map schema)) connection)))
   ([schema :- Schema, uri :- URI] :- Connection
    (let [connection (fresh-db! uri)]
-     (do @(d/transact connection schema) connection))))
+     (do @(d/transact connection (cons spec-tactular-map schema)) connection))))
 
 (t/ann ^:no-check from-database [(t/U Database Connection) -> Schema])
 (defn from-database

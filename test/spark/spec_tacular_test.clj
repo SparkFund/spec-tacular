@@ -217,4 +217,3 @@
                       :Link :Human :TestSpec6})]
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))
-

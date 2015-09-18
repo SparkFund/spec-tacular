@@ -212,8 +212,10 @@
              (let [{[arity# type#] :item required?# :required? :as item#} (get-item ~spec k#)]
                (when (and required?# (not (some? v#)))
                  (throw (ex-info "attempt to delete a required field" {:instance this# :field k#})))
-               (when (and (= arity# :many) (not (every? identity v#)))
+               (when (and (= arity# :many) (not (every? some? v#)))
                  (throw (ex-info "invalid value for arity :many" {:entity this# :field k# :value v#})))
+               (when (not (contains? #{~@(map :name (:items spec)) :db-ref} k#))
+                 (throw (ex-info "attempt to associate field not in the spec" {:instance this# :field k#})))
                (new ~class-name
                     (reduce
                      (fn [m# [k1# v1#]] (assoc m# k1# v1#))
@@ -361,12 +363,12 @@
         (map-ctor sp-map h))))
 
 (t/ann ^:no-check recursive-ctor (t/All [a] [t/Keyword a -> a]))
-(defn recursive-ctor [spec-name orig-sp & [h]]
+(defn recursive-ctor [spec-name orig-sp]
   "walks a nested map structure, constructing proper instances from nested values.
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
-  (let [spec (get-spec spec-name orig-sp)
+  (let [spec  (get-spec spec-name orig-sp)
         db-sp (database-coercion orig-sp)
-        sp   (or (database-coercion orig-sp) orig-sp)]
+        sp    (or (database-coercion orig-sp) orig-sp)]
     (when-not (and spec sp)
       (throw (ex-info (str "cannot create " (name spec-name)) {:sp orig-sp})))
     (when-not (instance? clojure.lang.IPersistentMap sp)
@@ -379,10 +381,12 @@
                    :when (not (primitive? sub-spec-name))
                    :let [sub-sp (get sp iname)]
                    :when (some? sub-sp)]
-               (let [f (if db-sp identity (partial recursive-ctor sub-spec-name))]
+               (let [f (if db-sp identity #(recursive-ctor sub-spec-name %))]
                  [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))]
-        (non-recursive-ctor (get-map-ctor (:name spec)) spec (into sp sub-kvs)
-                            (when db-sp h))))))
+        (non-recursive-ctor (get-map-ctor (:name spec))
+                            spec
+                            (into sp sub-kvs)
+                            (when db-sp (hash orig-sp)))))))
 
 (defn- mk-checking-ctor [spec]
   "For use in macros, creates a constructor that checks
@@ -588,12 +592,13 @@
 (defn spec-refless= [x y]
   (if-let [x-spec (get-spec x)]
     (and (= x-spec (get-spec y))
-         (for [{iname :name [arity _] :type} (:items x-spec)]
-           (let [v1 (iname x), v2 (iname y)]
-             (case arity
-               :one (spec-refless= x y)
-               :many (and (= (count ~v1) (count ~v2))
-                          (every? (fn [l] (some (fn [m] (spec-refless= l m)) v1)) v2))))))
+         (every? identity
+                 (for [{iname :name [arity _] :type} (:items x-spec)]
+                   (let [v1 (iname x), v2 (iname y)]
+                     (case arity
+                       :one (spec-refless= v1 v2)
+                       :many (and (= (count v1) (count v2))
+                                  (every? (fn [l] (some (fn [m] (spec-refless= l m)) v1)) v2)))))))
     (= x y)))
 
 (defn refless=
