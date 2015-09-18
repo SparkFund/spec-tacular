@@ -3,7 +3,7 @@
   (:use clojure.test
         spark.spec-tacular
         spark.spec-tacular.spec
-        spark.spec-tacular.datomic
+        [spark.spec-tacular.datomic :exclude [db]]
         spark.spec-tacular.test-utils
         spark.spec-tacular.generators
         spark.spec-tacular.test-specs)
@@ -674,7 +674,10 @@
       (sd/create! {:conn *conn*} (scmkw {:item :test}))
       (is (refless= #{[(scmkw {:item :test})]}
                     (q :find :ScmKw :in (db) :where
-                       [% {:item :test}])))))
+                       [% {:item :test}])))
+      (is (refless= #{[:test]}
+                    (q :find :keyword :in (db) :where
+                       [:ScmKw {:item [:keyword %]}])))))
 
   (testing "compound data"
     (with-test-db simple-schema

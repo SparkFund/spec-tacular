@@ -65,6 +65,9 @@
   [spec]
   (some-> spec :name name lower-case))
 
+(defn db [conn-ctx]
+  (db/db (:conn conn-ctx)))
+
 (t/ann db-keyword [SpecT (t/U clojure.lang.Named Item) -> t/Keyword])
 (defn db-keyword
   [spec a]
@@ -769,9 +772,14 @@
                       (get-spec sub-spec-name (get @tenv l))
                       spec)]
          (cond
-           (keyword? l)
+           (and (keyword? l)
+                (get-spec l))
            `(conj ~(expand-clause [[y l] r] uenv tenv)
                   ~(mk-where-clause `'~y))
+           (and (keyword? l)
+                (primitive? l))
+           ,(do (set-type! tenv r l)
+                (expand-item item db-kw r x uenv tenv))
            (and (::patvar (meta l)) (:items spec))
            ,(do (set-type! tenv l sub-spec-name)
                 `(conj ~(expand-clause [[l (:name spec)] r] uenv tenv)
@@ -782,7 +790,7 @@
                 [[`'~x db-kw `'~r]
                  [`'~r :spec-tacular/spec `'~l]])
            :else ;; fall back to dynamic resolution
-           (throw (ex-info "dynamic resolution not yet supported" {:syntax rhs}))))
+           (throw (ex-info "invalid item" {:syntax rhs}))))
       :else
       ;; We have a "thing" that eventually resolves into a value.
       ,(let [sub-spec (get-spec sub-spec-name)

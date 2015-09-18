@@ -1,5 +1,7 @@
 (ns spark.spec-tacular.readme-test
-  (:use clojure.test))
+  (:use clojure.test)
+  (:require [spark.spec-tacular.schema :as schema]
+            [spark.spec-tacular.datomic :as sd]))
 
 (require '[spark.spec-tacular :as sp :refer [defspec defunion]])
 
@@ -37,13 +39,9 @@
 
 ;;; Creating Databases
 
-(require '[spark.spec-tacular.schema :as schema])
-
 (deftest test-readme-creating-databases
   (is (every? map? (schema/from-namespace *ns*)))
   (is (instance? datomic.peer.LocalConnection (schema/to-database! (schema/from-namespace *ns*)))))
-
-(require '[spark.spec-tacular.datomic :as sd])
 
 (deftest test-readme-interfacing-databases
 

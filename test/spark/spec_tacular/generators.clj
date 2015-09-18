@@ -1,7 +1,7 @@
 (ns spark.spec-tacular.generators
   (:refer-clojure :exclude [assoc!])
   (:use spark.spec-tacular
-        spark.spec-tacular.datomic
+        [spark.spec-tacular.datomic :exclude [db]]
         spark.spec-tacular.test-utils)
   (:require [datomic.api :as db]
             [spark.spec-tacular.schema :as schema]

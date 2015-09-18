@@ -1,7 +1,7 @@
 # spec-tacular
 
 Write spectacular data definitions!  Our goal is to make the border
-between Clojure and Datomic a more convenient, safe, and place to live.
+between Clojure and Datomic a more convenient and safe place to live.
 
 Define your Datomic schemas using spec-tactular's spec DSL and receive
 the following in return:
@@ -10,7 +10,7 @@ the following in return:
    creation and association) that entity attributes have the correct
    fields, and in turn, the correct types
    
-* **core.typed aliases for each spec**
+* **Core Typed aliases for each spec**
 
 * **Specialized query language** with a map-like syntax that allows
    queries to be expressed with domain-specific spec keywords instead
@@ -46,6 +46,9 @@ the following in return:
 
 ```clojure
 (require '[spark.spec-tacular :as sp :refer [defspec defunion]])
+```
+
+```clojure
 
 ;; Sets up a House entity containing a mandantory color and optionally
 ;; a Mailbox. It may also link in any number of Occupants.
@@ -80,10 +83,12 @@ the following in return:
 (defspec Porcupine) ;; No fields, porcupines are boring
 ```
 
-### Creating Databases
+### Changing Databases
 ```clojure
 (require '[spark.spec-tacular.schema :as schema])
+```
 
+```clojure
 ;; Returns a schema with entries for each spec defined in my-ns
 (schema/from-namespace *ns*)
 ;; => ({:db/id ....,
@@ -102,7 +107,9 @@ the following in return:
 ### Interfacing with Databases
 ```clojure
 (require '[spark.spec-tacular.datomic :as sd])
+```
 
+```clojure
 ;; Use the House schema to create a database and connection
 (def conn-ctx {:conn (schema/to-database! (schema/from-namespace *ns*))})
 
@@ -143,9 +150,74 @@ h ;; => is still the simple red house
   ....)
 ````
 
-### Queries
+### Querying Databases
+```clojure
+(require '[spark.spec-tacular.datomic :as sd])
+```
 
-TODO
+```clojure
+
+;; First let's distinguish the mailboxes -- let's say Joe and Bernard
+;; get some mail
+(def mb1 (sd/assoc! conn-ctx (:mailbox h1) :has-mail? true))
+
+;; Get the database
+(def db (sd/db conn-ctx))
+
+;; Use % to look for the only find variable
+(sd/q :find [:Mailbox ...] :in db :where [% {:has-mail? false}])
+;; => #{(:mailbox h2)}, the mailbox from house h2
+(sd/q :find [:Mailbox ...] :in db :where [% {:has-mail? true}])
+;; => #{mb1}, that's Joe and Bernard's mailbox
+
+;; Find the Houses without mail
+(sd/q :find [:House ...] :in db :where
+      [% {:mailbox {:has-mail false}}])
+;; => #{h2}
+
+;; Find the House and it's human occupants when the mailbox has mail
+;; Use %1 and %2 to to look for multiple find variables
+(sd/q :find :House :Person :in db :where
+      [%1 {:occupants %2 :mailbox {:has-mail false}}])
+;; => #{[h1 #{joe bernard}]}
+```
+
+This last example means we're looking for any `:occupants` that are
+`:Person`s.  Even though we represent Datomic's cardinality "many" as
+a collection in Clojure, we still use a relation to search for members
+of that collection on the database.  Those familiar with Datomic may
+understand that this part of the query (roughly) expands to
+
+```clojure
+[.... [?house :house/occupants ?person] ....]
+```
+
+When we get the result of the query back in Clojure, we take that
+result and return it as a set.  Onwards!
+
+```clojure
+
+;; If you want to get the spec name of entities on the database, you
+;; can use the special :spec-tacular/spec keyword.  Here we restrict
+;; the occupants to the :Pet spec and then return all kinds of Pet's
+;; that live in houses:
+(sd/q :find [:keyword ...] :in db :where
+      [:House {:occupants [:Pet {:spec-tacular/spec %}]}])
+;; => #{:Cat}
+
+```
+
+## Updating from v.0.4.x
+
+* Replace all `spark.sparkspec` namespaces with `spark.spec-tacular`
+
+* Check all calls to `=` to see if `refless=` is more appropriate
+
+* Check all `set`s if you mix local instances and instances on the
+  database; these are nolonger `=` nor do they hash to the same number
+  even if they are otherwise equivalent.
+
+* Rename `defenum` to `defunion`
 
 ## License
 
