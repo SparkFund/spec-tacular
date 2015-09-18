@@ -1,6 +1,6 @@
-(ns spark.sparkspec.test-utils
+(ns spark.spec-tacular.test-utils
   (:require [datomic.api :as db]
-            [spark.sparkspec.datomic :refer [spark-type-attr]]))
+            [spark.spec-tacular.datomic :refer [spark-type-attr]]))
 
 ;;;; Macro for using fresh datomic instances for every test.
 

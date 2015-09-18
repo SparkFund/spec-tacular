@@ -1,10 +1,10 @@
-(ns spark.sparkspec.test-specs
+(ns spark.spec-tacular.test-specs
   {:core.typed {:collect-only true}}
   (:refer-clojure :exclude [assoc!])
   (:require [clojure.core.typed :as t])
-  (:use spark.sparkspec
-        spark.sparkspec.spec
-        spark.sparkspec.datomic))
+  (:use spark.spec-tacular
+        spark.spec-tacular.spec
+        spark.spec-tacular.datomic))
 
 (defspec Scm2
   [val1 :is-a :long])

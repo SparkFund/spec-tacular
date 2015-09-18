@@ -1,10 +1,10 @@
-(ns spark.sparkspec.schema-test
+(ns spark.spec-tacular.schema-test
   (:refer-clojure :exclude [read-string read])
   (:use clojure.test
-        spark.sparkspec.spec
-        [spark.sparkspec :exclude [diff]]
-        spark.sparkspec.schema
-        spark.sparkspec.test-utils)
+        spark.spec-tacular.spec
+        [spark.spec-tacular :exclude [diff]]
+        spark.spec-tacular.schema
+        spark.spec-tacular.test-utils)
   (:require [datomic.api :as d]
             [clojure.java.io :as io]))
 

@@ -1,4 +1,4 @@
-(defproject spec-tacular "0.4.24"
+(defproject spec-tacular "0.5.0"
   :description "First-class, extendable data specifications for clojure."
   :url "https://github.com/SparkFund/spec-tacular"
   :license {:name "Apache License, Version 2.0"
@@ -22,7 +22,7 @@
   :test-selectors {:default (complement :loud)
                    :loud :loud
                    :all (constantly true)}
-  :core.typed {:check [spark.sparkspec.datomic
-                       spark.sparkspec.schema
-                       spark.sparkspec.test-specs
-                       spark.sparkspec.typecheck-test]})
+  :core.typed {:check [spark.spec-tacular.datomic
+                       spark.spec-tacular.schema
+                       spark.spec-tacular.test-specs
+                       spark.spec-tacular.typecheck-test]})

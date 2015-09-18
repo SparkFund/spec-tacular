@@ -1,10 +1,10 @@
-(ns spark.sparkspec.generators
+(ns spark.spec-tacular.generators
   (:refer-clojure :exclude [assoc!])
-  (:use spark.sparkspec
-        spark.sparkspec.datomic
-        spark.sparkspec.test-utils)
+  (:use spark.spec-tacular
+        spark.spec-tacular.datomic
+        spark.spec-tacular.test-utils)
   (:require [datomic.api :as db]
-            [spark.sparkspec.schema :as schema]
+            [spark.spec-tacular.schema :as schema]
             [clojure.test.check :as tc]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]

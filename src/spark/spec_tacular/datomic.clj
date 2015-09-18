@@ -1,13 +1,13 @@
-(ns spark.sparkspec.datomic
+(ns spark.spec-tacular.datomic
   (:refer-clojure :exclude [for remove assoc!])
-  (:use spark.sparkspec.spec
-        spark.sparkspec
-        [clojure.string :only [lower-case]]
-        [clojure.set :only [rename-keys difference]]
-        [clojure.core.typed.unsafe :only [ignore-with-unchecked-cast]])
+  (:use spark.spec-tacular.spec
+        spark.spec-tacular)
   (:import clojure.lang.MapEntry)
   (:require [clj-time.coerce :as timec]
             [clojure.core.typed :as t :refer [for]]
+            [clojure.string :refer [lower-case]]
+            [clojure.set :refer [rename-keys difference]]
+            [clojure.core.typed.unsafe :refer [ignore-with-unchecked-cast]]
             [clojure.data :as data]
             [clojure.tools.macro :as m]
             [clojure.walk :as walk]

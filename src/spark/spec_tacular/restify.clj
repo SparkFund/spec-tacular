@@ -1,4 +1,4 @@
-(ns spark.sparkspec.restify
+(ns spark.spec-tacular.restify
   (:require [io.pedestal.http :as http]
             [io.pedestal.http.route :as route]
             [io.pedestal.http.body-params :as body-params]
@@ -11,8 +11,8 @@
             [clojure.string :refer [lower-case]]
             [clojure.walk :as walk]
             [io.pedestal.interceptor :as i]
-            [spark.sparkspec.datomic :as spd]
-            [spark.sparkspec :as sp]
+            [spark.spec-tacular.datomic :as spd]
+            [spark.spec-tacular :as sp]
             [clojure-csv.core :as csv]
             [clojure.string :as str])
   (:import java.lang.Throwable))

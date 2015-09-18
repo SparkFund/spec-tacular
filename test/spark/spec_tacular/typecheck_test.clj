@@ -1,8 +1,8 @@
-(ns spark.sparkspec.typecheck-test
+(ns spark.spec-tacular.typecheck-test
   (:use clojure.test)
-  (:require [spark.sparkspec]
-            [spark.sparkspec.datomic :as sd]
-            [spark.sparkspec.test-specs :as ts]
+  (:require [spark.spec-tacular]
+            [spark.spec-tacular.datomic :as sd]
+            [spark.spec-tacular.test-specs :as ts]
             [clojure.core.typed :as t]))
 
 (t/typed-deps spark.sparkspec.test-specs)

@@ -1,5 +1,5 @@
-(ns spark.sparkspec.restify-test
-  (:require [spark.sparkspec.restify :refer :all]
+(ns spark.spec-tacular.restify-test
+  (:require [spark.spec-tacular.restify :refer :all]
             [io.pedestal.http :as http]
             [io.pedestal.http.route :as route]
             [io.pedestal.http.body-params :as body-params]
@@ -10,9 +10,9 @@
             [cheshire.core :as json]
             [clojure.string :refer [lower-case]]
             [io.pedestal.interceptor :as i]
-            [spark.sparkspec.datomic :as spd]
-            [spark.sparkspec.test-utils :refer :all]
-            [spark.sparkspec :as sp]
+            [spark.spec-tacular.datomic :as spd]
+            [spark.spec-tacular.test-utils :refer :all]
+            [spark.spec-tacular :as sp]
             [clojure.test :refer :all]
             [io.pedestal.test :refer :all]))
 

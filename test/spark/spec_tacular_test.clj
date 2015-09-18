@@ -1,7 +1,7 @@
-(ns spark.sparkspec-test
-  (:use spark.sparkspec
+(ns spark.spec-tacular-test
+  (:use spark.spec-tacular
         clojure.test
-        spark.sparkspec.generators)
+        spark.spec-tacular.generators)
   (:require [clojure.core.typed :as t]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -101,7 +101,7 @@
          (get-spec :TestSpec2)))
   
   (is (testunion? (testspec2 {})))
-  (is (instance? spark.sparkspec.spec.UnionSpec (get-spec testunion)))
+  (is (instance? spark.spec_tacular.spec.UnionSpec (get-spec testunion)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
   (is (thrown? clojure.lang.ExceptionInfo (check-component! (get-spec :ES) :foo :nope)))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))

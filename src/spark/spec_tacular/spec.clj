@@ -1,4 +1,4 @@
-(ns spark.sparkspec.spec
+(ns spark.spec-tacular.spec
   (:require [clojure.pprint :as pp]
             [clj-time.core :as time]
             [clj-time.format :as timef]

@@ -1,14 +1,15 @@
-(ns spark.sparkspec.datomic-test
+(ns spark.spec-tacular.datomic-test
   (:refer-clojure :exclude [remove read-string read assoc!])
   (:use clojure.test
-        spark.sparkspec
-        spark.sparkspec.spec
-        spark.sparkspec.datomic
-        spark.sparkspec.test-utils
-        spark.sparkspec.generators)
+        spark.spec-tacular
+        spark.spec-tacular.spec
+        spark.spec-tacular.datomic
+        spark.spec-tacular.test-utils
+        spark.spec-tacular.generators
+        spark.spec-tacular.test-specs)
   (:require [datomic.api :as db]
-            [spark.sparkspec.datomic :as sd]
-            [spark.sparkspec.schema :as schema]
+            [spark.spec-tacular.datomic :as sd]
+            [spark.spec-tacular.schema :as schema]
             [clj-time.core :as time]
             [clojure.walk :as walk]
             [clojure.core.typed :as t]
@@ -16,12 +17,11 @@
             [clojure.test.check :as tc]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]
-            [clojure.test.check.clojure-test :as ct]
-            [spark.sparkspec.test-specs :refer :all]))
+            [clojure.test.check.clojure-test :as ct]))
 
 (def simple-schema
   (cons schema/spec-tactular-map
-        (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
+        (schema/from-namespace (the-ns 'spark.spec-tacular.test-specs))))
 
 (deftest test-entity-coercion
   (with-test-db simple-schema

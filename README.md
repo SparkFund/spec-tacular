@@ -81,7 +81,7 @@ the following in return:
 
 ### Creating Databases
 ```clojure
-(require '[spark.sparkspec.schema :as schema])
+(require '[spark.spec-tacular.schema :as schema])
 
 ;; Returns a schema with entries for each spec defined in my-ns
 (schema/from-namespace 'my-ns)
@@ -93,7 +93,7 @@ the following in return:
 
 ### Interfacing with Databases
 ```clojure
-(require '[spark.sparkspec.datomic :as sd])
+(require '[spark.spec-tacular.datomic :as sd])
 
 ```clojure
 ;; Use the House schema to create a database and connection

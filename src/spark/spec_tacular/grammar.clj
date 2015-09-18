@@ -1,5 +1,5 @@
-(ns spark.sparkspec.grammar
-  (:use [spark.sparkspec.spec])
+(ns spark.spec-tacular.grammar
+  (:use [spark.spec-tacular.spec])
   (:require [clojure.core.match :refer [match]])
   (:refer-clojure :exclude [name]))
 

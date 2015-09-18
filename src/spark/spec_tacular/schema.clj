@@ -1,15 +1,15 @@
-(ns spark.sparkspec.schema
+(ns spark.spec-tacular.schema
   (:refer-clojure :exclude [read-string read assoc!])
-  (:use [spark.sparkspec :exclude [diff]]
-        spark.sparkspec.spec
-        spark.sparkspec.datomic
+  (:use [spark.spec-tacular :exclude [diff]]
+        spark.spec-tacular.spec
+        spark.spec-tacular.datomic
         [clojure.string :only [lower-case]])
   (:require [clojure.core.typed :as t]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
-(t/typed-deps spark.sparkspec
-              spark.sparkspec.datomic)
+(t/typed-deps spark.spec-tacular
+              spark.spec-tacular.datomic)
 
 (t/ann ^:no-check clojure.core/slurp [(t/U t/Str java.io.File) -> t/Str])
 (t/ann ^:no-check clojure.edn/read-string 

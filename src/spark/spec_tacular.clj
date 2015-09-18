@@ -1,21 +1,13 @@
-(ns spark.sparkspec
+(ns spark.spec-tacular
   {:core.typed {:collect-only true}}
   (:require [clojure.core.typed :as t]
-            [clojure.string :refer [lower-case]]
+            [clojure.string :refer [lower-case join]]
             [clojure.data :as data]
-            [spark.sparkspec.grammar :refer [parse-spec parse-union]]
-            [spark.sparkspec.spec :refer :all]
-            [clojure.string :refer [join]] ;; TODO
-            [clj-time.core :as time]
             [clojure.walk :as walk]
-            [clojure.pprint :as pp])
-  (:import (clojure.lang ASeq)))
-
-;;;; TODO:
-;;     - Recursive explosions ??!?!?
-;;     - CRUDding resources
-;;     - append grammar to docstring ;)
-;;     - coerce everything to :is-a
+            [clojure.pprint :as pp]
+            [clj-time.core :as time]
+            [spark.spec-tacular.grammar :refer [parse-spec parse-union]]
+            [spark.spec-tacular.spec :refer :all]))
 
 (t/defalias SpecInstance (t/Map t/Any t/Any))
 (t/defalias SpecName t/Keyword)
