@@ -13,7 +13,7 @@
             [clojure.walk :as walk]
             [clojure.core.match :refer [match]]))
 
-(t/typed-deps spark.sparkspec)
+(t/typed-deps spark.spec-tacular)
 
 (require '[datomic.api :as db])
 
@@ -43,9 +43,9 @@
 (t/ann ^:no-check datomic.api/transact
        [Connection t/Any -> (t/Future t/Any)])
 
-(t/ann spark.sparkspec.test-utils/make-db [(t/Vec t/Any) -> datomic.peer.LocalConnection])
-(t/ann spark.sparkspec.test-utils/db [-> datomic.db.Db])
-(t/ann spark.sparkspec.test-utils/*conn* datomic.peer.LocalConnection)
+(t/ann spark.spec-tacular.test-utils/make-db [(t/Vec t/Any) -> datomic.peer.LocalConnection])
+(t/ann spark.spec-tacular.test-utils/db [-> datomic.db.Db])
+(t/ann spark.spec-tacular.test-utils/*conn* datomic.peer.LocalConnection)
 
 (def spark-type-attr 
   "The datomic attribute holding onto a keyword-valued spec type."

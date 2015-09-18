@@ -726,7 +726,7 @@
                 asw2 (:val (recursive-ctor :ScmMWrap (db/entity (db) esw-id)))]
             ;; (is (= asw1 esw) "returned from query equality")
             (testing "lazy-ctor"
-              #_(is (instance? spark.sparkspec.test_specs.l_ScmM asw2) "type") ;; TODO
+              #_(is (instance? spark.spec_tacular.test_specs.l_ScmM asw2) "type") ;; TODO
               (is (:identity asw2) "keyword access")
               (is (= (type (:vals asw2)) clojure.lang.PersistentVector) "keyword access")
               ;; (is (= asw2 esw) "equality")
