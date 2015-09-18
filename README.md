@@ -103,7 +103,6 @@ the following in return:
 ```clojure
 (require '[spark.spec-tacular.datomic :as sd])
 
-```clojure
 ;; Use the House schema to create a database and connection
 (def conn-ctx {:conn (schema/to-database! (schema/from-namespace *ns*))})
 
