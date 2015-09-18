@@ -751,7 +751,10 @@
     (cond
       (::patvar (meta rhs))
       ,(do (set-type! tenv rhs sub-spec-name)
-           [(mk-where-clause `'~rhs)])
+           (vec (concat (if-let [spec (get-spec (get @tenv rhs))]
+                          [[`'~rhs :spec-tacular/spec (get @tenv rhs)]]
+                          [])
+                        [(mk-where-clause `'~rhs)])))
       (and (keyword? rhs)
            (get-spec rhs))
       ,(t/let [y (gensym "?tmp")]
@@ -861,12 +864,8 @@
                    [['~x :spec-tacular/spec '~maybe-spec]]
                    (let [opts# ~opts]
                      (if (every? empty? (vals opts#)) []
-                         [(~'list ~''or ~@(map (fn [[kw stx]]
-                                                 `(~'cons ~''and
-                                                          (~'concat [[(~'list ~''ground ~kw)
-                                                                      '~maybe-spec]]
-                                                                    ~stx)))
-                                               opts))]))))
+                         [(list ~''or ~@(map (fn [[kw stx]] `(~'cons ~''and (~'concat [[(~'list ~''ground ~kw) '~maybe-spec]] ~stx)))
+                                             opts))]))))
               (symbol? maybe-spec)
               `(let [opts# ~(into {} (get grouped :syntax))
                      spec# ~maybe-spec]

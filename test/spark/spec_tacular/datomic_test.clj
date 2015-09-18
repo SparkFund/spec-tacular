@@ -779,16 +779,16 @@
                #{[soe]}))))
 
     (with-test-db simple-schema
-      (create! {:conn *conn*} (dog {:name "jack"}))
+      (create! {:conn *conn*} (ferret {:name "catsnake"}))
       (create! {:conn *conn*} (mouse {:name "zuzu"}))
       (is (refless= (q :find :Animal :in (db) :where
                        [% {:name "zuzu"}])
                     #{[(mouse {:name "zuzu"})]}))
-      (create! {:conn *conn*} (mouse {:name "jack"}))
+      (create! {:conn *conn*} (mouse {:name "catsnake"}))
       (is (refless= (q :find [:Animal ...] :in (db) :where
-                       [% {:name "jack"}])
-                    #{(mouse {:name "jack"})
-                      (dog {:name "jack"})}))))
+                       [% {:name "catsnake"}])
+                    #{(mouse {:name "catsnake"})
+                      (ferret {:name "catsnake"})}))))
 
   (testing "bad syntax" ; fully qualify for command line
     (with-test-db simple-schema
@@ -834,11 +834,6 @@
              clojure.lang.ExceptionInfo #"bad entity in database"
              (:scm2 (recursive-ctor :Scm (db/entity (db) id))))
             "cant get an Scm2 out of it")
-
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo #"bad entity in database"
-             (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}]))
-            "cant directly get the Scm2 either")
 
         (assert @(db/transact *conn*
                               [{:db/id (db/tempid :db.part/user -100)

@@ -49,13 +49,13 @@
 (defspec ScmKw
   [item :is-a :keyword])
 
-(defspec Dog
+(defspec Ferret
   [name :is-a :string])
 
 (defspec Mouse
   [name :is-a :string])
 
-(defunion Animal :Dog :Mouse)
+(defunion Animal :Ferret :Mouse)
 
 (defspec Birthday
   [date :is-a :calendarday])

@@ -74,4 +74,18 @@
         h2 (sd/create! conn-ctx (house {:color "Blue" :mailbox mb}))]
     ;; But since Mailboxes are passed by value,
     ;; the Mailbox get duplicated
-    (is (= (= (:mailbox h1) (:mailbox h2)) false))))
+    (is (= (= (:mailbox h1) (:mailbox h2)) false))
+
+    (def mb1 (sd/assoc! conn-ctx (:mailbox h1) :has-mail? true))
+    (def db (sd/db conn-ctx))
+    (is (= (sd/q :find [:Mailbox ...] :in db :where [% {:has-mail? false}]) #{(:mailbox h2)}))
+    (is (= (sd/q :find [:Mailbox ...] :in db :where [% {:has-mail? true}])  #{mb1}))
+    (is (= (sd/q :find [:House ...] :in db :where
+                 [% {:mailbox {:has-mail? false}}])
+           #{h2}))
+    (is (= (sd/q :find :House, :Person :in db :where
+                 [%1 {:occupants %2 :mailbox {:has-mail? true}}])
+           #{[(sd/refresh conn-ctx h1) joe] [(sd/refresh conn-ctx h1) bernard]}))
+    (is (= (sd/q :find [:string ...] :in db :where
+                 [:House {:occupants [:Person {:name %}]}])
+           #{"Joe" "Bernard"}))))

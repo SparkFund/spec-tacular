@@ -83,7 +83,7 @@ the following in return:
 (defspec Porcupine) ;; No fields, porcupines are boring
 ```
 
-### Changing Databases
+### Creating Databases
 ```clojure
 (require '[spark.spec-tacular.schema :as schema])
 ```
@@ -104,7 +104,7 @@ the following in return:
 ;; => #<LocalConnection datomic.peer.LocalConnection@....>
 ```
 
-### Interfacing with Databases
+### Changing Databases
 ```clojure
 (require '[spark.spec-tacular.datomic :as sd])
 ```
@@ -178,8 +178,8 @@ h ;; => is still the simple red house
 ;; Find the House and it's human occupants when the mailbox has mail
 ;; Use %1 and %2 to to look for multiple find variables
 (sd/q :find :House :Person :in db :where
-      [%1 {:occupants %2 :mailbox {:has-mail false}}])
-;; => #{[h1 #{joe bernard}]}
+      [%1 {:occupants %2 :mailbox {:has-mail true}}])
+;; => #{[h1 joe] [h2 bernard]}
 ```
 
 This last example means we're looking for any `:occupants` that are
@@ -201,11 +201,15 @@ result and return it as a set.  Onwards!
 ;; can use the special :spec-tacular/spec keyword.  Here we restrict
 ;; the occupants to the :Pet spec and then return all kinds of Pet's
 ;; that live in houses:
-(sd/q :find [:keyword ...] :in db :where
-      [:House {:occupants [:Pet {:spec-tacular/spec %}]}])
-;; => #{:Cat}
+(sd/q :find [:string ...] :in db :where
+      [:House {:occupants [:Person {:name %}]}])
+;; => #{"Joe" "Bernard"}
 
 ```
+
+Although maps work as you would expect in a query, the vector form
+`[<spec> <map>]` is protected syntax meaning the `map` should be
+restricted to things of type `<spec>`.
 
 ## Updating from v.0.4.x
 

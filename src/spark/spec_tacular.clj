@@ -438,12 +438,16 @@
 ;; i.e. it's not always `spec` being returned if we can do better
 (defn- mk-union-get-spec [spec]
   (let [elements (:elements spec)]
-    `(defmethod get-spec ~(:name spec) [o# & [rest#]]
-       (if-let [rest-spec# (and rest# (get-spec rest#))]
-         (if (some #(= (:name rest-spec#) %) [~@elements]) rest-spec#
-             (throw (ex-info "trying to construct an union out of spec instance(s) not in union spec"
-                             {:objects (cons o# rest#) :spec ~spec})))
-         ~spec))))
+    `(letfn [;; is spec2 somewhere in spec1's union
+             (member-of-union# [spec1# spec2#]
+               (when (or (contains? (:elements spec1#) (:name spec2#))
+                         (some #(member-of-union# (get-spec %) spec2#) (:elements spec1#)))
+                 spec2#))]
+       (defmethod get-spec ~(:name spec) [_# & [rest#]]
+         (if (some? rest#)
+           (or (member-of-union# ~spec (get-spec rest#))
+               (throw (ex-info "" {})))
+           ~spec)))))
 
 (defn- mk-union-get-map-ctor [spec]
   (let [fac-sym (symbol (str "map->i_" (name (:name spec)) "-fixed"))]
