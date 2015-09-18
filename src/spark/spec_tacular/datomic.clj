@@ -65,6 +65,7 @@
   [spec]
   (some-> spec :name name lower-case))
 
+(t/ann db [ConnCtx -> Database])
 (defn db [conn-ctx]
   (db/db (:conn conn-ctx)))
 
