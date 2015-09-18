@@ -23,19 +23,20 @@ the following in return:
 
 *WARNING:* spec-tactular is under active development, and makes no
  claims of stability.  It currently anticipates single-threaded,
- single-peer interactions with Datomic.
+ single-peer interactions with Datomic, and may act strangely if
+ either of those invariants are broken.
 
 ## Quick Start
 
 ```clojure
-[spec-tacular "0.4.13"]
+[spec-tacular "0.5.0"] ;; cutting edge; not stable
 ```
 
 ```maven
 <dependency>
   <groupId>spec-tacular</groupId>
   <artifactId>spec-tacular</artifactId>
-  <version>0.4.13</version>
+  <version>0.5.0</version>
 </dependency>
 ```
 
@@ -44,20 +45,20 @@ the following in return:
 ### Creating Specs
 
 ```clojure
-(require '[spark.sparkspec :refer [defspec]])
+(require '[spark.spec-tacular :as sp :refer [defspec]])
 
 ;; Sets up a House entity containing a mandantory color and optionally
 ;; a Mailbox. It may also link in any number of Occupants.
 (defspec House
   (:link [occupants :is-many :Occupant])
-  [mailbox :is-a :Mailbox]
-  [color :is-a :string :required])
+  [mailbox :is-a :Mailbox]               
+  [color :is-a :string :required])       
 
 (defspec Mailbox
   [has-mail? :is-a :bool])
 
 ;; Houses can be occupied by either People or Pets.
-(defenum Occupant :Person :Pet)
+(defunion Occupant :Person :Pet)
 
 ;; Each Person has a name that serves as an identifying field
 ;; (implemented as Datomic's notion of identity), and an age.
@@ -65,7 +66,7 @@ the following in return:
   [name :is-a :string :identity]
   [age :is-a number])
 
-(defenum Pet :Dog :Cat :Porcupine)
+(defunion Pet :Dog :Cat :Porcupine)
 
 (defspec Dog
   [fleas? :is-a :bool])
@@ -75,7 +76,7 @@ the following in return:
 (defspec Cat
   [hates :is-many :Occupant :link])
 
-(defspec Porcupine)
+(defspec Porcupine) ;; No fields, porcupines are boring
 ```
 
 ### Creating Databases
@@ -94,20 +95,53 @@ the following in return:
 ```clojure
 (require '[spark.sparkspec.datomic :as sd])
 
-(let [conn (schema/to-database! *ns*) ;; Use the House schema
-
-      ;; Create a red House
-      h (create! conn (house {:color "Red"}))
-
-      ;; Let some people move in
-      j (create! conn (person {:name Joe, :age 32}))
-      b (create! conn (person {:name Bernard, :age 25}))
-      h (assoc! conn h :occupants [j b])
-
-      ;; They get a cat, who hates both of them
-      c (cat {:hates (:occupants h)})
-      h (assoc! conn h :occupants (conj (:occupants h) c))])
+```clojure
+;; Use the House schema to create a database and connection
+(def conn-ctx {:conn (schema/to-database! *ns*)})
 ```
+
+Then, we can create a red house,
+```clojure
+(def h (sd/create! conn-ctx (house {:color "Red"})))
+
+;; Some quick semantics:
+(= h (house {:color "Red"})) ;; => false
+(sp/refless= h (house {:color "Red"})) ;; => true
+(assoc h :random-kw 42) ;; => error
+(set [h h]) ;; => #{h}
+(set [h (house {:color "Red"})]) ;; => #{h (house {:color "Red"})}
+```
+
+Let some people move in,
+```clojure
+(def joe     (sd/create! conn-ctx (person {:name Joe, :age 32})))
+(def bernard (sd/create! conn-ctx (person {:name Bernard, :age 25})))
+
+(def new-h (sd/assoc! conn-ctx h :occupants [joe bernard]))
+;; => assoc! returns a new House with the new field
+
+h ;; => is still the simple red house
+(refresh conn-ctx-ctx h) ;; => new-h
+```
+
+In most cases, you can forego the `refresh` and just use the return
+value of `assoc!`.
+
+Bernard and Joe get a cat, who hates both of them,
+```clojure
+(sd/create! (cat {:hates (:occupants new-h)}))
+(sd/assoc! conn-ctx h :occupants (conj (:occupants new-h) zuzu))
+```
+then they build a mailbox, and try to put it up in another House,
+```clojure
+(let [mb (sd/create! conn-ctx (mailbox {:has-mail? false}))
+      h (sd/assoc! conn-ctx h :mailbox mb)
+      h2 (sd/create! conn-ctx (house {:mailbox mb}))]
+  ;; But since Mailboxes are passed by value,
+  ;; the Mailbox get duplicated
+  (= (:mailbox h) (:mailbox h2)) ;; => false
+  ....)
+````
 
 ## License
 
