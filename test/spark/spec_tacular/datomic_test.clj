@@ -1,4 +1,4 @@
-(ns spark.spec-tacular.datomic-test
+ (ns spark.spec-tacular.datomic-test
   (:refer-clojure :exclude [remove read-string read assoc!])
   (:use clojure.test
         spark.spec-tacular
@@ -20,7 +20,7 @@
             [clojure.test.check.clojure-test :as ct]))
 
 (def simple-schema
-  (cons schema/spec-tactular-map
+  (cons schema/spec-tacular-map
         (schema/from-namespace (the-ns 'spark.spec-tacular.test-specs))))
 
 (deftest test-entity-coercion
@@ -632,9 +632,6 @@
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
 (deftest query-tests
-  (is (= (parse-query '(:find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
-         {:f '[?a] :db '(db) :wc '[[:ScmParent {:scm {:val2 ?a}}]] :coll? false}))
-
   (testing "primitive data"
     (with-test-db simple-schema
       (is (= #{} (q :find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))

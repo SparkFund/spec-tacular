@@ -3,7 +3,7 @@
 Write spectacular data definitions!  Our goal is to make the border
 between Clojure and Datomic a more convenient and safe place to live.
 
-Define your Datomic schemas using spec-tactular's spec DSL and receive
+Define your Datomic schemas using spec-tacular's spec DSL and receive
 the following in return:
 
 * **Representation of Datomic entities as maps** that verify (upon
@@ -21,7 +21,7 @@ the following in return:
 * **Simple transaction interface with Datomic**, using `create!` as a
    constructor, and `assoc!` as an update function.
 
-***WARNING:*** spec-tactular is under active development, and makes no
+***WARNING:*** spec-tacular is under active development, and makes no
  claims of stability.  It currently anticipates single-threaded,
  single-peer interactions with Datomic, and may act strangely if
  either of those invariants are broken.

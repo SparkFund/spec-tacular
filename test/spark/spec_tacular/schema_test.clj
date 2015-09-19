@@ -15,20 +15,20 @@
     :db/ident :exspec/var1
     :db/unique :db.unique/identity
     :db/valueType :db.type/string}
-   spec-tactular-map])
+   spec-tacular-map])
 
 (def schema-by-value
   [{:db/id 123124
     :db/ident :exspec/var1
     :db/unique :db.unique/value
     :db/valueType :db.type/string}
-   spec-tactular-map])
+   spec-tacular-map])
 
 (def schema-alt-keys
   [{:db/id 123124
     :db/ident :exspec/var2
     :db/valueType :db.type/string}
-   spec-tactular-map])
+   spec-tacular-map])
 
 (def matching-spec
   (map->Spec

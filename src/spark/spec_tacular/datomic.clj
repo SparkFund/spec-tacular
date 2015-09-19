@@ -17,41 +17,47 @@
 
 (require '[datomic.api :as db])
 
-(t/defalias Pattern (t/Map t/Any t/Any))
-(t/defalias Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
-(t/defalias ConnCtx (t/HMap :mandatory {:conn datomic.peer.LocalConnection}))
-(t/defalias DatomicEntity (t/HMap :mandatory {:db/id Long
-                                              :spec-tacular/spec t/Keyword}))
+;; -----------------------------------------------------------------------------
 
-;; core types
-(t/ann ^:no-check clojure.core/some? 
-       [t/Any -> t/Bool :filters {:then (! nil 0) :else (is nil 0)}])
-(t/ann ^:no-check clojure.core/not-empty 
-       (t/All [x] [(t/Option (t/Vec x)) -> (t/Option (t/NonEmptyVec x)) 
-                   ;; Can't make Seq work- the polymorphic specialization fails to match.
-                   :filters {:then (is (t/NonEmptyVec x) 0)}]))
+(t/defalias ^:no-doc Mask (t/Rec [mask] (t/Map t/Keyword (t/U mask t/Bool))))
 
-;; datomic types
 (t/defalias Database datomic.db.Db)
 (t/defalias Connection datomic.peer.LocalConnection)
-(t/ann ^:no-check datomic.api/q 
-       [t/Any * -> (t/Vec (t/Vec t/Any))])
-(t/ann ^:no-check datomic.api/tempid 
-       [t/Keyword -> datomic.db.DbId])
+
+(t/defalias ConnCtx
+  "A connection context.  The only mandatory field is the `:conn`,
+  which provides the actual connection to the database.
+
+  Other option fields include:
+
+  * `:transaction-log`, any object which can be converted to Datomic
+    transaction data"
+  (t/HMap :mandatory {:conn Connection}
+          :optional  {:transaction-log t/Any}))
+
+(t/ann ^:no-check datomic.api/q [t/Any * -> (t/Set t/Any)])
+
+#_(t/ann ^:no-check datomic.api/tempid 
+         [t/Keyword -> datomic.db.DbId])
+
 (t/ann ^:no-check datomic.api/entity 
-       [datomic.db.Db (t/U Long (t/HVec [t/Keyword t/Any])) -> DatomicEntity])
-(t/ann ^:no-check datomic.api/transact
-       [Connection t/Any -> (t/Future t/Any)])
+       [datomic.db.Db (t/U Long (t/HVec [t/Keyword t/Any])) -> datomic.query.EntityMap])
+
+#_(t/ann ^:no-check datomic.api/transact
+         [Connection t/Any -> (t/Future t/Any)])
+
 
 (t/ann spark.spec-tacular.test-utils/make-db [(t/Vec t/Any) -> datomic.peer.LocalConnection])
 (t/ann spark.spec-tacular.test-utils/db [-> datomic.db.Db])
 (t/ann spark.spec-tacular.test-utils/*conn* datomic.peer.LocalConnection)
 
-(def spark-type-attr 
-  "The datomic attribute holding onto a keyword-valued spec type."
+;; -----------------------------------------------------------------------------
+
+(def ^:no-doc spark-type-attr 
+  "The datomic attribute holding onto a keyword-valued SpecName"
   :spec-tacular/spec)
 
-(def db-type->spec-type
+(def ^:no-doc db-type->spec-type
   ^:private
   (reduce (t/ann-form #(assoc %1 %2 (keyword (name %2)))
                       [(t/Map t/Keyword t/Keyword) t/Keyword -> (t/Map t/Keyword t/Keyword)]) {}
@@ -60,17 +66,19 @@
                        :db.type/instant :db.type/uuid :db.type/uri :db.type/bytes]))
 
 (t/ann datomic-ns [SpecT -> t/Str])
-(defn datomic-ns
+(defn ^:no-doc datomic-ns
   "Returns a string representation of the db-normalized namespace for the given spec."
   [spec]
   (some-> spec :name name lower-case))
 
 (t/ann db [ConnCtx -> Database])
-(defn db [conn-ctx]
+(defn db
+  "Returns the database in a given connection context."
+  [conn-ctx]
   (db/db (:conn conn-ctx)))
 
 (t/ann db-keyword [SpecT (t/U clojure.lang.Named Item) -> t/Keyword])
-(defn db-keyword
+(defn ^:no-doc db-keyword
   [spec a]
   (t/let [dns (-> spec :name name lower-case)
           make-keyword :- [t/Str -> t/Keyword] #(keyword dns %)]
@@ -81,7 +89,7 @@
       ,(make-keyword (name (:name a)))
       :else (throw (ex-info "cannot make db-keyword" {:spec spec :attr a})))))
 
-(t/ann ^:no-check database-coercion [DatomicEntity -> (t/Map t/Keyword t/Any)])
+(t/ann ^:no-check database-coercion [datomic.query.EntityMap -> (t/Map t/Keyword t/Any)])
 (t/tc-ignore
  ;; the returned map may be missing valid keys, but it will definitely
  ;; be of the correct spec and won't have completely invalid kws
@@ -101,7 +109,7 @@
               (into {}))))))
 
 (t/ann get-all-eids [datomic.db.Db SpecT -> (t/ASeq Long)])
-(defn get-all-eids
+(defn ^:no-doc get-all-eids
   "Retrives all of the eids described by the given spec from the database."
   [db spec]
   (t/let [mk-db-kw :- [Item -> t/Keyword] #(db-keyword spec %)
@@ -114,7 +122,7 @@
 (t/ann get-eid (t/IFn 
                 [Database SpecInstance -> (t/Option Long)]
                 [Database SpecInstance SpecT -> (t/Option Long)]))
-(defn get-eid
+(defn ^:no-doc get-eid
   "Returns an EID associated with the data in the given spark type if
   it exists in the database. Looks up according to identity
   items. Returns nil if not found."
@@ -138,7 +146,7 @@
       (t/Option Long)))))
 
 (t/ann ^:no-check db->sp [Database (t/Map t/Any t/Any) -> SpecInstance])
-(defn db->sp ;; TODO -- this function is pointless now
+(defn ^:no-doc db->sp ;; TODO -- this function is pointless now
   [db ent & [sp-type]]
   (if-not ent
     nil
@@ -169,7 +177,7 @@
 
 (t/ann ^:no-check get-by-eid (t/IFn [datomic.db.Db Long -> SpecInstance]
                                     [datomic.db.Db Long SpecT -> SpecInstance]))
-(defn get-by-eid ;; TODO -- clean up uses of this function in user code
+(defn ^:no-doc get-by-eid ;; TODO -- clean up uses of this function in user code
   "fetches the entire SpecInstance from the db for the given eid
    throws IllegalArgumentException when eid isn't found."
   [db eid & [sp-type]]
@@ -178,9 +186,11 @@
       (db->sp db (db/entity db eid) sp-type)))
 
 (defmacro get-all-by-spec
-  "Returns all the entities in db with the given spec.
-  If the spec is a keyword at compile-time, the resulting entity is cast to the correct type.
-  Otherwise, the resulting entity is a generic SpecInstance."
+  "Returns all the entities in the database with the given spec.
+
+  If the spec is a keyword at compile-time, the resulting entity is
+  cast to the correct type.  Otherwise, the resulting entity is a
+  generic [[SpecInstance]]"
   [db spec]
   `(let [spec# (get-spec ~spec)
          db# ~db
@@ -195,7 +205,9 @@
                                    `SpecInstance)])]
      (map eid->si# eids#)))
 
-(defn count-all-by-spec [db spec]
+(defn count-all-by-spec
+  "Returns the number of entities with the given spec in the database."
+  [db spec]
   (assert (keyword? spec) "expecting spec name")
   (assert (instance? datomic.db.Db db) "expecting database")
   (ffirst (db/q {:find ['(count ?eid)] :in '[$] :where [['?eid :spec-tacular/spec spec]]} db)))
@@ -203,7 +215,7 @@
 (t/ann ^:no-check build-transactions
        (t/IFn [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]
               [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) SpecT -> (t/Map t/Keyword t/Any)]))
-(defn build-transactions
+(defn ^:no-doc build-transactions
   "Builds a nested datomic-data datastructure for the sp data, only
   for what's specified in the mask. Adds Datomicy deletion commands to
   the given atomic list of deletions when appropriate."
@@ -283,7 +295,7 @@
 (t/ann ^:no-check union-masks (t/IFn [-> (t/Val nil)]
                                      [(t/Option Mask) -> (t/Option Mask)]
                                      [(t/Option Mask) (t/Option Mask) -> (t/Option Mask)]))
-(defn union-masks
+(defn ^:no-doc union-masks
   "union (join) taken w.r.t. a lattice of 'specificity' eg -- nil < true < {:item ...} 
    (recall 'true' means the mask consisting only of the db-ref)
    keys are combined and their values are recursively summed.
@@ -299,7 +311,7 @@
       :else (or ma mb))))
 
 (t/ann ^:no-check item-mask [SpecT SpecInstance -> Mask])
-(defn item-mask
+(defn ^:no-doc item-mask
   "Builds a mask-map representing a specific sp value,
    where missing keys represent masked out fields and sp objects
    consisting only of a db-ref are considered 'true' valued leaves
@@ -333,7 +345,7 @@
 
 
 (t/ann ^:no-check shallow-mask [SpecT -> Mask])
-(defn shallow-mask
+(defn ^:no-doc shallow-mask
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Only lets top-level and is-component fields
   through."
@@ -351,7 +363,7 @@
          (into {}))))
 
 (t/ann ^:no-check shallow-plus-unions-mask [SpecT -> Mask])
-(defn shallow-plus-unions-mask
+(defn ^:no-doc shallow-plus-unions-mask
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Only lets top-level and is-component fields
   through As well, expands toplevel unions and any union members which
@@ -380,7 +392,7 @@
            (into {})))))
 
 (t/ann ^:no-check new-components-mask [SpecInstance SpecT -> Mask])
-(defn new-components-mask
+(defn ^:no-doc new-components-mask
   "Builds a mask that specifies only adding entities that don't already
   have eids. Any value with an eid will be treaded as an association and 
   will not result in any updates to the properties of that object in the
@@ -399,7 +411,7 @@
         true)))) ;primitive
 
 (t/ann ^:no-check depth-n-mask [SpecT t/AnyInteger -> Mask])
-(defn depth-n-mask
+(defn ^:no-doc depth-n-mask
   [spec n]
   (if (= n 0)
     (shallow-mask spec)
@@ -421,7 +433,7 @@
 
 (t/ann-datatype CompleteMask [spec :- SpecT])
 (t/tc-ignore
-(deftype CompleteMask [spec]
+(deftype ^:no-doc CompleteMask [spec]
   clojure.lang.IPersistentMap
   (assoc [_ k v]
     (throw (ex-info "Mask function not implemented." {:name "assoc"})))
@@ -448,8 +460,10 @@
   (valAt [t k] (when-let [e (.entryAt t k)] (.val e)))
   (valAt [t k default] (if-let [e (.entryAt t k)] (.val e) default))))
 
+(alter-meta! #'->CompleteMask assoc :no-doc true)
+
 (t/ann ^:no-check complete-mask [SpecT -> Mask])
-(defn complete-mask [spec]
+(defn ^:no-doc complete-mask [spec]
   "Builds a mask-map of the given spec for consumption by
   build-transactions. Recurs down specs to add everything in
   time."
@@ -458,7 +472,7 @@
 (t/ann ^:no-check sp->transactions 
        (t/IFn [datomic.db.DbId SpecInstance -> (t/ASeq t/Any)]
               [datomic.db.DbId SpecInstance t/Bool -> (t/ASeq t/Any)]))
-(defn sp->transactions
+(defn ^:no-doc sp->transactions
   "Returns a vector for datomic.api/transact that persist the given
   specced value sp to the database, according to the given db. If
   called with the optional shallow? argument, will persist according
@@ -474,7 +488,7 @@
 
 (t/ann ^:no-check commit-sp-transactions!
        [ConnCtx (t/ASeq t/Any) -> Long])
-(defn commit-sp-transactions!
+(defn ^:no-doc commit-sp-transactions!
   "if :transaction-log is specified in conn-ctx (a regular sp object),
    we attach its attributes to the transaction."
   [conn-ctx transaction]
@@ -487,9 +501,8 @@
         entid (db/resolve-tempid (db/db (:conn conn-ctx)) (:tempids tx) eid)]
     (or entid eid (:tempids tx))))
 
-(t/ann ^:no-check create-sp!
-       [ConnCtx SpecInstance -> Long])
-(defn create-sp!
+(t/ann ^:no-check create-sp! [ConnCtx SpecInstance -> Long])
+(defn ^:no-doc create-sp!
   "aborts if sp is already in db.
    if successful, returns the eid of the newly-added entity."
   [conn-ctx new-sp]
@@ -501,7 +514,7 @@
 
 (t/ann ^:no-check masked-create-sp!
        [ConnCtx SpecInstance Mask -> Long])
-(defn masked-create-sp!
+(defn ^:no-doc masked-create-sp!
   "Ensures sp is not in the db prior to creating. aborts if so."
   [conn-ctx sp mask]
   (let [spec (get-spec sp)
@@ -517,7 +530,7 @@
 
 (t/ann ^:no-check sp-filter-with-mask
        [Mask SpecT SpecInstance -> (t/Option SpecInstance)])
-(defn sp-filter-with-mask
+(defn ^:no-doc sp-filter-with-mask
   "applies a mask to a sp instance, keeping only the keys mentioned, 
   (including any relevant :db-id keys)"
   [mask spec-name sp]
@@ -559,7 +572,7 @@
 
 (t/ann ^:no-check update-sp!
        [ConnCtx SpecInstance SpecInstance -> Long])
-(defn update-sp!
+(defn ^:no-doc update-sp!
   "old-sp and new-sp need {:db-ref {:eid eid}} defined.
   Uses the semantics of item-mask, so keys that are not present in
   new-sp won't be updated or checked for comparing old vs new.  
@@ -590,7 +603,7 @@
 ; TODO consider replocing the old "update-sp" etc with something more explicitly masked like this?
 (t/ann ^:no-check masked-update-sp!
        [ConnCtx SpecInstance Mask -> Long])
-(defn masked-update-sp!
+(defn ^:no-doc masked-update-sp!
   "Ensures sp is in the db prior to updating. aborts if not."
   [conn-ctx sp mask]
   (let [db (db/db (:conn conn-ctx))
@@ -603,14 +616,14 @@
     (commit-sp-transactions! conn-ctx txns)))
 
 (t/ann ^:no-check remove-eids [SpecInstance -> SpecInstance])
-(defn remove-eids
+(defn ^:no-doc remove-eids
   "recursively strip all entries of :db-ref {:eid ...} from sp.
    can be used for checking equality with a non-db value."
   [sp]
   (walk/postwalk (fn [m] (if (get m :db-ref) (dissoc m :db-ref) m)) sp))
 
 (t/ann ^:no-check remove-identity-items [SpecT SpecInstance -> SpecInstance])
-(defn remove-identity-items
+(defn ^:no-doc remove-identity-items
   "recursively walks a sp and removes any :unique? or :identity?
   items (as those are harder to test.) We do want to come up with some
   sensible :identity? tests at some point though."
@@ -647,7 +660,7 @@
 ; TODO we could make it actually remove the keys instead of nil them, need a helper with some sentinal probably easiest?
 ; also we probably want to only strip these on nested things, not the toplevel thing. (i.e. THIS is the helper already.)
 (t/ann ^:no-check remove-items-with-required [SpecInstance -> SpecInstance])
-(defn remove-items-with-required
+(defn ^:no-doc remove-items-with-required
   "recursively walks a sp and removes any sub things that have
   required fields in the spec. Another tricky-to-test updates helper. (including top-level)"
   [sp]
@@ -672,7 +685,7 @@
 
 ;; TODO probably shouldnt live here
 (t/ann ^:no-check remove-sub-items-with-required [SpecInstance -> SpecInstance])
-(defn remove-sub-items-with-required
+(defn ^:no-doc remove-sub-items-with-required
   "recursively walks a single (map) sp and removes any sub-sps that
   have required fields in the spec (but not the toplevel one, only
   sub-items). Another tricky-to-test updates helper.  Also, remove any
@@ -702,15 +715,16 @@
 ;; =============================================================================
 ;; query
 
-(t/defalias QueryIdent  (t/U t/Keyword t/Sym (t/HVec [t/Sym t/Keyword])))
-(t/defalias QueryUEnv   (t/Atom1 (t/Map t/Sym t/Sym)))
-(t/defalias QueryTEnv   (t/Atom1 (t/Map t/Sym t/Keyword)))
-(t/defalias QueryClause (t/U '[QueryIdent QueryMap] '[(t/List t/Any)]))
-(t/defalias QueryMapVal (t/U QueryIdent QueryClause QueryMap))
-(t/defalias QueryMap    (t/Map t/Keyword QueryMapVal))
-(t/defalias QueryMapVec (t/HVec [t/Keyword QueryMapVal]))
+(t/defalias ^:no-doc QueryIdent  (t/U t/Keyword t/Sym '[t/Sym t/Keyword]))
+(t/defalias ^:no-doc QueryClause (t/U '[QueryIdent QueryMap] '[(t/List t/Any)]))
+(t/defalias ^:no-doc QueryMapVal (t/U QueryIdent QueryClause QueryMap))
+(t/defalias ^:no-doc QueryMap    (t/Map t/Keyword QueryMapVal))
+(t/defalias ^:no-doc QueryMapVec '[t/Keyword QueryMapVal])
 
-(t/defalias DatomicWhereClause (t/HVec [t/Any t/Keyword t/Any]))
+(t/defalias ^:no-doc QueryUEnv   (t/Atom1 (t/Map t/Sym t/Sym)))
+(t/defalias ^:no-doc QueryTEnv   (t/Atom1 (t/Map t/Sym t/Keyword)))
+
+(t/defalias ^:no-doc DatomicWhereClause '[t/Any t/Keyword t/Any])
 
 (t/ann set-type! [QueryTEnv t/Sym t/Keyword -> nil])
 (defn- set-type! [tenv x t]
@@ -746,7 +760,7 @@
 
 (declare expand-clause expand-map)
 (t/ann ^:no-check expand-item [Item t/Keyword QueryMapVal t/Sym QueryUEnv QueryTEnv -> t/Any])
-(defn expand-item [item db-kw rhs x uenv tenv]
+(defn- expand-item [item db-kw rhs x uenv tenv]
   (let [{[arity sub-spec-name] :type} item
         mk-where-clause (fn [rhs] [`'~x db-kw rhs])]
     (cond
@@ -822,7 +836,7 @@
 
 ;; map = {:kw (ident | clause | map | value),+}
 (t/ann ^:no-check expand-map [QueryMap t/Sym SpecT QueryUEnv QueryTEnv -> t/Any])
-(defn expand-map [atmap x spec uenv tenv]
+(defn- expand-map [atmap x spec uenv tenv]
   (when-not (map? atmap)
     (throw (ex-info "invalid map" {:syntax atmap})))
   (let [{:keys [elements items]} spec]
@@ -987,7 +1001,7 @@
 ;; map       = % | %n | spec-name
 ;;           | {:kw (clause | map | ident | value),+}
 (t/tc-ignore ;; only called from inside a macro; TODO type
- (defn parse-query [stx]
+ (defn- parse-query [stx]
    (let [keywords [:find :in :where]
          partitions (partition-by (fn [stx] (some #(= stx %) keywords)) stx)]
      (match partitions ;; ((:find) (1 2 ....) (:in) (3) (:where) (4 5 ....))
@@ -1009,7 +1023,46 @@
        (throw (ex-info "expecting keywords :find, :in, and :where followed by arguments"
                        {:syntax partitions}))))))
 
-(defmacro q [& stx]
+(defmacro q
+  "Returns a set of results from the Datomic query.  See [the
+  README](https://github.com/SparkFund/spec-tacular/tree/v0.5.0#querying-databases)
+  for examples.
+
+  ```
+  (q :find FIND-EXPR+ :in expr :where CLAUSE+)
+
+  FIND-EXPR = IDENT 
+            | [IDENT ...]
+  IDENT     = SpecName
+            | ?variable
+            | [SpecName ?variable]
+  CLAUSE    = [IDENT MAP]
+            | [(symbol (SpecName | ?variable)+)]
+  MAP       = % | %n | SpecName
+            | {keyword (CLAUSE | MAP | IDENT | expr),+}
+  ```
+
+  The `FIND-EXPR` are used as the `:find` arguments to the Datomic
+  query.
+
+  The value of `:in` is used as the database; no other arguments to
+  `:in` are allowed at the moment.
+
+  Each `:where` clause is expanded to one or more Datomic clauses.
+  The `[IDENT MAP]` form finds `IDENT`s with the fields given in
+  `MAP`.  The other clause syntax provides very experimental support
+  for a subset of Datomic [\"Function
+  Expressions\"](http://docs.datomic.com/query.html) -- more coming
+  soon.
+
+  Using `%` and `%n` is analogous to `#` and `%` in Clojure: `%`
+  inserts the first SpecName in the `FIND-EXPR` if there is only one,
+  or `%1` references the first, and `%2` the second, etc.
+
+  Every `SpecName` must be a keyword at compile-time; to dynamically
+  get the spec of an entity use the special keyword
+  `:spec-tacular/spec` as an entry in any `MAP`."
+  [& stx]
   (let [{:keys [f db wc coll?]} (parse-query stx)
         {:keys [args env clauses]} (expand-query f wc)
         type-kws  (map #(get env %) args)
@@ -1051,11 +1104,11 @@
 ;; database interfaces
 
 (declare transaction-data)
-(t/defalias TransactionData (t/List (t/HVec [t/Keyword Long t/Keyword t/Any])))
+(t/defalias ^:no-doc TransactionData (t/List (t/HVec [t/Keyword Long t/Keyword t/Any])))
 
 (t/ann ^:no-check transaction-data-item
        [Database SpecT Long Item t/Any t/Any -> TransactionData])
-(defn transaction-data-item
+(defn ^:no-doc transaction-data-item
   [db parent-spec parent-eid
    {iname :name required? :required? link? :link? [cardinality type] :type :as item}
    old new & [tmps]]
@@ -1127,7 +1180,7 @@
 
 (t/ann ^:no-check transaction-data
        [Database SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
-(defn transaction-data [db spec old-si updates & [tmps]]
+(defn ^:no-doc transaction-data [db spec old-si updates & [tmps]]
   "Given a possibly nil, possibly out of date old entity.
    Returns the transaction data to do the desired updates to something of type spec."
   (if-let [eid (when (and (nil? old-si) tmps)
@@ -1152,7 +1205,11 @@
            (#(with-meta % (assoc (meta %) :eid eid)))))))
 
 (t/ann ^:no-check graph-transaction-data [ConnCtx t/Coll -> TransactionData])
-(defn graph-transaction-data [conn-ctx new-si-coll]
+(defn graph-transaction-data
+  "Returns Datomic transaction data that would create the given graph
+  on the database given in `conn-ctx`.  Also contains meta-data
+  `:tmpids` and `:specs` for the expected temp-ids and specs, respectively."
+  [conn-ctx new-si-coll]
   (let [tmps  (atom [])
         specs (map get-spec new-si-coll)
         data  (let [db (db/db (:conn conn-ctx))]
@@ -1174,13 +1231,28 @@
     (with-meta data {:tmpids tmpids :specs specs})))
 
 (t/ann ^:no-check instance-transaction-data [ConnCtx t/Any -> TransactionData])
-(defn instance-transaction-data [conn-ctx new-si]
+(defn instance-transaction-data
+  "Returns the Datomic transaction data that would create the given
+  spec instance on the database given in `conn-ctx`."
+  [conn-ctx new-si]
   (let [data (graph-transaction-data conn-ctx [new-si])
         {:keys [tmpids specs]} (meta data)]
     (with-meta data {:tmpid (first tmpids) :spec (first specs)})))
 
 (t/ann ^:no-check create-graph! (t/All [a] [ConnCtx a -> a]))
-(defn create-graph! [conn-ctx new-si-coll]
+(defn create-graph!
+  "Creates every new instance contained in the given collection, and
+  returns the new instances in a collection of the same type, and in
+  the same order where applicable.  For every object that is
+  `identical?` in the given graph, only one instance is created on the
+  database.
+
+  create-graph! does *not* support arbitrarly nested collections.
+
+  Currently supports sets, lists, vector, and sequences.
+
+  Aborts if any entities already exist on the database."
+  [conn-ctx new-si-coll]
   (let [data (graph-transaction-data conn-ctx new-si-coll)        
         {:keys [tmpids specs]} (meta data)
         txn-result @(db/transact (:conn conn-ctx) data)]    
@@ -1197,21 +1269,28 @@
 
 (t/ann ^:no-check create! (t/All [a] [ConnCtx a -> a]))
 (defn create!
-  "Creates a new instance of the given entity on the database in the given connection.
-   Returns a representation of the newly created object.
-   Get eid from object using :db-ref field.
-   Aborts if the entity already exists in the database (use assoc! instead)."
+  "Creates a new instance of the given entity on the database in the
+  given connection context.  Returns a representation of the newly
+  created object.
+
+  Get the Datomic `:db/id` from the object using the `:db-ref` field.
+  
+  Aborts if the entity already exists in the database (use [[assoc!]] instead)."
   [conn-ctx new-si]
   (first (create-graph! conn-ctx [new-si])))
 
 (t/ann ^:no-check assoc! (t/All [a] [ConnCtx a t/Keyword t/Any -> a]))
 (defn assoc!
-  "Updates the given entity in database in the given connection.
-   The entity must be an object representation of an entity on the database
-     (returned from a query or from create!)
-   Returns the new entity.
-   Get eid from object using :db-ref field.
-   Aborts if the entity does not exist in the database (use create!)."
+  "Updates the given entity in database in the given connection. 
+  Returns the new entity.
+
+  The entity must be an object representation of an entity on the
+  database (for example, returned from a query, [[create!]], or an
+  earlier [[assoc!]]).
+   
+  Get the Datomic `:db/id` from the object using the `:db-ref` field.
+
+  Aborts if the entity does not exist in the database (use [[create!]] instead)."
   [conn-ctx si & {:as updates}]
   (when-not (get si :db-ref)
     (throw (ex-info "entity must be on database already" {:entity si})))
@@ -1222,7 +1301,10 @@
          (recursive-ctor (:name spec)))))
 
 (t/ann ^:no-check update! (t/All [a] [ConnCtx a a -> a]))
-(defn update! [conn-ctx si-old si-new]
+(defn update! 
+  "Calculate a shallow difference between the two spec instances and
+  uses [[assoc!]] to change the entity on the database."
+  [conn-ctx si-old si-new]
   (let [updates (mapcat (fn [[k v]] [k v]) si-new)]
     (if (empty? updates) si-old
         (if (not (even? (count updates)))
@@ -1231,7 +1313,13 @@
           (apply assoc! conn-ctx si-old updates)))))
 
 (t/ann ^:no-check refresh (t/All [a] [ConnCtx a -> a]))
-(defn refresh [conn-ctx si]
+(defn refresh 
+  "Returns an updated representation of the Datomic entity at the
+  given instance's `:db-ref`.
+
+  The entity must be an object representation of an entity on the
+  database (see [[assoc!]] for an explanation)."
+  [conn-ctx si]
   (let [eid  (get-in si [:db-ref :eid])
         spec (get-spec si)]
     (when-not eid (throw (ex-info "entity without identity" {:entity si})))
