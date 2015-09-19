@@ -1,4 +1,4 @@
-# spec-tacular
+# <a href="https://github.com/SparkFund/spec-tacular"><img src="https://avatars2.githubusercontent.com/u/7240335?v=3&s=200"></a>spec-tacular
 
 Write spectacular data definitions!  Our goal is to make the border
 between Clojure and Datomic a more convenient and safe place to live.
@@ -32,7 +32,7 @@ the following in return:
 [spec-tacular "0.5.0"] ;; unstable
 ```
 
-```maven
+```xml
 <dependency>
   <groupId>spec-tacular</groupId>
   <artifactId>spec-tacular</artifactId>
@@ -225,6 +225,6 @@ restricted to things of type `<spec>`.
 
 ## License
 
-Copyright © 2014-2015 SparkFund Community Investment
+Copyright © 2014-2015 [Spark Community Investment](https://www.sparkfund.co)
 
 Distributed under the Apache License Version 2.0
