@@ -2,6 +2,8 @@
 
 Write spectacular data definitions!  Our goal is to make the border
 between Clojure and Datomic a more convenient and safe place to live.
+[Browse the API](http://sparkfund.github.io/spec-tacular) or continue
+scrolling.
 
 Define your Datomic schemas using spec-tacular's spec DSL and receive
 the following in return:

@@ -260,16 +260,20 @@
                                       [Schema URI -> Connection]))
 (defn to-database!
   "Creates a fresh database with `schema` installed and returns a
-  connection to that database.  The schema should not already
-  contain [[spec-tacular-map]].
+  connection to that database.  If the schema does not already
+  contain [[spec-tacular-map]], it is added.
 
   Installs at `uri` if supplied."
   ([schema]
-   (let [connection (fresh-db!)]
-     (do @(d/transact connection (cons spec-tacular-map schema)) connection)))
+   (let [connection (fresh-db!)
+         schema (if (some #(= (:db/ident %) :spec-tacular/spec) schema) schema
+                    (cons spec-tacular-map schema))]
+     (do @(d/transact connection schema) connection)))
   ([schema uri]
-   (let [connection (fresh-db! uri)]
-     (do @(d/transact connection (cons spec-tacular-map schema)) connection))))
+   (let [connection (fresh-db! uri)
+         schema (if (some #(= (:db/ident %) :spec-tacular/spec) schema) schema
+                    (cons spec-tacular-map schema))]
+     (do @(d/transact connection schema) connection))))
 
 (t/ann ^:no-check from-database [(t/U Database Connection ConnCtx) -> Schema])
 (defn from-database
