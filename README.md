@@ -214,13 +214,10 @@ restricted to things of type `<spec>`.
 ## Updating from v.0.4.x
 
 * Replace all `spark.sparkspec` namespaces with `spark.spec-tacular`
-
 * Check all calls to `=` to see if `refless=` is more appropriate
-
 * Check all `set`s if you mix local instances and instances on the
   database; these are nolonger `=` nor do they hash to the same number
   even if they are otherwise equivalent.
-
 * Rename `defenum` to `defunion`
 
 ## Short Term Roadmap

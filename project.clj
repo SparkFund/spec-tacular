@@ -53,5 +53,7 @@
           :include [spark.spec-tacular
                     spark.spec-tacular.datomic
                     spark.spec-tacular.schema
-                    spark.spec-tacular.generators]}
+                    spark.spec-tacular.generators]
+          :src-dir-uri "https://github.com/SparkFund/spec-tacular/tree/develop/"
+          :src-linenum-anchor-prefix "L"}
   :pedantic? :abort)
