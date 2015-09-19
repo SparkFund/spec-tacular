@@ -1,61 +1,55 @@
-(ns spark.sparkspec.schema
+(ns spark.spec-tacular.schema
+  "Creating Datomic schemas from specifications"
   (:refer-clojure :exclude [read-string read assoc!])
-  (:use [spark.sparkspec :exclude [diff]]
-        spark.sparkspec.spec
-        spark.sparkspec.datomic
+  (:use [spark.spec-tacular :exclude [diff]]
+        spark.spec-tacular.spec
+        spark.spec-tacular.datomic
         [clojure.string :only [lower-case]])
   (:require [clojure.core.typed :as t]
             [clojure.edn :as edn]
+            [spark.spec-tacular.datomic :as sd]
             [clojure.java.io :as io]))
 
-(t/typed-deps spark.sparkspec
-              spark.sparkspec.datomic)
-
-(t/ann ^:no-check clojure.core/slurp [(t/U t/Str java.io.File) -> t/Str])
-(t/ann ^:no-check clojure.edn/read-string 
-       [(t/HMap :optional {:readers t/Any}) t/Str -> (t/Seq EntityMap)])
-(t/ann ^:no-check clojure.edn/read
-       [(t/HMap :optional {:readers t/Any}) java.io.PushbackReader -> (t/Seq EntityMap)])
-(t/ann ^:no-check clojure.data/diff 
-       (t/All [a b] [(t/Set a) (t/Set b) -> (t/HVec [(t/Set a) (t/Set b) (t/Set (t/I a b))])]))
-(t/ann ^:no-check clojure.java.io/writer
-       [java.io.File -> java.io.Writer])
+(t/typed-deps spark.spec-tacular
+              spark.spec-tacular.datomic)
 
 (require '[datomic.api :as d])
 
-;; An EntityMap is a (possibly partial) description of a Datomic entity
-;; An InstallableEntityMap is a full description of a Datomic entity that can be installed
 (t/defalias EntityMap
+  "An EntityMap is a (possibly partial) description of a Datomic entity."
   (t/HMap :mandatory
           {:db/ident t/Keyword
            :db/valueType t/Any}
           :optional 
           {:db/id datomic.db.DbId
-           :db/cardinality (t/U (t/Val :db.cardinality/one) (t/Val :db.cardinality/many))
+           :db/cardinality (t/U ':db.cardinality/one ':db.cardinality/many)
            :db/fn (t/Map t/Keyword t/Any)
            :db.install/_attribute t/Keyword}))
 (t/defalias InstallableEntityMap
+  "A a full description of a Datomic entity that can be installed as
+  part of a Datomic schema."
   (t/HMap :mandatory
           {:db/id datomic.db.DbId
            :db/ident t/Keyword
            :db/valueType t/Any
-           :db/cardinality (t/U (t/Val :db.cardinality/one) (t/Val :db.cardinality/many))
+           :db/cardinality (t/U ':db.cardinality/one ':db.cardinality/many)
            :db.install/_attribute (t/U (t/Val :db.part/db))}
           :optional 
           {:db/fn (t/Map t/Keyword t/Any)
            :db/doc t/Str}))
 
-;; A Schema is a list of mappings that can be used as a Datomic schema,
-;;   see http://docs.datomic.com/schema.html
-;; Schemas can be created from the specification in types.clj
-;; Schemas can be recreated from files and databases
-(t/defalias Schema (t/Seq EntityMap))
+(t/defalias Schema
+  "A list of mappings that can be used as a
+  [Datomic schema](http://docs.datomic.com/schema.html).  Schemas can
+  be created from sequences or namespaces containing [[defspec]]s, or
+  can be recreated from files and databases."
+  (t/Seq EntityMap))
 
 ;; A Delta is a Schema; but it is not intended to be used as a Datomic schema.
 ;;   Instead, it represents the change between two Schemas
 ;; Deltas can be created by computing the difference between two Schemas
 ;; Deltas can be recreated from files
-(t/defalias Delta Schema)
+(t/defalias ^:no-doc Delta Schema)
 
 (t/def ^:private datomic-base-attributes :- (t/Coll t/Keyword)
   #{:db.alter/attribute :db.install/partition :db/excise :db/lang
@@ -64,7 +58,12 @@
     :db/fn :db/isComponent :db/code :db/unique :db.excise/beforeT :db.excise/before
     :db/valueType :fressian/tag :db/doc :db.install/attribute :db/fulltext})
 
-(t/def spec-tactular-map :- InstallableEntityMap
+(t/ann ^:no-check spec-tacular-map InstallableEntityMap)
+(def
+  ^{:doc "The map for the special `:spec-tacular/spec` ident which
+  must be installed on any database hoping to use spec-tacular.
+  Automatically installed when using [[to-database!]]."}
+  spec-tacular-map
   {:db/id (d/tempid :db.part/db),
    :db/ident :spec-tacular/spec,
    :db/valueType :db.type/keyword,
@@ -72,8 +71,9 @@
    :db/doc "spec-tacular/spec type tag",
    :db.install/_attribute :db.part/db})
 
-(t/defn ^:private item->schema-map 
-  [spec :- SpecT, {iname :name [cardinality type] :type :as item} :- Item] :- EntityMap
+(t/ann ^:no-check item->schema-map [SpecT Item -> EntityMap])
+(defn- item->schema-map  
+  [spec {iname :name [cardinality type] :type :as item}]
   (merge
    {:db/id          (d/tempid :db.part/db)
     :db/ident       (keyword (datomic-ns spec) (name iname))
@@ -93,21 +93,24 @@
                    :db.unique/value)}
      {})))
 
-(t/defn from-spec
-  "Generates a Schema to represent the given spec"
-  [spec :- (t/U SpecT t/Keyword)] :- Schema
+(t/ann from-spec [(t/U SpecT t/Keyword) -> Schema])
+(defn from-spec
+  "Generates a [[Schema]] that represents `spec`."
+  [spec]
   (let [si (if (keyword? spec) (get-spec spec) spec)]
     (assert si (str "cannot find spec for " spec))
     (t/for [item :- Item (:items si)] :- EntityMap
            (item->schema-map si item))))
 
-(t/defn normalize
-  "normalizes a Schema for comparison
-   -- removes any mappings for attributes that datomic adds automatically
-   -- removes :db/id and :db.install/_attribute attributes from each mapping
-   -- makes sure each entry has a :db/unique attry, even if nil
-   -- simplifies :db/fn field so that it is comparable with ="
-  [schema :- Schema] :- Schema
+(t/ann normalize [Schema -> Schema])
+(defn normalize
+  "Normalizes `schema` for comparison:
+
+   * removes any mappings for attributes that Datomic adds automatically
+   * removes `:db/id` and `:db.install/_attribute` attributes from each mapping
+   * ensures each entry has a `:db/unique` attribute, even if it's `nil`
+   * simplifies `:db/fn` fields so that they are comparable with `=`"
+  [schema]
   (->> schema
        (filter #(not (contains? datomic-base-attributes (:db/ident %))))
        (map (t/fn [m :- EntityMap] :- EntityMap
@@ -118,24 +121,27 @@
               (if-let [txn-fn (:db/fn m)]
                 (assoc m :db/fn (dissoc (into {} txn-fn) :fnref :pending)) m)))))
 
-(t/defn from-file
-  "returns the Schema inside the given file"
-  [schema-file :- java.io.File] :- Schema
+(t/ann ^:no-check from-file [java.io.File -> Schema])
+(defn from-file
+  "Returns the [[Schema]] inside the given file"
+  [schema-file]
   (edn/read-string {:readers *data-readers*} (slurp schema-file)))
 
-(t/defn read-string
-  "returns the Schema inside the given stream"
-  [s :- t/Str] :- Schema
+(t/ann ^:no-check read-string [t/Str -> Schema])
+(defn read-string
+  "Returns the [[Schema]] inside the given string"
+  [s]
   (edn/read-string {:readers *data-readers*} s))
 
-(t/defn read
-  "returns the Schema inside the given stream"
-  [stream :- java.io.PushbackReader] :- Schema
+(t/ann ^:no-check read [java.io.PushbackReader -> Schema])
+(defn read
+  "Returns the [[Schema]] inside the given stream"
+  [stream]
   (edn/read {:readers *data-readers*} stream))
 
 (t/ann ^:no-check write [Schema java.io.Writer -> nil])
 (t/defn write
-  "writes a Schema to w"
+  "Writes the schema to w, adding in [[spec-tacular-map]]."
   [schema w]
   (t/let [write :- [java.lang.String -> nil]
           ,#(.write ^java.io.Writer w ^java.lang.String %)
@@ -144,31 +150,32 @@
           sorted-rows :- Schema
           (sort-by :db/ident (map #(into (sorted-map) %) sorted-cols))]
     (write "[")
-    (t/doseq [m :- EntityMap (cons spec-tactular-map sorted-rows)]
+    (t/doseq [m :- EntityMap (cons spec-tacular-map sorted-rows)]
       (write "\n")
       ;; regexp: #db/id[:db.part/db -1003792] ==> #db/id[:db.part/db]
       ;; TODO: is that regexp qualified enough?
       (write (clojure.string/replace (str m) #"(db|user) -(\d+)" "$1")))
     (write "\n]\n")))
 
-(t/defn to-file
-  "writes a Schema to then given file"
-  [schema :- Schema, file :- java.io.File] :- nil
+(t/ann ^:no-check to-file [Schema java.io.File -> nil])
+(defn to-file
+  "Writes `schema` to `file`, returns `nil`."
+  [schema file]
   (with-open [f (io/writer file)] (write schema f)))
 
-(t/defn diff
-  "returns the difference between two schemas as three sets:
-   -- the entries only in Schema1,
-   -- the entries only in Schema2,
-   -- the entries in both"
-  [schema1 :- Schema, schema2 :- Schema] 
-  :- (t/HVec [(t/Set EntityMap) (t/Set EntityMap) (t/Set EntityMap)])
+(t/ann ^:no-check diff [Schema Schema -> '[(t/Set EntityMap) (t/Set EntityMap) (t/Set EntityMap)]])
+(defn diff
+  "Returns the difference between two schemas as three sets:
+   * the entries only in `schema1`,
+   * the entries only in `schema2`,
+   * the entries in both `schema1` and `schema2`"
+  [schema1 schema2] 
   (clojure.data/diff (set (normalize schema1))
                      (set (normalize schema2))))
 
 ;; TODO: this is a diff not a check, checks throw errors
 (t/ann ^:no-check check [Schema SpecT -> (t/ASeq t/Str)])
-(defn check
+(defn ^:no-doc check
   "Returns a list of errors representing discrepencies between the
   given spec and schema."
   [schema spec]
@@ -206,17 +213,20 @@
        ;; TODO: Add more checks! Be strict!
        ))))
 
-(t/defn from-specs
-  "Converts specs into a Schema"
-  [specs :- (t/Seq (t/U SpecT t/Keyword))] :- Schema
+(t/ann from-specs [(t/Seqable (t/U SpecT t/Keyword)) -> Schema])
+(defn from-specs
+  "Converts a sequence of specs (which may be actual spec objects or
+  keywords) into a [[Schema]]"
+  [specs]
   (->> specs (mapcat from-spec)))
 
-(t/defn from-namespace
-  "Converts all specs in a namespace into a Schema"
-  [namespace :- clojure.lang.Namespace] :- Schema
+(t/ann from-namespace [clojure.lang.Namespace -> Schema])
+(defn from-namespace
+  "Converts all specs in `namespace` into a [[Schema]]"
+  [namespace]
   (->> namespace namespace->specs from-specs))
 
-(t/defalias URI t/Str)
+(t/defalias URI "A URI is just a string, but it should probably look like `\"datomic:mem://<squiid>\"`" t/Str)
 (t/ann ^:no-check datomic.api/squuid [-> java.util.UUID])
 (t/ann ^:no-check datomic.api/create-database [URI -> nil])
 (t/ann ^:no-check datomic.api/delete-database [URI -> nil])
@@ -246,32 +256,42 @@
          (println "Created fresh db.")))
      (d/connect uri))))
 
-(t/defn to-database!
-  "Creates a fresh db with schema installed; returns db"
-  ([schema :- Schema] :- Connection
-   (let [connection (fresh-db!)]
+(t/ann ^:no-check to-database! (t/IFn [Schema -> Connection]
+                                      [Schema URI -> Connection]))
+(defn to-database!
+  "Creates a fresh database with `schema` installed and returns a
+  connection to that database.  If the schema does not already
+  contain [[spec-tacular-map]], it is added.
+
+  Installs at `uri` if supplied."
+  ([schema]
+   (let [connection (fresh-db!)
+         schema (if (some #(= (:db/ident %) :spec-tacular/spec) schema) schema
+                    (cons spec-tacular-map schema))]
      (do @(d/transact connection schema) connection)))
-  ([schema :- Schema, uri :- URI] :- Connection
-   (let [connection (fresh-db! uri)]
+  ([schema uri]
+   (let [connection (fresh-db! uri)
+         schema (if (some #(= (:db/ident %) :spec-tacular/spec) schema) schema
+                    (cons spec-tacular-map schema))]
      (do @(d/transact connection schema) connection))))
 
-(t/ann ^:no-check from-database [(t/U Database Connection) -> Schema])
+(t/ann ^:no-check from-database [(t/U Database Connection ConnCtx) -> Schema])
 (defn from-database
-  "Returns the Schema in the given database, 
-   or if given a connection, the schema in the newest database in that connection"
+  "Returns the Schema in the given [[Database]], [[Connection]], or
+  [[spark.spec-tacular.datomic/ConnCtx]]."
   [db]
-  (let [db (if (instance? datomic.peer.LocalConnection db) (d/db db) db)]
-    (->> (t/ann-form (d/q '[:find ?attr :where [_ :db.install/attribute ?attr]] db)
-                     (t/Seq (t/HVec [t/Num]))) 
+  (let [db (cond
+             (instance? datomic.peer.LocalConnection db) (d/db db)
+             (map? db) (sd/db db)
+             :else db)]
+    (->> (d/q '[:find ?attr :where [_ :db.install/attribute ?attr]] db)
          ;; -- collects all entities that have been installed
-         (map (t/ann-form #(->> % first (d/entity db) (into {})) ;; doesn't typecheck
-                          [(t/HVec [t/Num]) -> EntityMap]))
+         (map #(->> % first (d/entity db) (into {})))
          ;; -- filters out those installed by datomic
-         (filter (t/ann-form #(not (contains? datomic-base-attributes (:db/ident %)))
-                             [EntityMap -> t/Bool])))))
+         (filter #(not (contains? datomic-base-attributes (:db/ident %)))))))
 
-(t/defn delta
-  "computes Delta between two Schemas"
+(t/defn ^:no-doc delta
+  "Computes Delta between two Schemas"
   [old :- Schema, new :- Schema] :- Schema
   (let [[removed-entries new-entries both] (diff old new)]
     (when removed-entries

@@ -1,7 +1,7 @@
-(ns spark.sparkspec-test
-  (:use spark.sparkspec
+(ns spark.spec-tacular-test
+  (:use spark.spec-tacular
         clojure.test
-        spark.sparkspec.generators)
+        spark.spec-tacular.generators)
   (:require [clojure.core.typed :as t]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
@@ -23,6 +23,7 @@
     (is (some? (get-spec :TestSpec1)))
     (is (some? (get-spec :TestSpec1 :TestSpec1)))
     (is (some? (get-spec {:spec-tacular/spec :TestSpec1})))
+    (is (some? (get-spec (get-spec :TestSpec1))))
     
     (let [good (testspec1 {:val1 3 :val2 "hi"})]
       (is (testspec1? good))
@@ -101,15 +102,16 @@
          (get-spec :TestSpec2)))
   
   (is (testunion? (testspec2 {})))
-  (is (instance? spark.sparkspec.spec.UnionSpec (get-spec testunion)))
+  (is (instance? spark.spec_tacular.spec.UnionSpec (get-spec testunion)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
   (is (thrown? clojure.lang.ExceptionInfo (check-component! (get-spec :ES) :foo :nope)))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
   (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
+                        (get-spec :testunion (testspec1 {:val1 1}))))
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
                         (esparent {:es {:foo (testspec1 {:val1 1})}}))
       "nested ctor fails properly with unions")
-
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #"spec instance\(s\) not in union spec"
+  (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
                         (es {:foo (a {})}))))
 
 ;; forward union reference
@@ -217,4 +219,3 @@
                       :Link :Human :TestSpec6})]
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))
-

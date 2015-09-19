@@ -1,10 +1,10 @@
-(ns spark.sparkspec.schema-test
+(ns spark.spec-tacular.schema-test
   (:refer-clojure :exclude [read-string read])
   (:use clojure.test
-        spark.sparkspec.spec
-        [spark.sparkspec :exclude [diff]]
-        spark.sparkspec.schema
-        spark.sparkspec.test-utils)
+        spark.spec-tacular.spec
+        [spark.spec-tacular :exclude [diff]]
+        spark.spec-tacular.schema
+        spark.spec-tacular.test-utils)
   (:require [datomic.api :as d]
             [clojure.java.io :as io]))
 
@@ -15,20 +15,20 @@
     :db/ident :exspec/var1
     :db/unique :db.unique/identity
     :db/valueType :db.type/string}
-   spec-tactular-map])
+   spec-tacular-map])
 
 (def schema-by-value
   [{:db/id 123124
     :db/ident :exspec/var1
     :db/unique :db.unique/value
     :db/valueType :db.type/string}
-   spec-tactular-map])
+   spec-tacular-map])
 
 (def schema-alt-keys
   [{:db/id 123124
     :db/ident :exspec/var2
     :db/valueType :db.type/string}
-   spec-tactular-map])
+   spec-tacular-map])
 
 (def matching-spec
   (map->Spec
@@ -56,19 +56,19 @@
   (is (= '("inconsistent keys between schema and spec. Diff: [#{:var2} #{:var1} nil]")
          (check schema-alt-keys matching-spec))))
 
-(defspec Person
+(defspec P
   [name :is-a :string])
 
-(defspec House
-  [occupants :is-many :Person])
+(defspec Abode
+  [occupants :is-many :P])
 
 (deftest test-schema-write
-  (let [schema (from-specs [:Person])]
-    (check schema (get-spec :Person))
+  (let [schema (from-specs [:P])]
+    (check schema (get-spec :P))
     (let [s (with-out-str (write schema *out*))]
       (is (= (re-seq #":db/ident [^,}]*" s)
              [":db/ident :spec-tacular/spec"
-              ":db/ident :person/name"]))
+              ":db/ident :p/name"]))
       (is (= (re-seq #":db/cardinality :db.cardinality/[^,}]*" s)
              [":db/cardinality :db.cardinality/one"
               ":db/cardinality :db.cardinality/one"]))
@@ -77,7 +77,7 @@
               ":db/valueType :db.type/string"])))))
 
 (deftest test-normalize
-  (let [schema (from-specs [:Person :House])
+  (let [schema (from-specs [:P :Abode])
         clean-schema (normalize schema)
         dirty-schema (normalize (from-database (to-database! schema)))]
     (is (every? #(and (contains? % :db/ident)
@@ -111,7 +111,7 @@
 
 (deftest test-from-namespace
   (let [[missing extra both]
-        (diff [{:db/ident :person/name,
+        (diff [{:db/ident :p/name,
                 :db/valueType :db.type/string,
                 :db/cardinality :db.cardinality/one,
                 :db/doc "",
@@ -122,7 +122,7 @@
                 :db/cardinality :db.cardinality/one,
                 :db/doc "",
                 :db.install/_attribute :db.part/db}
-               {:db/ident :house/occupants,
+               {:db/ident :abode/occupants,
                 :db/valueType :db.type/ref,
                 :db/cardinality :db.cardinality/many,
                 :db/doc "",

@@ -1,14 +1,15 @@
-(ns spark.sparkspec.datomic-test
+ (ns spark.spec-tacular.datomic-test
   (:refer-clojure :exclude [remove read-string read assoc!])
   (:use clojure.test
-        spark.sparkspec
-        spark.sparkspec.spec
-        spark.sparkspec.datomic
-        spark.sparkspec.test-utils
-        spark.sparkspec.generators)
+        spark.spec-tacular
+        spark.spec-tacular.spec
+        [spark.spec-tacular.datomic :exclude [db]]
+        spark.spec-tacular.test-utils
+        spark.spec-tacular.generators
+        spark.spec-tacular.test-specs)
   (:require [datomic.api :as db]
-            [spark.sparkspec.datomic :as sd]
-            [spark.sparkspec.schema :as schema]
+            [spark.spec-tacular.datomic :as sd]
+            [spark.spec-tacular.schema :as schema]
             [clj-time.core :as time]
             [clojure.walk :as walk]
             [clojure.core.typed :as t]
@@ -16,12 +17,11 @@
             [clojure.test.check :as tc]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]
-            [clojure.test.check.clojure-test :as ct]
-            [spark.sparkspec.test-specs :refer :all]))
+            [clojure.test.check.clojure-test :as ct]))
 
 (def simple-schema
-  (cons schema/spec-tactular-map
-        (schema/from-namespace (the-ns 'spark.sparkspec.test-specs))))
+  (cons schema/spec-tacular-map
+        (schema/from-namespace (the-ns 'spark.spec-tacular.test-specs))))
 
 (deftest test-entity-coercion
   (with-test-db simple-schema
@@ -632,9 +632,6 @@
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
 (deftest query-tests
-  (is (= (parse-query '(:find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
-         {:f '[?a] :db '(db) :wc '[[:ScmParent {:scm {:val2 ?a}}]] :coll? false}))
-
   (testing "primitive data"
     (with-test-db simple-schema
       (is (= #{} (q :find ?a :in (db) :where [:ScmParent {:scm {:val2 ?a}}]))
@@ -644,7 +641,7 @@
             a2 (scmparent {:scm (scm {:val1 "b" :val2 2})})]
         (create-sp! {:conn *conn*} a1)
         (create-sp! {:conn *conn*} a2))
-  
+      
       (is (= #{[1] [2]}
              (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val2 ?a}}]))
@@ -674,7 +671,10 @@
       (sd/create! {:conn *conn*} (scmkw {:item :test}))
       (is (refless= #{[(scmkw {:item :test})]}
                     (q :find :ScmKw :in (db) :where
-                       [% {:item :test}])))))
+                       [% {:item :test}])))
+      (is (refless= #{[:test]}
+                    (q :find :keyword :in (db) :where
+                       [:ScmKw {:item [:keyword %]}])))))
 
   (testing "compound data"
     (with-test-db simple-schema
@@ -726,16 +726,16 @@
                 asw2 (:val (recursive-ctor :ScmMWrap (db/entity (db) esw-id)))]
             ;; (is (= asw1 esw) "returned from query equality")
             (testing "lazy-ctor"
-              #_(is (instance? spark.sparkspec.test_specs.l_ScmM asw2) "type") ;; TODO
+              #_(is (instance? spark.spec_tacular.test_specs.l_ScmM asw2) "type") ;; TODO
               (is (:identity asw2) "keyword access")
               (is (= (type (:vals asw2)) clojure.lang.PersistentVector) "keyword access")
               ;; (is (= asw2 esw) "equality")
               ))))
       (testing "coll"
-          (let [ex (create! {:conn *conn*} (scmmwrap {:val {:val (scm {:val1 "foobar"})}}))]
-            (is (contains? (sd/q :find [:Scm ...] :in (db) :where
-                                 [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
-                           (get-in ex [:val :val])))))
+        (let [ex (create! {:conn *conn*} (scmmwrap {:val {:val (scm {:val1 "foobar"})}}))]
+          (is (contains? (sd/q :find [:Scm ...] :in (db) :where
+                               [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
+                         (get-in ex [:val :val])))))
       (testing "absent field access"
         (let [eid (create-sp! {:conn *conn*} (scm2))
               a-scm2 (recursive-ctor :Scm2 (db/entity (db) eid))]
@@ -776,43 +776,43 @@
                #{[soe]}))))
 
     (with-test-db simple-schema
-      (create! {:conn *conn*} (dog {:name "jack"}))
-      (create! {:conn *conn*} (cat {:name "zuzu"}))
+      (create! {:conn *conn*} (ferret {:name "catsnake"}))
+      (create! {:conn *conn*} (mouse {:name "zuzu"}))
       (is (refless= (q :find :Animal :in (db) :where
                        [% {:name "zuzu"}])
-                    #{[(cat {:name "zuzu"})]}))
-      (create! {:conn *conn*} (cat {:name "jack"}))
+                    #{[(mouse {:name "zuzu"})]}))
+      (create! {:conn *conn*} (mouse {:name "catsnake"}))
       (is (refless= (q :find [:Animal ...] :in (db) :where
-                       [% {:name "jack"}])
-                    #{(cat {:name "jack"})
-                      (dog {:name "jack"})}))))
+                       [% {:name "catsnake"}])
+                    #{(mouse {:name "catsnake"})
+                      (ferret {:name "catsnake"})}))))
 
   (testing "bad syntax" ; fully qualify for command line
     (with-test-db simple-schema
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"Invalid clause rhs"
-           (macroexpand '(spark.sparkspec.datomic/q :find :Scm2 :in (db)
-                                                    :where [:Scm :scm2])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find :Scm2 :in (db)
+                                                       :where [:Scm :scm2])))
           "using a (non-spec) keyword as a rhs")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"could not infer type"
-           (macroexpand '(spark.sparkspec.datomic/q :find ?x :in (db)
-                                                    :where [?x {:y 5}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find ?x :in (db)
+                                                       :where [?x {:y 5}])))
           "impossible to determine spec of x")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"unsupported ident"
-           (macroexpand '(spark.sparkspec.datomic/q :find ?x :in (db) :where
-                                                    ["?x" {:y 5}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find ?x :in (db) :where
+                                                       ["?x" {:y 5}])))
           "using a string as an ident")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"could not find item"
-           (macroexpand '(spark.sparkspec.datomic/q :find :Scm :in (db) :where
-                                                    [% {:y 5}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find :Scm :in (db) :where
+                                                       [% {:y 5}])))
           "trying to specify a field that is not in the spec")
       (is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"not supported"
-           (macroexpand '(spark.sparkspec.datomic/q :find ?val :in (db) :where
-                                                    [:ScmEnum {:val1 ?val}])))
+           (macroexpand '(spark.spec-tacular.datomic/q :find ?val :in (db) :where
+                                                       [:ScmEnum {:val1 ?val}])))
           "trying to pull out a field from an enum with different field types")
 
       (is (thrown-with-msg?
@@ -831,11 +831,6 @@
              clojure.lang.ExceptionInfo #"bad entity in database"
              (:scm2 (recursive-ctor :Scm (db/entity (db) id))))
             "cant get an Scm2 out of it")
-
-        (is (thrown-with-msg?
-             clojure.lang.ExceptionInfo #"bad entity in database"
-             (q :find :Scm2 :in (db) :where [:Scm {:scm2 %}]))
-            "cant directly get the Scm2 either")
 
         (assert @(db/transact *conn*
                               [{:db/id (db/tempid :db.part/user -100)
@@ -1191,7 +1186,12 @@
     (let [spec     (get-spec spec-key)
           fields   (map :name (:items spec))
           conn-ctx {:conn *conn*}]
-      (prop/for-all [{:keys [original updates]} (instance-generator spec)]
+      (prop/for-all [{:keys [original updates]}
+                     (gen/bind (instance-generator spec-key)
+                       (fn [sp]
+                         (gen/bind (update-generator (get-spec sp))
+                           (fn [updates]
+                             (gen/return {:original sp :updates updates})))))]
         (and (every? #(check-component! spec % (get original %)) fields)
              (when-let [created (check-create! conn-ctx original)]
                (or (= created :skip) (check-update! conn-ctx created updates))))))))

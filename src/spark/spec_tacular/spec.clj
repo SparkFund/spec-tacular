@@ -1,4 +1,4 @@
-(ns spark.sparkspec.spec
+(ns spark.spec-tacular.spec
   (:require [clojure.pprint :as pp]
             [clj-time.core :as time]
             [clj-time.format :as timef]
@@ -51,7 +51,6 @@
            [:calendarday org.joda.time.DateTime `org.joda.time.DateTime timec/to-date-time]
            [:uuid java.util.UUID `java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
            [:uri java.net.URI `java.net.URI nil]
-           [:bytes Bytes `Bytes nil]
-           ;; :ref could maybe be datomic.db.DbId ? But it seems Datomic accepts raw integers too?
-           ;; TODO: Longs don't seem to be datomic.db.DbIds
-           [:ref Object `Object nil]])) 
+           [:bytes Bytes `Bytes nil]])) 
+
+(def core-types (into #{} (keys type-map)))

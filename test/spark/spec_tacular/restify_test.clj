@@ -1,5 +1,5 @@
-(ns spark.sparkspec.restify-test
-  (:require [spark.sparkspec.restify :refer :all]
+(ns spark.spec-tacular.restify-test
+  (:require [spark.spec-tacular.restify :refer :all]
             [io.pedestal.http :as http]
             [io.pedestal.http.route :as route]
             [io.pedestal.http.body-params :as body-params]
@@ -10,9 +10,9 @@
             [cheshire.core :as json]
             [clojure.string :refer [lower-case]]
             [io.pedestal.interceptor :as i]
-            [spark.sparkspec.datomic :as spd]
-            [spark.sparkspec.test-utils :refer :all]
-            [spark.sparkspec :as sp]
+            [spark.spec-tacular.datomic :as spd]
+            [spark.spec-tacular.test-utils :refer :all]
+            [spark.spec-tacular :as sp]
             [clojure.test :refer :all]
             [io.pedestal.test :refer :all]))
 
@@ -54,17 +54,19 @@
     :testspec/val1 "hi"
     :testspec/val2 13124}])
 
-(def service {::http/routes #(make-expanded-routes "/api/v1" (sp/get-spec :TestSpec) (fn [] {:conn *conn*}))
-              ::http/port 8080})
 
-(def server (::http/service-fn (-> service dev/init http/create-server)))
+(defn mk-server []
+  (def service {::http/routes #(make-expanded-routes "/api/v1" (sp/get-spec :TestSpec) (fn [] {:conn *conn*}))
+                ::http/port 8080})
+  (def server (::http/service-fn (-> service dev/init http/create-server))))
 
 (defmacro with-new-db [& body]
   `(with-test-db schema
-    @(d/transact *conn* seed)
-    ~@body))
+     @(d/transact *conn* seed)
+     ~@body))
 
 (deftest ^:loud get-collection
+  (mk-server)
   (with-new-db
     (let [{:keys [body status] :as res} (response-for server :get "/testspec")
           body (json/parse-string body true)]
@@ -72,6 +74,7 @@
       (is (= 1 (count body))))))
 
 (deftest ^:loud post-collection
+  (mk-server)
   (with-new-db
     (let [{status :status {loc "Location"} :headers}
           (response-for server :post "/testspec"
@@ -82,11 +85,12 @@
           "When we create an entity, we should get back the appropriate
         HTTP response (201).")
       (is (and loc (re-matches #"/api/v1/testspec/(\w+)" loc))
-             "We should get something that vaguely looks like a URL for the
+          "We should get something that vaguely looks like a URL for the
         resource we created.")
       (is (= "woah" (:testspec/val1 (d/entity (db) eid)))))))
 
 (deftest ^:loud get-element
+  (mk-server)
   (with-new-db
     (let [query '[:find ?eid :where [?eid :testspec/val1 "hi"]]
           seed-eid (ffirst (d/q query (db)))
@@ -98,6 +102,7 @@
               testspec?)))))
 
 (deftest ^:loud put-element
+  (mk-server)
   (testing "when :old matches the DB, we commit the data"
     (with-new-db
       (let [query '[:find ?eid :where [?eid :testspec/val1 "hi"]]
@@ -112,7 +117,7 @@
         (is (= status 200))
         (is (= (contains? (:testspec/val2 (d/entity (db) (ffirst (d/q query (db)))))
                           45552))))))
-#_
+  #_
   (testing "when :old does not match the DB, we do not commit the data"
     (with-new-db
       (let [query '[:find ?eid :where [?eid :testspec/val1 "hi"]]
@@ -129,6 +134,7 @@
                (set (:val2 orig))))))))
 
 (deftest ^:loud delete-element
+  (mk-server)
   (with-new-db
     (let [query '[:find ?eid :where [?eid :testspec/val1 "hi"]]
           seed-eid (ffirst (d/q query (db)))
@@ -140,3 +146,4 @@
 (deftest ^:loud test-json
   (let [sp (testspec {:val1 "atest" :val2 [111 222] :val3 (testspec {})})]
     (is (= sp (from-json-friendly :TestSpec (to-json-friendly sp))))))
+

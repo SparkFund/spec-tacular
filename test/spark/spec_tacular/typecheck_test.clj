@@ -1,11 +1,12 @@
-(ns spark.sparkspec.typecheck-test
+(ns spark.spec-tacular.typecheck-test
   (:use clojure.test)
-  (:require [spark.sparkspec]
-            [spark.sparkspec.datomic :as sd]
-            [spark.sparkspec.test-specs :as ts]
+  (:require [spark.spec-tacular]
+            [spark.spec-tacular.datomic :as sd]
+            [spark.spec-tacular.test-specs :as ts]
             [clojure.core.typed :as t]))
 
-(t/typed-deps spark.sparkspec.test-specs)
+(t/typed-deps spark.spec-tacular.datomic
+              spark.spec-tacular.test-specs)
 
 (t/ann test-query-typecheck [sd/Database -> (t/Set (t/HVec [Long]))])
 (defn test-query-typecheck
