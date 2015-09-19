@@ -23,6 +23,7 @@
     (is (some? (get-spec :TestSpec1)))
     (is (some? (get-spec :TestSpec1 :TestSpec1)))
     (is (some? (get-spec {:spec-tacular/spec :TestSpec1})))
+    (is (some? (get-spec (get-spec :TestSpec1))))
     
     (let [good (testspec1 {:val1 3 :val2 "hi"})]
       (is (testspec1? good))

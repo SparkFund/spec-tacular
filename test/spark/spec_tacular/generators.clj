@@ -120,13 +120,17 @@
     ((get spec-gen-env spec-key) spec-gen-env)))
 
 (defn ^:no-doc update-generator [spec]
-  (let [sp-gen (mk-spec-generator (:name (get-spec spec)))]
-    (spec-subset sp-gen)))
+  (if-let [spec-key (:name (get-spec spec))]
+    (let [sp-gen (mk-spec-generator spec-key)]
+      (spec-subset sp-gen))
+    (throw (ex-info "Expecting spec object or name of spec" {:actual spec}))))
 
 (defn instance-generator
   "Returns a generator for the given `spec`."
   [spec]
-  (mk-spec-generator (:name (get-spec spec))))
+  (if-let [spec-key (:name (get-spec spec))]
+    (mk-spec-generator spec-key)
+    (throw (ex-info "Expecting spec object or name of spec" {:actual spec}))))
 
 (defn ^:no-doc graph-generator [spec]
   (let [pre (atom {})

@@ -52,13 +52,15 @@
 (defn- resolve-fn [o & rest]
   (cond
     (:spec-tacular/spec o) (:spec-tacular/spec o) 
+    (instance? Spec o) (:name o)
     (or (keyword? o) (= (class o) (class (class o)))) o
     :else (class o)))
 
 (t/ann ^:no-check get-spec [t/Any -> (t/Option SpecT)])
 (defmulti get-spec
-  "If the given object is a spec or union, or was defined by [[defspec]]
-  or [[defunion]], returns that spec or union, otherwise `nil`."
+  "If the given object is a spec or union, or was defined
+  by [[defspec]] or [[defunion]], returns that spec or union,
+  otherwise `nil`."
   resolve-fn)
 
 (defmethod get-spec :default [_] nil) ;; TODO
@@ -425,7 +427,8 @@
   (let [gs (gensym)]
     `(let [~gs (eval-default-values ~spec)]
        (defmethod get-spec ~(:name spec) [& _#] ~gs)
-       (defmethod get-spec ~(symbol (str "i_" (name (:name spec)))) [& _#] ~gs))))
+       (defmethod get-spec ~gs [& _#] ~gs)
+       (defmethod get-spec ~(spec->class spec) [& _#] ~gs))))
 
 (defn- mk-get-spec-class [spec]
   (let [class-name (symbol (str "i_" (name (:name spec))))]
@@ -437,7 +440,7 @@
     `(do
        (defn ~fac-sym [o# h#] (~(symbol (str class-ctor ".")) o# (atom {}) h#))
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
-       (defmethod get-map-ctor ~(symbol (str "i_" (name (:name spec)))) [_#] ~fac-sym))))
+       (defmethod get-map-ctor ~(spec->class spec) [_#] ~fac-sym))))
 
 ;; when calling get-spec on an union, try using the extra args to narrow down the spec
 ;; i.e. it's not always `spec` being returned if we can do better
