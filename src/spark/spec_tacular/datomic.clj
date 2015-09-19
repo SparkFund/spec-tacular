@@ -1,5 +1,6 @@
 (ns spark.spec-tacular.datomic
-  "Datomic interface for the spec-tacular DSL"
+  {:doc "Datomic interface for the spec-tacular DSL"
+   :core.typed {:collect-only true}}
   (:refer-clojure :exclude [for remove assoc!])
   (:use spark.spec-tacular.spec
         spark.spec-tacular)
@@ -36,17 +37,8 @@
   (t/HMap :mandatory {:conn Connection}
           :optional  {:transaction-log t/Any}))
 
-(t/ann ^:no-check datomic.api/q [t/Any * -> (t/Set t/Any)])
-
-#_(t/ann ^:no-check datomic.api/tempid 
-         [t/Keyword -> datomic.db.DbId])
-
 (t/ann ^:no-check datomic.api/entity 
        [datomic.db.Db (t/U Long (t/HVec [t/Keyword t/Any])) -> datomic.query.EntityMap])
-
-#_(t/ann ^:no-check datomic.api/transact
-         [Connection t/Any -> (t/Future t/Any)])
-
 
 (t/ann spark.spec-tacular.test-utils/make-db [(t/Vec t/Any) -> datomic.peer.LocalConnection])
 (t/ann spark.spec-tacular.test-utils/db [-> datomic.db.Db])
@@ -58,8 +50,7 @@
   "The datomic attribute holding onto a keyword-valued SpecName"
   :spec-tacular/spec)
 
-(def ^:no-doc db-type->spec-type
-  ^:private
+(def ^{:no-doc true :private true} db-type->spec-type
   (reduce (t/ann-form #(assoc %1 %2 (keyword (name %2)))
                       [(t/Map t/Keyword t/Keyword) t/Keyword -> (t/Map t/Keyword t/Keyword)]) {}
                       [:db.type/keyword :db.type/string :db.type/boolean :db.type/long
@@ -109,7 +100,7 @@
               (filter second)
               (into {}))))))
 
-(t/ann get-all-eids [datomic.db.Db SpecT -> (t/ASeq Long)])
+(t/ann ^:no-check get-all-eids [datomic.db.Db SpecT -> (t/ASeq Long)])
 (defn ^:no-doc get-all-eids
   "Retrives all of the eids described by the given spec from the database."
   [db spec]
@@ -1089,16 +1080,18 @@
                               (db/entity ~db ~result) ~t-s)]
                       (recursive-ctor ~t-kw e#))
                     ~(err result t-s))))]
-    `(t/let [check# :- [(t/Vec t/Any) ~'-> ~(if coll? (first type-syms) `(t/HVec ~(vec type-syms)))]
+    `(t/let [check# :- [~(if coll? `t/Any `(t/Vec t/Any)) ~'-> ~(if coll? (first type-syms) `(t/HVec ~(vec type-syms)))]
              ~(if coll?
                 `(fn [~(first args)]
                    ~(wrap (first args) (first type-kws) (first type-maps) (first type-syms)))
                 `(fn [~(vec args)]
                    [~@(map wrap args type-kws type-maps type-syms)]))]
-       (->> (db/q {:find ~(if coll? `'([~(first args) ...]) `'~args)
-                   :in '~['$]
-                   :where (distinct ~clauses)}
-                  ~db)
+       (->> (clojure.core.typed.unsafe/ignore-with-unchecked-cast
+             (db/q {:find ~(if coll? `'([~(first args) ...]) `'~args)
+                    :in '~['$]
+                    :where (distinct ~clauses)}
+                   ~db)
+             (t/Seqable ~(if coll? `t/Any `(t/Vec t/Any))))
             (map check#) (set)))))
 
 ;; =============================================================================

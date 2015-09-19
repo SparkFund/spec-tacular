@@ -58,7 +58,7 @@
     :db/fn :db/isComponent :db/code :db/unique :db.excise/beforeT :db.excise/before
     :db/valueType :fressian/tag :db/doc :db.install/attribute :db/fulltext})
 
-(t/ann spec-tacular-map InstallableEntityMap)
+(t/ann ^:no-check spec-tacular-map InstallableEntityMap)
 (def
   ^{:doc "The map for the special `:spec-tacular/spec` ident which
   must be installed on any database hoping to use spec-tacular.
@@ -71,8 +71,9 @@
    :db/doc "spec-tacular/spec type tag",
    :db.install/_attribute :db.part/db})
 
-(t/defn ^:private item->schema-map 
-  [spec :- SpecT, {iname :name [cardinality type] :type :as item} :- Item] :- EntityMap
+(t/ann ^:no-check item->schema-map [SpecT Item -> EntityMap])
+(defn- item->schema-map  
+  [spec {iname :name [cardinality type] :type :as item}]
   (merge
    {:db/id          (d/tempid :db.part/db)
     :db/ident       (keyword (datomic-ns spec) (name iname))
@@ -156,7 +157,7 @@
       (write (clojure.string/replace (str m) #"(db|user) -(\d+)" "$1")))
     (write "\n]\n")))
 
-(t/ann to-file [Schema java.io.File -> nil])
+(t/ann ^:no-check to-file [Schema java.io.File -> nil])
 (defn to-file
   "Writes `schema` to `file`, returns `nil`."
   [schema file]
@@ -255,9 +256,8 @@
          (println "Created fresh db.")))
      (d/connect uri))))
 
-(t/ann to-database!
-       (t/IFn [Schema -> Connection]
-              [Schema URI -> Connection]))
+(t/ann ^:no-check to-database! (t/IFn [Schema -> Connection]
+                                      [Schema URI -> Connection]))
 (defn to-database!
   "Creates a fresh database with `schema` installed and returns a
   connection to that database.  The schema should not already
@@ -271,7 +271,7 @@
    (let [connection (fresh-db! uri)]
      (do @(d/transact connection (cons spec-tacular-map schema)) connection))))
 
-(t/ann ^:no-check from-database [(t/U Database Connection) -> Schema])
+(t/ann ^:no-check from-database [(t/U Database Connection ConnCtx) -> Schema])
 (defn from-database
   "Returns the Schema in the given [[Database]], [[Connection]], or
   [[spark.spec-tacular.datomic/ConnCtx]]."

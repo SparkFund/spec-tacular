@@ -1,6 +1,6 @@
 (ns spark.spec-tacular
-  "A database-agnostic DSL for data specifications"
-  {:core.typed {:collect-only true}}
+  {:doc "A database-agnostic DSL for data specifications"
+   :core.typed {:collect-only true}}
   (:require [clojure.core.typed :as t]
             [clojure.string :refer [lower-case join]]
             [clojure.data :as data]
@@ -9,7 +9,8 @@
             [clj-time.core :as time]
             [spark.spec-tacular.grammar :refer [parse-spec parse-union]]
             [spark.spec-tacular.spec :refer :all])
-  (:import spark.spec_tacular.spec.SpecType))
+  (:import spark.spec_tacular.spec.Spec
+           spark.spec_tacular.spec.SpecType))
 
 (t/defalias SpecInstance
   "The broadest type for a spec instance, but it is
@@ -34,6 +35,7 @@
 
 ;; -----------------------------------------------------------------------------
 
+(t/ann ^:no-check get-item [SpecT t/Keyword -> Item])
 (defn ^:no-doc get-item [spec kw] 
   "returns the item in spec with the name kw"
   (assert (keyword? kw) (str "not a keyword: " kw))
