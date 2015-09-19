@@ -1,4 +1,6 @@
 (ns spark.spec-tacular.generators
+  "Provides generators to be used in conjunction
+  with [clojure.test.check.generators](https://github.com/clojure/test.check)"
   (:refer-clojure :exclude [assoc!])
   (:use spark.spec-tacular
         [spark.spec-tacular.datomic :exclude [db]]
@@ -27,7 +29,7 @@
    :bytes   (fn [_] gen/bytes)
    :ref     (fn [_] gen/simple-type-printable)})
 
-(defn item-gen
+(defn- item-gen
   [{iname :name [cardinality type-key] :type required :required? unique? :unique?}
    spec-gen-env]
   (let [generator ,((get spec-gen-env type-key) spec-gen-env)
@@ -46,7 +48,7 @@
                maybe-unique
                maybe-optionize)]))
 
-(defn spec-gen [spec spec-gen-env & [pre]]
+(defn- spec-gen [spec spec-gen-env & [pre]]
   (if (:elements spec)
     (gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
     (gen/bind (gen/frequency [[8 (gen/return true)] [2 (gen/return false)]])
@@ -63,7 +65,7 @@
                       (swap! pre update-in [(:name spec)] #(conj % sp)))
                     (gen/return sp))))))))))
 
-(defn spec-subset
+(defn- spec-subset
   "generates a map from a generator but with just a subset of the keys.
    could be missing required fields"
   [sp-gen]
@@ -78,7 +80,7 @@
                             (map (comp :name first)))]
               (gen/return (into {} (map (fn [k] [k (get sp k)]) keep))))))))))
 
-(defn spec-children
+(defn- spec-children
   "Returns the set of spec names that need to be defined prior to this one.
   CAUTION this involves manually breaking any cycles in the spec dependency graph."
   [spec-key]
@@ -89,7 +91,7 @@
              (map #(-> % :type second))
              (set)))))
 
-(defn spec-dependencies
+(defn- spec-dependencies
   "recursive dependencies for a collection of spec keys 
   (fixpoint, including originally supplied keys).
   Returns a set."
@@ -97,7 +99,7 @@
   (let [next-set (apply clojure.set/union spec-keys (map spec-children spec-keys))]
     (if (= spec-keys next-set) next-set (recur next-set))))
 
-(defn mk-spec-generators
+(defn- mk-spec-generators
   "returns a map of keys->[env -> generator], including generators for all required deps.  
    Implementations in prim-gen-map (key->[env -> generator]) override auto-building
    of compound gens, but also provide gens for terminals like strings etc."
@@ -109,7 +111,7 @@
                          #(spec-gen (get-spec d) % pre))])
                   deps))))
 
-(defn mk-spec-generator
+(defn ^:no-doc mk-spec-generator
   "Generates a default generator for the given key.
    Uses prim-gens to implement generators for primitive types. 
    ex: (last (gen/sample (mk-spec-generator :Contact) 1))"
@@ -117,18 +119,16 @@
   (let [spec-gen-env (mk-spec-generators #{spec-key} prim-gens pre)]
     ((get spec-gen-env spec-key) spec-gen-env)))
 
-(defn instance-generator [spec]
-  (let [sp-gen (mk-spec-generator (:name spec))]
-    (gen/bind sp-gen
-      (fn [sp]
-        (let [spec-name (:name (get-spec sp))]
-          (gen/bind (if (:elements spec)
-                      (spec-subset (mk-spec-generator spec-name))
-                      (spec-subset sp-gen))
-            (fn [sp-subset]
-              (gen/return {:original sp :updates sp-subset}))))))))
+(defn ^:no-doc update-generator [spec]
+  (let [sp-gen (mk-spec-generator (:name (get-spec spec)))]
+    (spec-subset sp-gen)))
 
-(defn graph-generator [spec]
+(defn instance-generator
+  "Returns a generator for the given `spec`."
+  [spec]
+  (mk-spec-generator (:name (get-spec spec))))
+
+(defn ^:no-doc graph-generator [spec]
   (let [pre (atom {})
         sp-gen (mk-spec-generator (:name spec) pre)]
     (gen/bind (gen/such-that #(> (count %) 3) (gen/not-empty (gen/vector sp-gen)) 50)

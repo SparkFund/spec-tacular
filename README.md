@@ -223,6 +223,13 @@ restricted to things of type `<spec>`.
 
 * Rename `defenum` to `defunion`
 
+### Short Term Roadmap
+
+[ ] Create `defenum` that mirrors Datomic's enumerations
+[ ] Create `:component` spec option
+[ ] Create `defattr` that can be used as a field type to allow shared
+Datomic namespaces between fields of different specs
+
 ## License
 
 Copyright © 2014-2015 [Spark Community Investment](https://www.sparkfund.co)

@@ -1,5 +1,5 @@
 (defproject spec-tacular "0.5.0"
-  :description "First-class, extendable data specifications for clojure."
+  :description "First-class data specifications for Clojure and Datomic."
   :url "https://github.com/SparkFund/spec-tacular"
   :license {:name "Apache License, Version 2.0"
             :url "http://www.apache.org/licenses/LICENSE-2.0.html"}
@@ -46,11 +46,10 @@
   :test-selectors {:default (complement :loud)
                    :loud :loud
                    :all (constantly true)}
-  :core.typed {:check [spark.spec-tacular.datomic
-                       spark.spec-tacular.schema
-                       spark.spec-tacular.test-specs
+  :core.typed {:check [spark.spec-tacular.schema
                        spark.spec-tacular.typecheck-test]}
   :codox {:defaults {:doc/format :markdown}
+          :sources ["src" "test"]
           :include [spark.spec-tacular
                     spark.spec-tacular.datomic
                     spark.spec-tacular.schema

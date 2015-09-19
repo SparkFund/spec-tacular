@@ -1186,7 +1186,12 @@
     (let [spec     (get-spec spec-key)
           fields   (map :name (:items spec))
           conn-ctx {:conn *conn*}]
-      (prop/for-all [{:keys [original updates]} (instance-generator spec)]
+      (prop/for-all [{:keys [original updates]}
+                     (gen/bind (instance-generator spec-key)
+                       (fn [sp]
+                         (gen/bind (update-generator (get-spec sp))
+                           (fn [updates]
+                             (gen/return {:original sp :updates updates})))))]
         (and (every? #(check-component! spec % (get original %)) fields)
              (when-let [created (check-create! conn-ctx original)]
                (or (= created :skip) (check-update! conn-ctx created updates))))))))

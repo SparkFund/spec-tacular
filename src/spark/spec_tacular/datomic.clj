@@ -1,4 +1,5 @@
 (ns spark.spec-tacular.datomic
+  "Datomic interface for the spec-tacular DSL"
   (:refer-clojure :exclude [for remove assoc!])
   (:use spark.spec-tacular.spec
         spark.spec-tacular)
