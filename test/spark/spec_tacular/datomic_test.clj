@@ -917,7 +917,36 @@
              (create! {:conn *conn*} s)))
         (is (thrown-with-msg?
              clojure.lang.ExceptionInfo #"entity already in database"
-             (create! {:conn *conn*} (assoc s :val2 4))))))))
+             (create! {:conn *conn*} (assoc s :val2 4)))))))
+  (testing "component"
+    (with-test-db simple-schema
+      (let [c1 (create! {:conn *conn*} (container {:one (container {})}))]
+        (is (= (count-all-by-spec (db) :Container) 2))
+        (retract! {:conn *conn*} c1)
+        (is (= (count-all-by-spec (db) :Container) 0)))
+      (let [c1 (create! {:conn *conn*} (container {:one (container {})
+                                                   :many [(container {}) (container {})]}))]
+        (is (= (count-all-by-spec (db) :Container) 4))
+        (retract! {:conn *conn*} c1)
+        (is (= (count-all-by-spec (db) :Container) 0)))
+      (let [c1 (create! {:conn *conn*} (container {:one (container {})
+                                                   :many [(container {}) (container {})]}))]
+        (is (= (count-all-by-spec (db) :Container) 4))
+        (assoc! {:conn *conn*} c1 :one nil)
+        (is (= (count-all-by-spec (db) :Container) 3))))
+    (with-test-db simple-schema
+      (let [c1 (create! {:conn *conn*} (container {:one (container {})
+                                                   :many [(container {}) (container {})]}))]
+        (is (= (count-all-by-spec (db) :Container) 4))
+        (assoc! {:conn *conn*} c1 :many [(container {})])
+        (is (= (count-all-by-spec (db) :Container) 3))))
+    (with-test-db simple-schema
+      (let [c1 (create! {:conn *conn*} (container {:one (container {})
+                                                   :many [(container {}) (container {})]}))]
+        (is (= (count-all-by-spec (db) :Container) 4))
+        (retract! {:conn *conn*} (:one c1))
+        (is (= (:one (refresh {:conn *conn*} c1) nil)))
+        (is (= (count-all-by-spec (db) :Container) 3))))))
 
 (deftest test-create!
   (with-test-db simple-schema

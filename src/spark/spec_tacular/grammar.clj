@@ -28,6 +28,9 @@
            item-info (->> (parse-opts opts loc)
                           (#(if (contains? type-map t) (dissoc % :link?) %)))
            item-name (keyword name)]
+       (when (and (:component? item-info) (:link? item-info))
+         (throw (ex-info "can't have a component link"
+                         (merge loc {:syntax stx}))))
        (when-not (keyword? t)
          (throw (ex-info (str "expecting keyword type, got " (type t))
                          (merge loc {:syntax stx}))))
@@ -46,6 +49,7 @@
       ([:unique & rest] :seq)            (k {:unique? true}      rest)
       ([:link & rest] :seq)              (k {:link? true}        rest)
       ([:default-value v & rest] :seq)   (k {:default-value v}   rest)
+      ([:component & rest] :seq)         (k {:component? true}   rest)
       :else (throw (ex-info "invalid options" (merge loc {:syntax stx}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

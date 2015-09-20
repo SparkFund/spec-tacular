@@ -202,7 +202,7 @@
   [db spec]
   (assert (keyword? spec) "expecting spec name")
   (assert (instance? datomic.db.Db db) "expecting database")
-  (ffirst (db/q {:find ['(count ?eid)] :in '[$] :where [['?eid :spec-tacular/spec spec]]} db)))
+  (or (ffirst (db/q {:find ['(count ?eid)] :in '[$] :where [['?eid :spec-tacular/spec spec]]} db)) 0))
 
 (t/ann ^:no-check build-transactions
        (t/IFn [datomic.db.Db SpecInstance Mask (t/Atom1 (t/ASeq (t/Vec t/Any))) -> (t/Map t/Keyword t/Any)]
@@ -1140,7 +1140,9 @@
                 (throw (ex-info "attempt to delete a required field"
                                 {:item item :field iname :spec parent-spec})))
               (if-let [eid (get-in i [:db-ref :eid])]
-                [[:db/retract parent-eid datomic-key (get-in i [:db-ref :eid])]]
+                (if (:component? item)
+                  [[:db.fn/retractEntity eid]]
+                  [[:db/retract parent-eid datomic-key eid]])
                 (do (when link? (throw (ex-info "retracted link missing eid" {:entity i})))
                     [[:db/retract parent-eid datomic-key i]])))]
       (cond
@@ -1281,6 +1283,9 @@
   The entity must be an object representation of an entity on the
   database (for example, returned from a query, [[create!]], or an
   earlier [[assoc!]]).
+
+  *Attempting to retract a `:component` field (by setting that field
+  to `nil`) retracts the entire component instance.*
    
   Get the Datomic `:db/id` from the object using the `:db-ref` field.
 
@@ -1321,7 +1326,22 @@
     (let [em (db/entity (db/db (:conn conn-ctx)) eid)]
       (recursive-ctor (:name spec) em))))
 
-;; wishlist
-;; (defn copy []) or copy!
-;; (defn dissoc! []) or delete! or remove!
-;; (defn cas []) ? maybe as a helper
+(t/ann ^:no-check retract! (t/IFn [ConnCtx t/Any -> nil]
+                                  [ConnCtx t/Any t/Keyword -> nil]))
+(defn retract!
+  "Removes the given instance from the database using
+  `:db.fn/retractEntity`.  Returns `nil`."
+  {:added "0.5.1"}
+  [conn-ctx si & [field-name]]
+  (if field-name
+    (assoc! conn-ctx si field-name nil)
+    (let [eid (get-in si [:db-ref :eid])]
+      (when-not eid (throw (ex-info "entity not on database" {:entity si})))
+      (let [data [[:db.fn/retractEntity eid]]
+            data (if-let [tl (:transaction-log conn-ctx)]
+                   (let [txn-id (db/tempid :db.part/tx)]
+                     (->> (sp->transactions (db/db (:conn conn-ctx)) tl) ; hijack db/id to point to txn.
+                          (map #(assoc % :db/id txn-id))
+                          (concat data)))
+                   data)]
+        (do (commit-sp-transactions! conn-ctx data) nil)))))
