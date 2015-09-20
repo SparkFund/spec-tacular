@@ -184,7 +184,8 @@
                      :else (let [res# (let [{[arity# type#] :type :as item#} (get-item ~spec k#)]
                                         (case arity#
                                           :one (recursive-ctor type# val#)
-                                          :many (mapv #(recursive-ctor type# %) val#)))]
+                                          :many (when-not (empty? val#)
+                                                  (set (mapv #(recursive-ctor type# %) val#)))))]
                              (do (swap! ~'cache assoc k# res#) res#))))))
            (valAt [~'this ~'k]
              (.valAt ~'this ~'k nil))
@@ -195,12 +196,7 @@
                     (= ref1# ref2#))
                   ~@(for [{iname :name [arity sub-sp-nm] :type link? :link? :as item}
                           (:items spec)]
-                      (let [v1 (gensym), v2 (gensym), l (gensym), m (gensym)]
-                        `(let [~v1 (~iname ~'this), ~v2 (~iname ~'o)]
-                           ~(case arity
-                              :one `(= ~v1 ~v2)
-                              :many `(and (= (count ~v1) (count ~v2))
-                                          (every? (fn [~l] (some (fn [~m] (= ~l ~m)) ~v1)) ~v2))))))))
+                      `(= (.valAt ~'this ~iname nil) (.valAt ~'o ~iname nil)))))
            (entryAt [this# k#]
              (let [v# (.valAt this# k# this#)]
                (when-not (identical? this# v#)
@@ -326,7 +322,7 @@
                                  (symbol (str *ns*) (name sub-sp-nm)))]
                  [iname (let [t (case arity
                                   :one  item-type
-                                  :many (list `t/SequentialSeqable item-type))]
+                                  :many (list `t/Set item-type))]
                           (if required? t (list `t/Option t)))]))]
     `(t/HMap
       ;; FIXME: This should be true but waiting on 
@@ -389,10 +385,17 @@
                    :let [sub-sp (get sp iname)]
                    :when (some? sub-sp)]
                (let [f (if db-sp identity #(recursive-ctor sub-spec-name %))]
-                 [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))]
+                 [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))
+            many-prims
+            ,(for [{iname :name [arity sub-spec-name] :type :as item} (:items spec)
+                   :when (and (primitive? sub-spec-name)
+                              (= arity :many))
+                   :let [sub-sp (get sp iname)]
+                   :when (some? sub-sp)]
+               [iname (if (empty? sub-sp) nil (set sub-sp))])]
         (non-recursive-ctor (get-map-ctor (:name spec))
                             spec
-                            (into sp sub-kvs)
+                            (into sp (concat sub-kvs many-prims))
                             (when db-sp (hash orig-sp)))))))
 
 (defn- mk-checking-ctor [spec]
@@ -643,19 +646,21 @@
 (defn refless
   "Returns a version of the given spec instance with no `:db-ref`s on
   any sub-instance."
+  {:added "0.5.0"}
   [si]
   (walk/prewalk (fn [si] (if (get-spec si) (dissoc si :db-ref) si)) si))
+
+(declare refless=)
 
 (defn- spec-refless= [x y]
   (if-let [x-spec (get-spec x)]
     (and (= x-spec (get-spec y))
-         (every? identity
-                 (for [{iname :name [arity _] :type} (:items x-spec)]
+         (every? (fn [{iname :name [arity _] :type}]
                    (let [v1 (iname x), v2 (iname y)]
                      (case arity
                        :one (spec-refless= v1 v2)
-                       :many (and (= (count v1) (count v2))
-                                  (every? (fn [l] (some (fn [m] (spec-refless= l m)) v1)) v2)))))))
+                       :many (refless= v1 v2))))
+                 (:items x-spec)))
     (= x y)))
 
 (defn refless=
@@ -665,10 +670,22 @@
   Contains a fast path if both `x` and `y` have specs, otherwise
   expect bad asymptotics as each collection must be rebuilt without
   `:db-ref`s."
+  {:added "0.5.0"}
   [x y]
   (cond
     (and (get-spec x) (get-spec y))
-    (spec-refless= x y)
-    :else
-    (let [refless-coll (partial walk/postwalk #(if (get-spec %) (dissoc % :db-ref) %))]
-      (= (refless-coll x) (refless-coll y)))))
+    ,(spec-refless= x y)
+    (and (sequential? x) (sequential? y))
+    ,(and (= (count x) (count y))
+          (every? #(apply refless= %) (map vector x y)))
+    (and (map? x) (map? y))
+    ,(every? #(refless= (get x %) (get y %))
+             (set (concat (keys x) (keys y))))
+    (and (set? x) (set? y))
+    ,(loop [l (seq x), s y]
+       (if-let [v1 (first l)]
+         (if-let [v2 (some #(when (= (refless= % v1)) %) s)]
+           (recur (rest l) (clojure.set/difference s #{v2}))
+           false)
+         (empty? s)))
+    :else (= x y)))

@@ -377,7 +377,7 @@
                         b1db
                         (assoc b1db :multi []))
           b1db (get-by-eid (db) b1eid)
-          _ (is (= [] (:multi b1db))
+          _ (is (= nil (:multi b1db))
                 "Can update to delete lists ")
           b2eid (create-sp! {:conn *conn*} (scmm {:vals [(scm2 {:val1 1})
                                                          (scm2 {:val1 2})]}))
@@ -386,7 +386,7 @@
                         b2db
                         (assoc b2db :vals []))
           b2db (get-by-eid (db) b2eid)
-          _ (is (= [] (:vals b2db))
+          _ (is (= nil (:vals b2db))
                 "Can delete non-primitive is-manys too")
           b2eid (create-sp! {:conn *conn*} (scmm {:vals [(scm2 {:val1 1})
                                                          (scm2 {:val1 2})]}))
@@ -397,7 +397,7 @@
                         b3db
                         (assoc b3db :vals nil))
           b3db (get-by-eid (db) b2eid)
-          _ (is (= [] (:vals b3db))
+          _ (is (= nil (:vals b3db))
                 "Can delete non-primitive is-manys via nil too")
           scmreq-eid (create-sp! {:conn *conn*} (scmreq {:name "blah"}))
           scmreq-db (get-by-eid (db) scmreq-eid)
@@ -425,22 +425,22 @@
              #{[123]})
           "Can update to change an enum field from one to another")))
   (with-test-db simple-schema
-    (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm3) (scm3) (scm2 {:val1 123})]}))
+    (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm3) (scm2 {:val1 123})]}))
           eid (commit-sp-transactions! {:conn *conn*} tx1)
           sp (db->sp (db) (db/entity (db) eid))
           _ (is (= (count (db/q '[:find ?eid
                                   :where
                                   [?owner :scmownsenum/enums ?eid]]
                                 (db)))
-                   3)
+                   2)
                 "can store a list of enums")
-          tx2 (sp->transactions (db) (update-in sp [:enums] concat [(scm3) (scm3)]))
+          tx2 (sp->transactions (db) (update-in sp [:enums] concat [(scm3)]))
           tx-info2 @(db/transact *conn* tx2)]
       (is (= (count (db/q '[:find ?eid
                             :where
                             [?owner :scmownsenum/enums ?eid]]
                           (db)))
-             5)
+             3)
           "can append more enums to a list of enums")))
   (with-test-db simple-schema
     (let [tx1 (sp->transactions (db) (scmownsenum {:enums [(scm2 {:val1 1}) (scm2 {:val1 2})]}))
@@ -728,7 +728,7 @@
             (testing "lazy-ctor"
               #_(is (instance? spark.spec_tacular.test_specs.l_ScmM asw2) "type") ;; TODO
               (is (:identity asw2) "keyword access")
-              (is (= (type (:vals asw2)) clojure.lang.PersistentVector) "keyword access")
+              (is (= (type (:vals asw2)) clojure.lang.PersistentHashSet) "keyword access")
               ;; (is (= asw2 esw) "equality")
               ))))
       (testing "coll"
@@ -905,7 +905,7 @@
             e-soe (-> (scmownsenum {})
                       (assoc :enums (for [s [se7]] (create! {:conn *conn*} s))))
             _ (is (= (type (:enums e-soe))
-                     clojure.lang.PersistentVector))
+                     clojure.lang.PersistentHashSet))
             a-soe (create! {:conn *conn*} e-soe)
             _ (is (get-in (first (:enums a-soe)) [:db-ref :eid]))])))
   (testing "errors"
@@ -920,29 +920,38 @@
              (create! {:conn *conn*} (assoc s :val2 4)))))))
   (testing "component"
     (with-test-db simple-schema
-      (let [c1 (create! {:conn *conn*} (container {:one (container {})}))]
+      (let [c1 (create! {:conn *conn*} (container {:number 1
+                                                   :one (container {:number 2})}))]
         (is (= (count-all-by-spec (db) :Container) 2))
         (retract! {:conn *conn*} c1)
         (is (= (count-all-by-spec (db) :Container) 0)))
-      (let [c1 (create! {:conn *conn*} (container {:one (container {})
-                                                   :many [(container {}) (container {})]}))]
+      (let [c1 (create! {:conn *conn*} (container {:number 1
+                                                   :one (container {:number 2})
+                                                   :many [(container {:number 3})
+                                                          (container {:number 4})]}))]
         (is (= (count-all-by-spec (db) :Container) 4))
         (retract! {:conn *conn*} c1)
         (is (= (count-all-by-spec (db) :Container) 0)))
-      (let [c1 (create! {:conn *conn*} (container {:one (container {})
-                                                   :many [(container {}) (container {})]}))]
+      (let [c1 (create! {:conn *conn*} (container {:number 1
+                                                   :one (container {:number 2})
+                                                   :many [(container {:number 3})
+                                                          (container {:number 4})]}))]
         (is (= (count-all-by-spec (db) :Container) 4))
         (assoc! {:conn *conn*} c1 :one nil)
         (is (= (count-all-by-spec (db) :Container) 3))))
     (with-test-db simple-schema
-      (let [c1 (create! {:conn *conn*} (container {:one (container {})
-                                                   :many [(container {}) (container {})]}))]
+      (let [c1 (create! {:conn *conn*} (container {:number 1
+                                                   :one (container {:number 2})
+                                                   :many [(container {:number 3})
+                                                          (container {:number 4})]}))]
         (is (= (count-all-by-spec (db) :Container) 4))
         (assoc! {:conn *conn*} c1 :many [(container {})])
         (is (= (count-all-by-spec (db) :Container) 3))))
     (with-test-db simple-schema
-      (let [c1 (create! {:conn *conn*} (container {:one (container {})
-                                                   :many [(container {}) (container {})]}))]
+      (let [c1 (create! {:conn *conn*} (container {:number 1
+                                                   :one (container {:number 2})
+                                                   :many [(container {:number 3})
+                                                          (container {:number 4})]}))]
         (is (= (count-all-by-spec (db) :Container) 4))
         (retract! {:conn *conn*} (:one c1))
         (is (= (:one (refresh {:conn *conn*} c1) nil)))
@@ -962,9 +971,39 @@
                (scmlink {:link1 (scm {:val1 "7" :scm2 (scm2 {:val1 1})})
                          :link2 [(scm2 {:val1 2}) (scm2 {:val1 3})]
                          :val1  (scmparent {:scm (scm {:val1 "8" :scm2 {:val1 4}})})})
-               (scmlink{:val1 (scmparent{:scm (scm {:multi ["$" "J~"]  :val2 3 :val1 "K"})})
-                        :link1 (scm {:scm2 (scm2 {}) :multi [] :val2 -5 :val1 "Z"})})]]
+               (scmlink {:val1 (scmparent{:scm (scm {:multi ["$" "J~"]  :val2 3 :val1 "K"})})
+                         :link1 (scm {:scm2 (scm2 {}) :multi [] :val2 -5 :val1 "Z"})})]]
       (doseq [ex exs] (is (refless= (create! {:conn *conn*} ex) ex) (str ex))))))
+
+(deftest test-refless
+  (is (refless= (scmmwrap {:db-ref {:eid 17592186045419},
+                           :val (scmm {:db-ref {:eid 17592186045420},
+                                       :identity "G__57958jHwJNU",
+                                       :val (scm {:db-ref {:eid 17592186045421},
+                                                  :val2 -5,
+                                                  :multi [""]})})})
+                (scmmwrap {:val (scmm {:val (scm {:val2 -5, :multi [""]}),
+                                       :identity "G__57958jHwJNU"})})))
+  (is (refless= (scmmwrap {:db-ref {:eid 17592186045419},
+                           :val (scmm {:db-ref {:eid 17592186045420},
+                                       :identity "G__57958jHwJNU",
+                                       :val (scm {:db-ref {:eid 17592186045421},
+                                                  :val2 -5,
+                                                  :multi [""]})})})
+                (scmmwrap {:val (scmm {:val (scm {:val2 -5, :multi [""]}),
+                                       :identity "G__57958jHwJNU"})})))
+  (is (refless= (scmmwrap {:db-ref {:eid 17592186045425},
+                           :name "",
+                           :val (scmm {:db-ref {:eid 17592186045426},
+                                       :identity "G__57885?-*k@xO",
+                                       :val (scm {:db-ref {:eid 17592186045421},
+                                                  :val2 -5,
+                                                  :multi [""]}),
+                                       :vals [(scm2 {:db-ref {:eid 17592186045427}})]})})
+                (scmmwrap {:val (scmm {:vals [(scm2 {})],
+                                       :val (scm {:val2 -5, :multi [""]}),
+                                       :identity "G__57885?-*k@xO"}),
+                           :name ""}))))
 
 (deftest test-update!
   (with-test-db simple-schema
@@ -1178,8 +1217,8 @@
               actual (create-graph! conn-ctx (seq expected))
               urefs  (unique-db-refs actual)
               uobjs  (unique-objs expected)]
-          (is (refless= {:count (count urefs) :entity actual}
-                        {:count (count uobjs) :entity expected})))))))
+          (is (= (count urefs) (count uobjs)))
+          (is (refless= actual expected)))))))
 
 (deftest test-calendar-day
   (with-test-db simple-schema
@@ -1241,8 +1280,9 @@
       (with-test-db simple-schema
         (let [conn-ctx {:conn *conn*}
               actual (create-graph! conn-ctx expected)]
-          (is (refless= {:count (count (unique-db-refs actual)) :entity actual}
-                        {:count (count (unique-objs expected)) :entity expected})))))))
+          (is (= (count (unique-db-refs actual))
+                 (count (unique-objs expected))))
+          (is (refless= actual expected)))))))
 
 (ct/defspec graph-ScmOwnsEnum 10 (prop-create-graph :ScmOwnsEnum))
 (ct/defspec graph-ScmM 10 (prop-create-graph :ScmM))
