@@ -87,11 +87,12 @@
                       :many :db.cardinality/many)
     :db/doc         ""
     :db.install/_attribute :db.part/db}
-   (if (:unique? item)
+   (when (:unique? item)
      {:db/unique (if (:identity? item)
                    :db.unique/identity
-                   :db.unique/value)}
-     {})))
+                   :db.unique/value)})
+   (when (:component? item)
+     {:db/isComponent true})))
 
 (t/ann from-spec [(t/U SpecT t/Keyword) -> Schema])
 (defn from-spec

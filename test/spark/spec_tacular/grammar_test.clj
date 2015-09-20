@@ -47,4 +47,7 @@
                  (parse-spec '(Foo [bar :is-a :Bar] [bar :is-a :Bar]))))
 
   #_(is (thrown? clojure.lang.ExceptionInfo
-                 (parse-union '(Foo 5)))))
+                 (parse-union '(Foo 5))))
+
+  (is (thrown? clojure.lang.ExceptionInfo
+               (parse-spec '(Container [one :is-a :Container :link :component])))))

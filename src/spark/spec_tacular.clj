@@ -494,13 +494,21 @@
   ```
 
   creates the spec `:Name`; where arity is either `:is-a` or
-  `:is-many`, type is either another spec name or a primitive type
-  keyword, and option is any of `:unique`, `:identity`, `:link`, or
-  `:required`.
+  `:is-many` and type is either another spec name or a primitive type
+  keyword. 
 
   spec-tacular supports base types `:keyword`, `:string`, `:boolean`,
   `:long`, `:bigint`, `:float`, `:double`, `:bigdec`, `:instant`,
   `:calendarday`, `:uuid`, `:uri`, and `:bytes`.
+
+  Fields are allowed to have the following options:
+
+  * `:unique` and `:identity`, meaning only one entity can have a
+  given value for this attribute in the database
+  * `:link`, meaning the instance is always passed by-reference
+  * `:component`, mutually exclusive with `:link`, means the instance
+  only exists when tied to it's parent
+  * `:required`, a required field
 
   A core.typed alias `Name` is created, as well as a constructor
   `name` and a predicate `name?`.

@@ -1,10 +1,7 @@
 (ns spark.spec-tacular.test-specs
   {:core.typed {:collect-only true}}
-  (:refer-clojure :exclude [assoc!])
   (:require [clojure.core.typed :as t])
-  (:use spark.spec-tacular
-        spark.spec-tacular.spec
-        spark.spec-tacular.datomic))
+  (:use spark.spec-tacular))
 
 (defspec Scm2
   [val1 :is-a :long])
@@ -59,3 +56,7 @@
 
 (defspec Birthday
   [date :is-a :calendarday])
+
+(defspec Container
+  [one :is-a :Container :component]
+  [many :is-many :Container :component])
