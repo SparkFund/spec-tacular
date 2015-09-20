@@ -138,7 +138,7 @@
     (is (link? l))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not a map"
                           (recursive-ctor :TestSpec2 many)))
-    (is (= (:ts2 l) many))
+    (is (= (:ts2 l) (set many)))
     (is (doall (with-out-str (prn l)))))
 
   (let [l (link {:s1 ["a" "b" "c"]})]
@@ -154,7 +154,20 @@
   
   (let [l1 (link {:ts3 (testspec3 {:db-ref 1}) :db-ref 3})
         l2 (link {:ts3 (testspec3 {:db-ref 2}) :db-ref 4})]
-    (is (refless= [[[l1]]] [[[l2]]]) "refless equality")))
+    (is (refless= [[[l1]]] [[[l2]]]) "refless equality"))
+
+  (testing "is-many"
+    (is (not= (link {:ts4 [(testspec4 {:val1 true}) (testspec4 {:val1 false})]})
+              (link {:ts4 [(testspec4 {:val1 true}) (testspec4 {:val1 true})]})))
+    (is (not= (link {:ts4 [(testspec4 {:val1 true}) (testspec4 {:val1 true})]})
+              (link {:ts4 [(testspec4 {:val1 true}) (testspec4 {:val1 false})]})))))
+
+(defspec TestSpec7
+  [nums :is-many :long])
+
+(deftest test-is-many
+  (is (= (testspec7 {:nums  [1 2 3 4]})
+         (testspec7 {:nums #{1 2 3 4}}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
@@ -216,6 +229,6 @@
                     (into #{} (map :name ns-specs))
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testunion :ES :ESParent :UnionFoo :UnionForward :A :B
-                      :Link :Human :TestSpec6})]
+                      :Link :Human :TestSpec6 :TestSpec7})]
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))

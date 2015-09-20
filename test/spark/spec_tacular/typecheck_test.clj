@@ -24,13 +24,9 @@
 (defn test-coll-query-typecheck [db]
   (sd/q :find [?a ...] :in db :where [:Scm {:val1 ?a}]))
 
-(t/ann test-is-multi-vec ts/Scm)
+(t/ann test-is-multi-set ts/Scm)
 (def test-is-multi-vec
-  (ts/scm {:multi ["hi"]}))
-
-(t/ann test-is-multi-list ts/Scm)
-(def test-is-multi-list
-  (ts/scm {:multi (list "hi")}))
+  (ts/scm {:multi #{"hi"}}))
 
 (t/ann test-coll-spec [sd/Database -> (t/Option ts/ScmEnum)])
 (defn test-coll-spec [db]

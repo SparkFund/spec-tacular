@@ -58,5 +58,6 @@
   [date :is-a :calendarday])
 
 (defspec Container
+  [number :is-a :long]
   [one :is-a :Container :component]
   [many :is-many :Container :component])
