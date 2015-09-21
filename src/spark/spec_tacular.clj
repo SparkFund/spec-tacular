@@ -520,7 +520,8 @@
 (defn- mk-union-huh [spec]
   (let [huh (make-name spec #(str (lower-case %) "?"))
         huh-name-ann (with-meta huh (assoc (meta huh) :no-check true))]
-    `(defn ~huh-name-ann [o#] (contains? ~(:elements spec) (:name (get-spec o#))))))
+    `(do (t/ann ~huh-name-ann [t/Any ~'-> t/Bool])
+         (defn ~huh [o#] (contains? ~(:elements spec) (:name (get-spec o#)))))))
 
 ;; -----------------------------------------------------------------------------
 ;; defspec, defunion

@@ -41,4 +41,5 @@
 (t/ann test-huh [t/Any -> t/Bool])
 (defn test-huh [x]
   (or (ts/scm? x)
-      (ts/scmownsenum? x)))
+      (ts/scmownsenum? x)
+      (ts/animal? x)))
