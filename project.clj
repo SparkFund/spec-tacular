@@ -1,4 +1,4 @@
-(defproject spec-tacular "0.5.1-SNAPSHOT"
+(defproject spec-tacular "0.6.0-SNAPSHOT"
   :description "First-class data specifications for Clojure and Datomic."
   :url "https://github.com/SparkFund/spec-tacular"
   :license {:name "Apache License, Version 2.0"
@@ -15,33 +15,7 @@
                                org.clojure/tools.analyzer
                                org.clojure/tools.reader
                                org.clojure/tools.analyzer.jvm]]
-                 [clj-time "0.9.0"]
-
-                 ;; Restify
-                 [clojure-csv/clojure-csv "2.0.1"]
-                 [io.pedestal/pedestal.jetty "0.3.0"
-                  :exclusions [ch.qos.logback/logback-classic]]
-                 [io.pedestal/pedestal.service "0.3.0"
-                  :exclusions [commons-codec
-                               org.clojure/tools.reader
-                               org.slf4j/slf4j-api
-                               ch.qos.logback/logback-classic]]
-                 [io.pedestal/pedestal.service-tools "0.3.0"
-                  :exclusions [org.slf4j/log4j-over-slf4j
-                               org.slf4j/jul-to-slf4j
-                               org.slf4j/jcl-over-slf4j
-                               org.clojure/tools.reader
-                               ch.qos.logback/logback-classic
-                               commons-codec]]
-                 [org.immutant/immutant "1.1.3"
-                  :exclusions [commons-codec
-                               org.jgroups/jgroups
-                               org.jboss.logging/jboss-logging]]
-                 [clj-http "0.9.1"
-                  :exclusions [commons-codec
-                               potemkin]]
-                 [ring/ring-core "1.3.0"
-                  :exclusions [commons-codec]]]
+                 [clj-time "0.9.0"]]
   :plugins [[lein-typed "0.3.5"]]
   :test-selectors {:default (complement :loud)
                    :loud :loud

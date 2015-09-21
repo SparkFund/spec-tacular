@@ -52,8 +52,7 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
                           (testspec1 {:val1 0 :val2 1}))
         "wrong type")
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
-                          (testspec1 {:val1 3 :extra-key true}))
+    (is (thrown? clojure.lang.ExceptionInfo (testspec1 {:val1 3 :extra-key true}))
         "extra key")))
 
 (defspec TestSpec2
@@ -71,12 +70,14 @@
       (is (testspec2 {:ts1 ts1})))))
 
 (defspec TestSpec4
-  [val1 :is-a :boolean])
+  [val1 :is-a :boolean]
+  [val2 :is-many :boolean])
 
 (deftest test-TestSpec4
-  (testing "valid"
+  (testing "booleans"
     (is (some? (check-component! (get-spec :TestSpec4) :val1 false)))
-    (is (testspec4? (testspec4 {:val1 false})))))
+    (is (testspec4? (testspec4 {:val1 false})))
+    (is (some? (re-find #"false" (pr-str (testspec4 {:val1 false})))))))
 
 (defspec TestSpec5
   [name :is-a :string :required])
@@ -100,19 +101,17 @@
   (is (some? (get-spec :testunion)))
   (is (= (get-spec :testunion {:spec-tacular/spec :TestSpec2})
          (get-spec :TestSpec2)))
+  (is (= (:elements (get-spec :testunion))
+         #{:TestSpec2 :TestSpec3}))
   
   (is (testunion? (testspec2 {})))
   (is (instance? spark.spec_tacular.spec.UnionSpec (get-spec testunion)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
   (is (thrown? clojure.lang.ExceptionInfo (check-component! (get-spec :ES) :foo :nope)))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
-                        (get-spec :testunion (testspec1 {:val1 1}))))
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
-                        (esparent {:es {:foo (testspec1 {:val1 1})}}))
-      "nested ctor fails properly with unions")
-  (is (thrown-with-msg? clojure.lang.ExceptionInfo #""
-                        (es {:foo (a {})}))))
+  (is (thrown? clojure.lang.ExceptionInfo (get-spec :testunion (testspec1 {:val1 1}))))
+  (is (thrown? clojure.lang.ExceptionInfo (esparent {:es {:foo (testspec1 {:val1 1})}})))
+  (is (thrown? clojure.lang.ExceptionInfo (es {:foo (a {})}))))
 
 ;; forward union reference
 (defunion UnionFoo :UnionForward)
@@ -128,6 +127,10 @@
   [ts3 :is-a :TestSpec3]
   [ts4 :is-many :TestSpec4]
   [s1 :is-many :string])
+
+(deftest test-refless=
+  (is (refless= #{false} #{false}))
+  (is (refless= #{nil} #{nil})))
 
 (deftest test-link
   (let [many [(testspec2) (testspec2 {:ts1 (testspec1 {:val1 42})})]
