@@ -15,6 +15,7 @@
                                org.clojure/tools.analyzer
                                org.clojure/tools.reader
                                org.clojure/tools.analyzer.jvm]]
+                 [clojure-csv/clojure-csv "2.0.1"]
                  [clj-time "0.9.0"]]
   :plugins [[lein-typed "0.3.5"]]
   :test-selectors {:default (complement :loud)
