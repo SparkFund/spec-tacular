@@ -4,7 +4,16 @@
             [clj-time.format :as timef]
             [clj-time.coerce :as timec]))
 
+;; -----------------------------------------------------------------------------
+;; records
+
 (defrecord Spec [name opts items syntax])
+(defrecord Item [name type precondition required? unique? optional? identity? default-value])
+(defrecord UnionSpec [name elements])
+(defrecord SpecType [name type type-symbol coercion])
+
+;; -----------------------------------------------------------------------------
+;; printing
 
 (defmethod pp/simple-dispatch Spec [spec]
   (let [stx (.syntax spec)]
@@ -24,15 +33,25 @@
             (pp/simple-dispatch link)))
          (pp/simple-dispatch item-stx))))))
 
-(defrecord Item
-    [name type precondition required? unique? optional? identity? default-value])
+;; -----------------------------------------------------------------------------
+;; helpers
 
-(defrecord UnionSpec [name elements])
+(defn make-name
+  "Creates a symbol using the name of the spec and the given
+  `append-fn`."
+  [spec append-fn]
+  (-> spec :name name append-fn symbol))
+
+(defn spec->class
+  "Returns the symbol for the spec's class"
+  [spec]
+  (make-name spec #(str "i_" %)))
+
+;; -----------------------------------------------------------------------------
+;; primitive types
 
 ;;;; There is no existing Java class for a primitive byte array
 (def Bytes (class (byte-array [1 2])))
-
-(defrecord SpecType [name type type-symbol coercion])
 
 (def type-map
   (reduce

@@ -12,6 +12,9 @@
   (:import spark.spec_tacular.spec.Spec
            spark.spec_tacular.spec.SpecType))
 
+;; -----------------------------------------------------------------------------
+;; types
+
 (t/defalias SpecInstance
   "The broadest type for a spec instance, but it is
   preferable to use an alias defined via [[defspec]]."
@@ -24,30 +27,16 @@
 (t/defalias Item
   "The type of a field in a spec"
   '{:name t/Keyword
-    :type '[(t/U (t/Val :one) (t/Val :many))
-            SpecName]})
+    :type '[(t/U ':one ':many) SpecName]})
 
 (t/defalias SpecT
   "The type of a spec"
   (t/HMap :mandatory {:name SpecName}
-          :optional {:elements (t/Seqable SpecName)
-                     :items (t/Seqable Item)}))
+          :optional  {:elements (t/Seqable SpecName)
+                      :items (t/Seqable Item)}))
 
 ;; -----------------------------------------------------------------------------
-
-(t/ann ^:no-check get-item [SpecT t/Keyword -> Item])
-(defn ^:no-doc get-item [spec kw] 
-  "returns the item in spec with the name kw"
-  (assert (keyword? kw) (str "not a keyword: " kw))
-  (->> spec :items (filter #(= (name (:name %)) (name kw))) first))
-
-(defn- coerce [spec kw val] 
-  (let [{[cardinality typ] :type :as item} (get-item spec kw)]
-    (if (and item val) ;; this is defined in the spec, and the item is non-nil
-      (case cardinality
-        :one ((or (-> type-map typ :coercion) identity) val)
-        :many (vec (map #((or (-> type-map typ :coercion) identity) %) val)))
-      val)))
+;; multimethods
 
 (defn- resolve-fn [o & rest]
   (cond
@@ -62,46 +51,103 @@
   by [[defspec]] or [[defunion]], returns that spec or union,
   otherwise `nil`."
   resolve-fn)
-
-(defmethod get-spec :default [_] nil) ;; TODO
+(defmethod get-spec :default [_] nil)
 
 (t/ann ^:no-check get-type [(t/U SpecInstance t/Keyword) -> SpecType])
 (defmulti get-type
-  "Returns a SpecType record containing the `name` of the type, the
-  class `type`, a symbol `type-symbol` that would eval to the
+  "Returns a [[SpecType]] record containing the `name` of the type,
+  the class `type`, a symbol `type-symbol` that would eval to the
   `type` (useful for macros), and possibly a `coercion` function."
   resolve-fn)
 (defmethod get-type :default [x] (get type-map x))
 
 (t/ann ^:no-check get-ctor [t/Keyword -> [t/Any -> SpecInstance]])
-(defmulti ^:no-doc get-ctor identity)
-
-(defmulti ^:no-doc get-map-ctor
-  "If the keyword or class names a Spec MySpec,
-   returns a map->MySpec map factory fn-name." 
-  resolve-fn)
-
-(defmulti ^:no-doc get-spec-class
-  "returns the class of the record type representing the given spec name, 
-   or nil (if it is an union spec, it won't have a corresponding class)"
+(defmulti ^:no-doc get-ctor
+  "Returns the ctor for the given spec name."
   identity)
 
+(defmulti ^:no-doc get-map-ctor
+  "Returns a map-><SpecName> map factory for the given spec name."
+  identity)
+
+(defmulti ^:no-doc get-spec-class
+  "Returns the class of the record type representing the given spec name,
+   or nil (if it is an union spec, it won't have a corresponding class)"
+  identity)
 (defmethod get-spec-class :default [_] nil)
 
 (defmulti database-coercion
-  "Returns the coercion function that maps an object of a known
-  database type (currently `datomic.query.EntityMap`) to a map that
-  can be used in a spec constructor.  Defaults to `nil` if the object
-  does not come from a known database type."
+  "Returns the coercion function that maps an object of a known database
+  type (currently `datomic.query.EntityMap`) to a map that can be used
+  in a spec constructor.  Defaults to `nil` if the object does not come
+  from a known database type."
   (fn [o] (type o)))
 (defmethod database-coercion :default [_] nil)
 
 (doseq [[k v] type-map]
   (defmethod get-spec-class k [_] (:type v)))
 
+;; -----------------------------------------------------------------------------
+;; helpers
+
+(t/ann ^:no-check get-item [SpecT t/Keyword -> Item])
+(defn ^:no-doc get-item
+  "Returns the [[Item]] in `spec` with the name `kw`"
+  [spec kw]
+  (assert (keyword? kw) (str "not a keyword: " kw))
+  (->> spec :items (some #(when (-> % :name name (= (name kw))) %))))
+
+(t/ann ^:no-check primitive? [t/Keyword -> t/Bool])
+(defn primitive?
+  "Returns `true` if the given spec name is primitive (i.e. is part of
+  the base type environment and not defined as a spec), `false`
+  otherwise.  See [[defspec]] for a list of primitive type keywords."
+  [spec-name]
+  (boolean (contains? core-types spec-name)))
+
+;; Item -> (t/U (t/Val :non-rec) (t/Val :rec))
+(t/ann ^:no-check recursiveness [Item -> (t/U ':non-rec ':rec)])
+(defn recursiveness
+  "Returns `:non-rec` if the given item is [[primitive?]], `:rec` otherwise."
+  [{[_ t] :type}]
+  (if (primitive? t) :non-rec :rec)) ;; TODO
+
+(defn- coerce
+  "Coerces `val` into something that could be put in the `kw` field of
+  `spec`.  Returns `nil` only if the value is coerced to `nil`; i.e.
+  if `val` does not have a `coercion` the `val` is returned unharmed."
+  [spec kw val] 
+  (let [{[cardinality typ] :type :as item} (get-item spec kw)]
+    (if (and item (some? val)) ;; this is defined in the spec, and the item is non-nil
+      (case cardinality
+        :one ((or (-> type-map typ :coercion) identity) val)
+        :many (let [l (map #((or (-> type-map typ :coercion) identity) %) val)]
+                (cond (empty? l) nil, (primitive? typ) (set l), :else l)))
+      val)))
+
+(t/ann ^:no-check has-spec? [t/Any -> t/Bool])
+(defn has-spec?
+  "Returns whether or not the given object has a spec."
+  [o]
+  (some? (get-spec o)))
+
+(t/ann ^:no-check namespace->specs [clojure.lang.Namespace -> (t/Seq SpecT)])
+(t/defn namespace->specs
+  "Returns a sequence containing every spec in the given
+  namespace."
+  [namespace :- clojure.lang.Namespace] :- (t/Seq SpecT)
+  (->> (ns-publics namespace)
+       (map (fn [[sym v]] 
+              (some-> (meta v) :spec-tacular/spec get-spec)))
+       (filter identity)
+       (into #{})))
+
+;; -----------------------------------------------------------------------------
+;; verification
+
 (defn check-component!
   "Checks the field name `k` and its value `v` against the given spec,
-  errors if `v` is not of the correct type."
+  errors if `v` is not of the correct type.  Returns `true` otherwise."
   [spec k v]
   (let [{iname :name [cardinality typ] :type required? :required? precondition :precondition :as item}
         ,(get-item spec k)
@@ -127,43 +173,21 @@
                     :many (every? is-type? v)
                     :one  (is-type? v))
           (throw (ex-info "invalid type"
-                          {:expected-type typ
-                           :actual-type (class v)
-                           :sub-spec-name iname
-                           :spec-name sname}))))))
+                          {:spec spec
+                           :field iname
+                           :expected-type typ
+                           :actual-type (class v)}))))))
   true)
 
-(t/ann ^:no-check has-spec? [t/Any -> t/Bool])
-(defn has-spec?
-  "Returns whether or not the given object has a spec."
-  [o]
-  (some? (get-spec o)))
+;; -----------------------------------------------------------------------------
+;; spec instances (have fields .atmap, .cache, and .db-hash)
 
-(t/ann ^:no-check primitive? [t/Keyword -> t/Bool])
-(defn primitive?
-  "Returns `true` if the given spec name is primitive (i.e. is part of
-  the base type environment and not defined as a spec), `false`
-  otherwise.  See [[defspec]] for a list of primitive type keywords."
-  [spec-name]
-  (boolean (contains? core-types spec-name)))
-
-;; Item -> (t/U (t/Val :non-rec) (t/Val :rec))
-(t/ann ^:no-check recursiveness [Item -> (t/U ':non-rec ':rec)])
-(defn recursiveness
-  "Returns `:non-rec` if the given item is [[primitive?]], `:rec` otherwise."
-  [{[_ t] :type}]
-  (if (primitive? t) :non-rec :rec)) ;; TODO
-
-;;;; Spec->form Functions
-
-(defn- make-name [spec append-fn]
-  (symbol (append-fn (-> spec :name name))))
-(defn- spec->class [spec]
-  (symbol (str "i_" (-> spec :name name))))
-(defn- spec->huh [])
-
-(defn- mk-record [spec]
-  (let [gs (gensym), class-name (spec->class spec)
+(defn- mk-record
+  "Returns syntax that defines a `deftype` for the given `spec` and
+  then some print dispatch functions."
+  [spec]
+  (let [gs (gensym)
+        class-name (spec->class spec)
         {:keys [non-rec]} (group-by recursiveness (:items spec))
         non-rec-kws (cons :db-ref (map :name non-rec))]
     `(do (deftype ~class-name [~'atmap ~'cache ~'db-hash]
@@ -171,15 +195,17 @@
            clojure.lang.IObj
            ;; user doesn't get the map out again so it's fine to put the meta on it
            ;; stipulation -- meta of the SpecInstance is initially inherited from meta of the map
-           (meta [this#] (meta ~'atmap))
-           (withMeta [this# ~gs] (new ~class-name (with-meta ~'atmap ~gs) (atom {}) ~'db-hash))
+           (meta [this#]
+             (meta ~'atmap))
+           (withMeta [this# meta#]
+             (new ~class-name (with-meta ~'atmap meta#) (atom {}) ~'db-hash))
            clojure.lang.ILookup
            (valAt [this# k# not-found#]
              (or (k# (deref ~'cache))
                  (let [val# (.valAt ~'atmap k# not-found#)]
                    (cond
                      (identical? val# not-found#) val#
-                     (some #(= % k#) [~@non-rec-kws]) val#
+                     (contains? #{~@non-rec-kws} k#) val#
                      (not val#) val#
                      :else (let [res# (let [{[arity# type#] :type :as item#} (get-item ~spec k#)]
                                         (case arity#
@@ -187,13 +213,13 @@
                                           :many (when-not (empty? val#)
                                                   (set (mapv #(recursive-ctor type# %) val#)))))]
                              (do (swap! ~'cache assoc k# res#) res#))))))
-           (valAt [~'this ~'k]
-             (.valAt ~'this ~'k nil))
+           (valAt [this# k#]
+             (.valAt this# k# nil))
            clojure.lang.IPersistentMap
            (equiv ~'[this o]
              (and (instance? ~class-name ~'o)
-                  (let [ref1# (.valAt ~'this :db-ref nil), ref2# (.valAt ~'o :db-ref nil)]
-                    (= ref1# ref2#))
+                  (= (.valAt ~'this :db-ref nil)
+                     (.valAt ~'o    :db-ref nil))
                   ~@(for [{iname :name [arity sub-sp-nm] :type link? :link? :as item}
                           (:items spec)]
                       `(= (.valAt ~'this ~iname nil) (.valAt ~'o ~iname nil)))))
@@ -202,12 +228,12 @@
                (when-not (identical? this# v#)
                  (clojure.lang.MapEntry. k# v#))))
            (seq [~gs]
-             (->> [(if-let [ref# (.valAt ~gs :db-ref)]
+             (->> [(if-let [ref# (.valAt ~gs :db-ref nil)] ;; :db-ref can't be false
                      (new clojure.lang.MapEntry :db-ref ref#))
                    ~@(for [{iname :name :as item} (:items spec)]
                        `(when (contains? ~gs ~iname)
                           (.entryAt ~gs ~iname)))]
-                  (filter identity)
+                  (filter identity) ;; entries can't be false/nil
                   (seq)))
            (empty [this#]
              (throw (UnsupportedOperationException. (str "can't create empty " ~(:name spec)))))
@@ -227,11 +253,12 @@
                     nil)))
            (containsKey [this# k#]
              (not (identical? this# (.valAt ~'atmap k# this#))))
-           (iterator [~gs]
+           (iterator [this#]
              (.iterator
               (reduce
                (fn [m# [k1# v1#]]
-                 (assoc m# k1# (.valAt ~gs k1#)))
+                 (if-some [v2# (.valAt this# k1# nil)]
+                   (assoc m# k1# v2#) m#))
                (deref ~'cache) ~'atmap)))
            (cons [this# e#]
              (if (map? e#)
@@ -244,7 +271,9 @@
            clojure.lang.IHashEq
            (hasheq [this#]
              (let [sub-hash# (or ~'db-hash
-                                 (->> (reduce (fn [m# [k# v#]] (assoc m# k# (.valAt this# k#)))
+                                 (->> (reduce (fn [m# [k# v#]]
+                                                (if-some [v2# (.valAt this# k# nil)]
+                                                  (assoc m# k# v2#) m#))
                                               ~'atmap ~'atmap)
                                       (clojure.lang.APersistentMap/mapHasheq)))]
                (bit-xor ~(hash class-name) sub-hash#)))
@@ -297,7 +326,7 @@
                   (with-out-str (print-method v *out*)))))
             (write-item [{iname :name link? :link? [c t] :type :as item}]
               (when (contains? si iname)
-                (->> (if-let [v (iname si)]
+                (->> (if-some [v (iname si)]
                        (case c
                          :one (write-value v link?)
                          :many (str "[" (->> v (map #(write-value % link?)) (join " ")) "]"))
@@ -310,6 +339,9 @@
                 (filter identity)
                 (join " "))
            "})"))))
+
+;; -----------------------------------------------------------------------------
+;; type alias
 
 (defn- spec->union-type [spec]
   `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
@@ -342,6 +374,9 @@
          (defmethod get-type ~(:name spec) [_#] 
            {:name ~(:name spec) :type-symbol '~alias}))))
 
+;; -----------------------------------------------------------------------------
+;; constructors
+
 (defn ^:no-doc non-recursive-ctor
   "builds an instance from another, checking fields, but children
    must all be primitive, non-recursive values or already spark types"
@@ -352,7 +387,7 @@
                          sp items)
         sp-map   (reduce (fn [m k]
                            (let [coerced (coerce spec k (get sp k))]
-                             (if (some? coerced) (assoc m k coerced) m)))
+                             (assoc m k coerced)))
                          defaults (keys sp))
         sp-map   (dissoc sp-map :spec-tacular/spec)
         actual-kws   (keys (dissoc sp :spec-tacular/spec :db-ref))
@@ -385,17 +420,10 @@
                    :let [sub-sp (get sp iname)]
                    :when (some? sub-sp)]
                (let [f (if db-sp identity #(recursive-ctor sub-spec-name %))]
-                 [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))
-            many-prims
-            ,(for [{iname :name [arity sub-spec-name] :type :as item} (:items spec)
-                   :when (and (primitive? sub-spec-name)
-                              (= arity :many))
-                   :let [sub-sp (get sp iname)]
-                   :when (some? sub-sp)]
-               [iname (if (empty? sub-sp) nil (set sub-sp))])]
+                 [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))]
         (non-recursive-ctor (get-map-ctor (:name spec))
                             spec
-                            (into sp (concat sub-kvs many-prims))
+                            (into sp sub-kvs)
                             (when db-sp (hash orig-sp)))))))
 
 (defn- mk-checking-ctor [spec]
@@ -417,48 +445,12 @@
        (defmethod get-ctor ~(:name spec) [_#] ~ctor-name-def)
        (defmethod get-ctor ~spec [_#] ~ctor-name-def))))
 
-(defn ^:no-doc eval-default-values [spec]
-  "like eval, but eval won't go into records types like Spec or Item.
-   we need to eval because we want the Spec record at macro time, but want to defer
-   evalling the fn forms for eg :default-value
-  (we could eval all nested values, not just :default-value, esp
-   if we want to use non-literals in other fields in the future.)"
-  (update-in spec [:items]
-             (fn [items] (doall (map (fn [item] (update-in item [:default-value] eval)) items)))))
-
-(defn- mk-get-spec [spec]
-  (let [gs (gensym)]
-    `(let [~gs (eval-default-values ~spec)]
-       (defmethod get-spec ~(:name spec) [& _#] ~gs)
-       (defmethod get-spec ~gs [& _#] ~gs)
-       (defmethod get-spec ~(spec->class spec) [& _#] ~gs))))
-
-(defn- mk-get-spec-class [spec]
-  (let [class-name (symbol (str "i_" (name (:name spec))))]
-    `(defmethod get-spec-class ~(:name spec) [_#] ~class-name)))
-
 (defn- mk-get-map-ctor [spec]
   (let [class-ctor (str "i_" (name (:name spec)))
         fac-sym    (symbol (str class-ctor "-fixed"))]
     `(do
        (defn ~fac-sym [o# h#] (~(symbol (str class-ctor ".")) o# (atom {}) h#))
-       (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
-       (defmethod get-map-ctor ~(spec->class spec) [_#] ~fac-sym))))
-
-;; when calling get-spec on an union, try using the extra args to narrow down the spec
-;; i.e. it's not always `spec` being returned if we can do better
-(defn- mk-union-get-spec [spec]
-  (let [elements (:elements spec)]
-    `(letfn [;; is spec2 somewhere in spec1's union
-             (member-of-union# [spec1# spec2#]
-               (when (or (contains? (:elements spec1#) (:name spec2#))
-                         (some #(member-of-union# (get-spec %) spec2#) (:elements spec1#)))
-                 spec2#))]
-       (defmethod get-spec ~(:name spec) [_# & [rest#]]
-         (if (some? rest#)
-           (or (member-of-union# ~spec (get-spec rest#))
-               (throw (ex-info "" {})))
-           ~spec)))))
+       (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym))))
 
 (defn- mk-union-get-map-ctor [spec]
   (let [fac-sym (symbol (str "map->i_" (name (:name spec)) "-fixed"))]
@@ -472,20 +464,66 @@
            (assert (contains? ~(:elements spec) subspec-name#) 
                    (str subspec-name#" is not an element of "~(:name spec)))
            ((get-map-ctor subspec-name#) o# h#)))
-       (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym)
-       (defmethod get-map-ctor ~(symbol (name (:name spec))) [_#] ~fac-sym))))
-
-(defn- mk-huh [spec]
-  (let [huh (make-name spec #(str (lower-case %) "?"))
-        class-name (make-name spec #(str "i_" %))]
-    `(do (t/ann ~huh [t/Any ~'-> t/Bool])
-         (defn ~huh [o#] (instance? ~class-name o#)))))
-
-(defn- mk-union-huh [spec]
-  (let [huh (make-name spec #(str (lower-case %) "?"))]
-    `(defn ~huh [o#] (contains? ~(:elements spec) (:name (get-spec o#))))))
+       (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym))))
 
 ;; -----------------------------------------------------------------------------
+;; get-spec
+
+(defn ^:no-doc eval-default-values [spec]
+  "like eval, but eval won't go into records types like Spec or Item.
+   we need to eval because we want the Spec record at macro time, but want to defer
+   evalling the fn forms for eg :default-value
+  (we could eval all nested values, not just :default-value, esp
+   if we want to use non-literals in other fields in the future.)"
+  (update-in spec [:items]
+             (fn [items] (doall (map (fn [item] (update-in item [:default-value] eval)) items)))))
+
+(defn- mk-get-spec [spec]
+  (let [gs (gensym)]
+    `(let [~gs (eval-default-values ~spec)]
+       (defmethod get-spec ~(:name spec) [& _#] ~gs)
+       (defmethod get-spec ~(spec->class spec) [& _#] ~gs))))
+
+(defn- mk-union-get-spec [spec]
+  ;; when calling get-spec on an union, try using the extra args to
+  ;; narrow down the spec i.e. it's not always `spec` being returned if
+  ;; we can do better
+  (let [elements (:elements spec)]
+    `(letfn [;; is spec2 somewhere in spec1's union
+             (member-of-union# [spec1# spec2#]
+               (when (or (contains? (:elements spec1#) (:name spec2#))
+                         (some #(member-of-union# (get-spec %) spec2#) (:elements spec1#)))
+                 spec2#))]
+       (defmethod get-spec ~(:name spec) [_# & [rest#]]
+         (if (some? rest#)
+           (or (member-of-union# ~spec (get-spec rest#))
+               (throw (ex-info "" {})))
+           ~spec)))))
+
+;; -----------------------------------------------------------------------------
+;; get-spec-class
+
+(defn- mk-get-spec-class [spec]
+  (let [class-name (symbol (str "i_" (name (:name spec))))]
+    `(defmethod get-spec-class ~(:name spec) [_#] ~class-name)))
+
+;; -----------------------------------------------------------------------------
+;; huh
+
+(defn- mk-huh [spec]
+  (let [class-name (spec->class spec)
+        huh (make-name spec #(str (lower-case %) "?"))
+        huh-name-ann (with-meta huh (assoc (meta huh) :no-check true))]
+    `(do (t/ann ~huh [t/Any ~'-> t/Bool])
+         (defn ~huh-name-ann [o#] (instance? ~class-name o#)))))
+
+(defn- mk-union-huh [spec]
+  (let [huh (make-name spec #(str (lower-case %) "?"))
+        huh-name-ann (with-meta huh (assoc (meta huh) :no-check true))]
+    `(defn ~huh-name-ann [o#] (contains? ~(:elements spec) (:name (get-spec o#))))))
+
+;; -----------------------------------------------------------------------------
+;; defspec, defunion
 
 (defmacro defspec
   "Defines a spec-tacular spec type.
@@ -550,60 +588,7 @@
          ~(mk-union-huh s))))
 
 ;; -----------------------------------------------------------------------------
-
-(defn ^:no-doc inspect-spec
-  "Produces a json-friendly nested-map representation of a spec.
-   Nesting depth is bounded by the mask."
-  [spec-name mask & [resource-prefix-str schema-prefix-str]]
-  (let [spec (get-spec spec-name)
-        spec-type (if (:elements spec)
-                    :union
-                    (if (primitive? spec-name)
-                      :primitive
-                      :record))
-        resource-kv (when (and resource-prefix-str (= :record spec-type))
-                      {:resource-url (str resource-prefix-str "/"
-                                      (lower-case (name spec-name)))})
-        inspect-kv (when (and schema-prefix-str (#{:record :union} spec-type))
-                     {:schema-url (str schema-prefix-str "/"
-                                          (lower-case (name spec-name)))})]
-    (when mask
-      (merge
-       {:spec-name spec-name
-        :spec-type spec-type}
-       inspect-kv
-       resource-kv
-       (if (map? mask)
-         (if (= :union spec-type)
-           {:expanded true
-            :union-elements (->> (:elements spec)
-                                (map #(inspect-spec % (get mask %) resource-prefix-str schema-prefix-str))
-                                (filter some?))}
-           (let [items
-                 , (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)
-                         :when (iname mask)]
-                     {iname {:many (= cardinality :many)
-                             :required (if (:required? item) true false)
-                             ;; :identity? (:identity? item) ; not meaningful for front-end?
-                             ;; :unique? (:unique? item)
-                             ;; :optional (:optional item)
-                             :spec (inspect-spec sub-sp-nm (iname mask) resource-prefix-str schema-prefix-str)}})]
-             {:expanded true
-              :items (or (reduce merge items) [])}))
-         (if (= :primitive spec-type)
-           {:expanded true}
-           {:expanded false}))))))
-
-(t/ann ^:no-check namespace->specs [clojure.lang.Namespace -> (t/Seq SpecT)])
-(t/defn namespace->specs
-  "Returns a sequence containing every spec in the given
-  namespace."
-  [namespace :- clojure.lang.Namespace] :- (t/Seq SpecT)
-  (->> (ns-publics namespace)
-       (map (fn [[sym v]] 
-              (some-> (meta v) :spec-tacular/spec get-spec)))
-       (filter identity)
-       (into #{})))
+;; diffing
 
 (defn diff
   "Takes two spec instances and returns a vector of three maps created
@@ -641,7 +626,8 @@
          [key (key (first si))])
        (into {})))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; -----------------------------------------------------------------------------
+;; refless
 
 (defn refless
   "Returns a version of the given spec instance with no `:db-ref`s on
@@ -682,10 +668,12 @@
     ,(every? #(refless= (get x %) (get y %))
              (set (concat (keys x) (keys y))))
     (and (set? x) (set? y))
-    ,(loop [l (seq x), s y]
-       (if-let [v1 (first l)]
-         (if-let [v2 (some #(when (= (refless= % v1)) %) s)]
-           (recur (rest l) (clojure.set/difference s #{v2}))
-           false)
-         (empty? s)))
+    ,(and (= (contains? x nil) (contains? y nil))
+          (loop [l (seq (clojure.set/difference x #{nil})),
+                 s (clojure.set/difference y #{nil})]
+            (if-some [v1 (when-first [v1 l] v1)]
+              (if-some [v2 (some #(when (= (refless= % v1)) [%]) s)] ;; wrap false-ish values
+                (recur (rest l) (clojure.set/difference s #{(first v2)}))
+                false)
+              (empty? s))))
     :else (= x y)))

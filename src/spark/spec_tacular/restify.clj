@@ -1,21 +1,61 @@
 (ns spark.spec-tacular.restify
-  (:require [io.pedestal.http :as http]
-            [io.pedestal.http.route :as route]
-            [io.pedestal.http.body-params :as body-params]
-            [io.pedestal.http.route.definition :refer [defroutes expand-routes]]
-            [io.pedestal.log :as log]
-            [io.pedestal.service-tools.dev :as dev]
-            [ring.util.response :as ring-resp]
-            [datomic.api :as d]
-            [cheshire.core :as json]
-            [clojure.string :refer [lower-case]]
+  "Totally unsupported and depricated, but this namespace would be a
+  good start for web serialization."
+  (:require [datomic.api :as d]
             [clojure.walk :as walk]
-            [io.pedestal.interceptor :as i]
-            [spark.spec-tacular.datomic :as spd]
+            [spark.spec-tacular.datomic :as sd]
             [spark.spec-tacular :as sp]
             [clojure-csv.core :as csv]
-            [clojure.string :as str])
+            [clojure.string :as str :refer [lower-case]])
   (:import java.lang.Throwable))
+
+;; -----------------------------------------------------------------------------
+;; inspect-spec
+
+(defn ^:no-doc inspect-spec
+  "Produces a json-friendly nested-map representation of a spec.
+   Nesting depth is bounded by the mask."
+  [spec-name mask & [resource-prefix-str schema-prefix-str]]
+  (let [spec (sp/get-spec spec-name)
+        spec-type (if (:elements spec)
+                    :union
+                    (if (sp/primitive? spec-name)
+                      :primitive
+                      :record))
+        resource-kv (when (and resource-prefix-str (= :record spec-type))
+                      {:resource-url (str resource-prefix-str "/"
+                                      (lower-case (name spec-name)))})
+        inspect-kv (when (and schema-prefix-str (#{:record :union} spec-type))
+                     {:schema-url (str schema-prefix-str "/"
+                                          (lower-case (name spec-name)))})]
+    (when mask
+      (merge
+       {:spec-name spec-name
+        :spec-type spec-type}
+       inspect-kv
+       resource-kv
+       (if (map? mask)
+         (if (= :union spec-type)
+           {:expanded true
+            :union-elements (->> (:elements spec)
+                                (map #(inspect-spec % (get mask %) resource-prefix-str schema-prefix-str))
+                                (filter some?))}
+           (let [items
+                 , (for [{iname :name [cardinality sub-sp-nm] :type :as item} (:items spec)
+                         :when (iname mask)]
+                     {iname {:many (= cardinality :many)
+                             :required (if (:required? item) true false)
+                             ;; :identity? (:identity? item) ; not meaningful for front-end?
+                             ;; :unique? (:unique? item)
+                             ;; :optional (:optional item)
+                             :spec (inspect-spec sub-sp-nm (iname mask) resource-prefix-str schema-prefix-str)}})]
+             {:expanded true
+              :items (or (reduce merge items) [])}))
+         (if (= :primitive spec-type)
+           {:expanded true}
+           {:expanded false}))))))
+
+;; -----------------------------------------------------------------------------
 
 (defn explicitly-tag
   "deep-walks a sp object adding explicit :spec-tacular/spec
@@ -61,15 +101,6 @@
                    (dissoc :spec-tacular-spec))
                o)))
        (sp/recursive-ctor spec-name)))
-
-(defn- handler
-  "Helper function for making Pedestal handlers from request->response
-  functions and some data."
-  [n spec f]
-  (i/handler
-   (keyword (-> *ns* ns-name str) (str (-> spec :name name) \- n)) f))
-
-;; Utility functions for flattening a list of items into CSV output
 
 (defn csv-extract-fields
   "returns list of pairs of colName and colValues, where colName is a list of 'item' names representing the nesting structure.
@@ -125,54 +156,7 @@
         simple-mode (and (fn? simple-repr-fn)
                          (= (-> req :query-params :simple) "true"))
         result (if simple-mode (map simple-repr-fn tagged) tagged)]
-    (ring-resp/response result)))
-
-(defn- mk-coll-get-response-csv
-  "Returns CSV describing the collection, in a ring-response.  :many-arity sub-items are ignored, and instead
-  are output as a list indicating the number of values present."
-  [spec-name sp-list]
-  (-> (csv-build spec-name sp-list)
-    (ring-resp/response)
-    (ring-resp/content-type "text/csv")))
-
-(defn- make-downloadable
-  "utility function which accepts a ring-response and a filename, and wraps
-  the response with a content-disposition: attachment header if filename isn't nil,
-  forcing the response to show up as a save-as. This is useful for export functions.
-  Note that \n, \r,  and double quotes in the file name are disallowed and will be removed"
-  [ring-resp filename]
-  (let [filename-escaped (some-> filename (str/replace "\"" "") (str/replace "\n" "") (str/replace "\r" ""))]
-    (if (and (some? filename-escaped) (some? ring-resp))
-      ; if a filename is provided in the query param (?filename=foo.csv), force a download
-      (ring-resp/header ring-resp "Content-Disposition" (str "attachment; filename=\"" filename-escaped "\""))
-      ; otherwise we want to just return the raw text to display in-browser
-      ring-resp)))
-
-(defn- mk-coll-list-all
-  "Helper function for building handlers that return all elements of a certain spec."
-  [spec get-conn-ctx-fn simple-repr-fn]
-  (handler
-    "coll-list-all"
-    spec
-    (fn [req]
-      (let [db (d/db (:conn (get-conn-ctx-fn)))
-            eids (spd/get-all-eids db spec)
-            spec-name (:name spec)
-            sp-list (map #(spd/db->sp db (d/entity db %) spec-name) eids)
-            format (-> req :query-params :format)
-            filename (some-> req :query-params :filename)]
-        (cond
-          (= format "csv")
-          (-> (mk-coll-get-response-csv spec-name sp-list)
-              (make-downloadable filename))
-          (or (= format "json") (nil? format))
-          (-> (mk-coll-get-response-json req eids sp-list simple-repr-fn)
-              (make-downloadable filename))
-          :else
-          (-> "ERROR: Invalid output format (choices: json, csv)"
-              (ring-resp/response)
-              (ring-resp/content-type "text/plain")
-              (ring-resp/status 400)))))))
+    result))
 
 (defn- ent-of-type?
   "Helper; Given a datomic entity (from d/entity) and a spec,
@@ -181,112 +165,3 @@
   (and (some? ent)
        (not (empty? ent))
        (= (:name spec) (:spec-tacular/spec ent))))
-
-(defn- error-response
-  "Helper for generating plaintext error responses"
-  [code message]
-  (-> (str "ERROR: " message)
-      (ring-resp/response)
-      (ring-resp/status code)
-      (ring-resp/content-type "text/plain")))
-
-(defn- mk-elem-get
-  "Helper function for building handlers that get a particular element
-  according to its EID and type."
-  [spec get-conn-ctx-fn]
-  (handler
-    "elem-get"
-    spec
-    (fn [{{id :id} :path-params}]
-      (let [id (java.lang.Long/valueOf id)
-            db (d/db (:conn (get-conn-ctx-fn)))
-            ent (d/entity db id)]
-        (if (ent-of-type? ent spec)
-          (-> (spd/db->sp db ent (:name spec))
-              (to-json-friendly)
-              (ring-resp/response))
-          (error-response 404 "resource does not exist"))))))
-
-(defn- mk-elem-create
-  "Helper function for building handlers that add a particular element
-  to the database."
-  [spec get-conn-ctx-fn resource-route]
-  (handler
-   "coll-post"
-   spec
-   (fn [req]
-     (let [sp (from-json-friendly (:name spec) (:json-params req))
-           conn-ctx (get-conn-ctx-fn)
-           db (d/db (:conn conn-ctx))]
-       (assert (not (spd/get-eid db sp)) "object must not already be in the db")
-       (let [txs (spd/sp->transactions db sp)
-             _ (log/info :msg "about to commit" :data txs)
-             eid (spd/commit-sp-transactions! conn-ctx txs)
-             url (str resource-route "/" eid)]
-         (ring-resp/created url))))))
-
-(defn- mk-elem-update
-  "Helper function for building handlers that modify a particular
-  element (by EID) in the database with information given in the
-  body."
-  [spec get-conn-ctx-fn]
-  (handler
-    "elem-put"
-    spec
-    (fn [{{id :id} :path-params json :json-params :as req}]
-      (let [id (java.lang.Long/valueOf id)
-            conn-ctx (get-conn-ctx-fn)
-            db (d/db (:conn conn-ctx))
-            new (from-json-friendly (:name spec) json)]
-        (if (ent-of-type? (d/entity db id) spec)
-          (do (spd/commit-sp-transactions! conn-ctx (spd/sp->transactions db new))
-              (-> new (to-json-friendly) (ring-resp/response)))
-          (error-response 404 "resource does not exist"))))))
-
-(defn- mk-elem-delete
-  "Helper function for building handlers that delete a particular
-  element (by EID) in the database with information given in the
-  body."
-  [spec get-conn-ctx-fn]
-  (handler
-    "elem-delete"
-    spec
-    (fn [{{id :id} :path-params}]
-      (let [id (java.lang.Long/valueOf id)
-            db (d/db (:conn (get-conn-ctx-fn)))
-            ent (d/entity db id)]
-        (if (ent-of-type? ent spec)
-          (do (spd/commit-sp-transactions! (get-conn-ctx-fn) [[:db.fn/retractEntity (Long/valueOf id)]])
-              (ring-resp/response ""))
-          (error-response 404 "resource does not exist"))))))
-
-
-(defn make-routes
-  "Creates a list of routes for a RESTful API for the given
-  spec. Allows for get/post on the collection and get/put/delete on
-  individual resources.  expects body-params, html-body and json-body
-  interceptors."
-  [route-above parent-route spec get-conn-ctx-fn & [simple-repr-fn]]
-  [parent-route
-   {:get (mk-coll-list-all spec get-conn-ctx-fn simple-repr-fn)
-    :post (mk-elem-create spec get-conn-ctx-fn (str route-above parent-route))}
-   ["/:id" 
-    {:get (mk-elem-get spec get-conn-ctx-fn)
-     :put (mk-elem-update spec get-conn-ctx-fn)
-     :delete (mk-elem-delete spec get-conn-ctx-fn)}]])
-
-;; TODO: document this better in terms of how
-(defn make-expanded-routes
-  "Creates a list of routes for a RESTful API for the given
-  spec. Allows for get/post on the collection and get/put/delete on
-  individual resources."
-  [route-above spec get-conn-ctx-fn]
-  (let [parent-route (str "/" (-> spec :name name lower-case))
-        api-name (keyword (str (name (:name spec)) "-API"))]
-    (expand-routes
-     [[api-name
-       (conj (make-routes route-above parent-route spec get-conn-ctx-fn)
-             ^:interceptors
-             [(body-params/body-params)
-              http/html-body
-              http/json-body])]])))

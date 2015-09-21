@@ -31,7 +31,8 @@ the following in return:
 ## Quick Start
 
 ```clojure
-[spec-tacular "0.5.0"] ;; unstable
+[spec-tacular "0.6.0-SNAPSHOT"] ;; unstable
+[spec-tacular "0.5.0"]          ;; also unstable
 ```
 
 ```xml
@@ -213,7 +214,7 @@ Although maps work as you would expect in a query, the vector form
 `[<spec> <map>]` is protected syntax meaning the `map` should be
 restricted to things of type `<spec>`.
 
-## Updating from v.0.4.x
+## Updating from v.0.4.x to v0.5.0
 
 * Replace all `spark.sparkspec` namespaces with `spark.spec-tacular`
 * Check all calls to `=` to see if `refless=` is more appropriate
@@ -221,6 +222,14 @@ restricted to things of type `<spec>`.
   database; these are nolonger `=` nor do they hash to the same number
   even if they are otherwise equivalent.
 * Rename `defenum` to `defunion`
+
+## Updating from v.0.5.x to v0.6.0
+
+* `:is-many` fields are now represented as
+  `clojure.lang.PersistentHashSet`s
+* `spark.spec-tacular.restify` was removed, it may come back
+  eventually but in the meantime, if you need web serialization we
+  accept pull requests
 
 ## Short Term Roadmap
 

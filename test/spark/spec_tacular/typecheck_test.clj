@@ -38,3 +38,7 @@
 (defn test-get-all-by-spec-scmenum [db]
   (sd/get-all-by-spec db :ScmEnum))
 
+(t/ann test-huh [t/Any -> t/Bool])
+(defn test-huh [x]
+  (or (ts/scm? x)
+      (ts/scmownsenum? x)))
