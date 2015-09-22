@@ -1158,6 +1158,8 @@
       (cond
         (= cardinality :one)
         ,(cond
+           (and (some? new) (some? old) (:component? item))
+           ,(concat (retract old) (add new))
            (some? new) (add new)
            (some? old) (retract old)
            :else [])

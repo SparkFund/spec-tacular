@@ -973,7 +973,15 @@
         (is (= (count-all-by-spec (db) :Container) 4))
         (retract! {:conn *conn*} (:one c1))
         (is (= (:one (refresh {:conn *conn*} c1) nil)))
-        (is (= (count-all-by-spec (db) :Container) 3))))))
+        (is (= (count-all-by-spec (db) :Container) 3))))
+    (with-test-db simple-schema
+      (let [c1 (create! {:conn *conn*} (container {:number 1
+                                                   :one (container {:number 2})
+                                                   :many [(container {:number 3})
+                                                          (container {:number 4})]}))]
+        (is (= (count-all-by-spec (db) :Container) 4))
+        (assoc! {:conn *conn*} c1 :one (container {:number 5}))
+        (is (= (count-all-by-spec (db) :Container) 4))))))
 
 (deftest test-create!
   (with-test-db simple-schema
