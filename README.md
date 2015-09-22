@@ -48,7 +48,7 @@ the following in return:
 ### Creating Specs
 
 ```clojure
-(require '[spark.spec-tacular :as sp :refer [defspec defunion]])
+(require '[spark.spec-tacular :as sp :refer [defspec defunion defenum]])
 ```
 
 ```clojure
@@ -58,10 +58,13 @@ the following in return:
 (defspec House
   (:link [occupants :is-many :Occupant])
   [mailbox :is-a :Mailbox]               
-  [color :is-a :string :required])       
+  [color :is-a :Color :required])
 
-(defspec Mailbox
-  [has-mail? :is-a :boolean])
+(defenum Color   ;; Houses can only be green or orange..
+  green, orange) ;; makes for interesting neighborhoods
+
+(defspec Mailbox              ;; Hope you don't want to get your mail
+  [has-mail? :is-a :boolean]) ;; cause mailboxes only know if they have mail
 
 ;; Houses can be occupied by either People or Pets.
 (defunion Occupant :Person :Pet)
@@ -117,15 +120,15 @@ the following in return:
 (def conn-ctx {:conn (schema/to-database! (schema/from-namespace *ns*))})
 
 ;; Create a red house:
-(def h (sd/create! conn-ctx (house {:color "Red"})))
+(def h (sd/create! conn-ctx (house {:color :Color/green})))
 
 ;; Some quick semantics:
-(:color h)                             ;; => "Red"
-(= h (house {:color "Red"}))           ;; => false
-(sp/refless= h (house {:color "Red"})) ;; => true
-(assoc h :random-kw 42)                ;; => error
-(set [h h])                            ;; => #{h}
-(set [h (house {:color "Red"})])       ;; => #{h (house {:color "Red"})}
+(:color h)                                    ;; => :Color/green
+(= h (house {:color :Color/green}))           ;; => false
+(sp/refless= h (house {:color :Color/green})) ;; => true
+(assoc h :random-kw 42)                       ;; => error
+(set [h h])                                   ;; => #{h}
+(set [h (house {:color :Color/green})])       ;; => #{h (house {:color :Color/green})}
 
 ;; Let some people move in:
 (def joe     (sd/create! conn-ctx (person {:name "Joe" :age 32})))
@@ -146,7 +149,7 @@ h ;; => is still the simple red house
 ;; They build a mailbox, and try to put it up in another House:
 (let [mb (mailbox {:has-mail? false})
       h1 (sd/assoc! conn-ctx h :mailbox mb)
-      h2 (sd/create! conn-ctx (house {:color "Blue" :mailbox mb}))]
+      h2 (sd/create! conn-ctx (house {:color :Color/orange :mailbox mb}))]
   ;; But since Mailboxes are passed by value,
   ;; the Mailbox get duplicated
   (= (:mailbox h1) (:mailbox h2)) ;; => false
@@ -233,7 +236,6 @@ restricted to things of type `<spec>`.
 
 ## Short Term Roadmap
 
-* Create `defenum` that mirrors Datomic's enumerations
 * Create `defattr` that can be used as a field type to allow shared
 Datomic namespaces between fields of different specs
 
