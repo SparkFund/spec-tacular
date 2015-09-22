@@ -15,11 +15,7 @@
             [clojure.data :as data]
             [clojure.tools.macro :as m]
             [clojure.walk :as walk]
-            [clojure.core.match :refer [match]]
-            [taoensso.timbre :as timbre
-             :refer (log  trace  debug  info  warn  error  fatal  report
-                          logf tracef debugf infof warnf errorf fatalf reportf
-                          spy get-env log-env)]))
+            [clojure.core.match :refer [match]]))
 
 (t/typed-deps spark.spec-tacular)
 
