@@ -230,7 +230,7 @@
 (ct/defspec gen-ESParent  100 (prop-check-components :ESParent))
 (ct/defspec gen-TestSpec6 100 (prop-check-components :TestSpec6))
 (ct/defspec gen-Link      100 (prop-check-components :Link))
-
+(ct/defspec gen-HasEnum   100 (prop-check-components :HasEnum))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; diff

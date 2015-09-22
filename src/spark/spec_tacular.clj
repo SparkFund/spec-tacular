@@ -33,10 +33,9 @@
 
 (t/defalias SpecT
   "The type of a spec"
-  (t/HMap :mandatory {:name SpecName}
-          :optional  {:elements (t/Seqable SpecName)
-                      :items (t/Seqable Item)
-                      :values (t/Seqable t/Keyword)}))
+  (t/U '{:name SpecName :elements (t/Seqable SpecName)}
+       '{:name SpecName :items (t/Seqable Item)}
+       '{:name SpecName :values (t/Seqable t/Keyword)}))
 
 ;; -----------------------------------------------------------------------------
 ;; multimethods
@@ -52,9 +51,18 @@
 
 (t/ann ^:no-check get-spec [t/Any -> (t/Option SpecT)])
 (defmulti get-spec
-  "If the given object is a spec or union, or was defined
-  by [[defspec]] or [[defunion]], returns that spec or union,
-  otherwise `nil`."
+  "Acts like the identity function if sent an actual spec object.
+
+  Otherwise, if there is a spec (defined
+  with [[defspec]], [[defunion]], or [[defenum]]) such that:
+
+  * the spec has the `:name` denoted by the argument, when given a
+  keyword;
+  * the spec instance is an instance of that spec, when given an
+  actual spec instance;
+
+  then returns that spec, otherwise returns `nil`."
+
   resolve-fn)
 (defmethod get-spec :default [_] nil)
 
@@ -106,7 +114,10 @@
 (defn primitive?
   "Returns `true` if the given spec name is primitive (i.e. is part of
   the base type environment and not defined as a spec), `false`
-  otherwise.  See [[defspec]] for a list of primitive type keywords."
+  otherwise.  See [[defspec]] for a list of primitive type keywords.
+
+  Note that all specs defined by `defenum` are considered primitive,
+  since their values are all keywords."
   [spec-name]
   (boolean (or (contains? core-types spec-name)
                (instance? EnumSpec (get-spec spec-name)))))
@@ -373,7 +384,7 @@
     EnumSpec `(t/U ~@(map (fn [val] `'~val) (:values spec)))))
 
 (defn- mk-type-alias
-  "defines an core.typed alias named after the given spec's name"
+  "Defines a core.typed alias named after the given spec's name"
   [spec]
   (let [alias (symbol (str *ns*) (name (:name spec)))
         type  (spec->type spec)]
@@ -510,7 +521,8 @@
        (defmethod get-spec ~(:name spec) [_# & [rest#]]
          (if (some? rest#)
            (or (member-of-union# ~spec (get-spec rest#))
-               (throw (ex-info "internal badness" {:objects (cons _# rest#)})))
+               (throw (ex-info "arguments to get-spec do not have the same spec"
+                               {:obj1 _# :obj2 rest#})))
            ~spec)))))
 
 (defn- mk-enum-get-spec [enum]
@@ -622,7 +634,6 @@
   The resulting enumeration recognizes `:Name/<symbol>` keywords,
   which answer `true` to `name?`.  Enumerations do not define
   constructors as keywords are already Clojure values."
-
   {:added "0.6.0"}
   [& stx]
   (let [e (parse-enum stx)]
@@ -641,7 +652,7 @@
   "Takes two spec instances and returns a vector of three maps created
   by calling `clojure.data/diff` on each item of the spec.
 
-  Only well defined when sp1 and sp2 share the same spec.
+  Only well defined when `sp1` and `sp2` share the same spec.
 
   For `:is-many` fields, expect to see sets of similarities or
   differences in the result, as order should not matter."
