@@ -3,8 +3,7 @@
   with [clojure.test.check.generators](https://github.com/clojure/test.check)"
   (:refer-clojure :exclude [assoc!])
   (:use spark.spec-tacular
-        [spark.spec-tacular.datomic :exclude [db]]
-        spark.spec-tacular.test-utils)
+        [spark.spec-tacular.datomic :exclude [db]])
   (:require [datomic.api :as db]
             [spark.spec-tacular.schema :as schema]
             [clojure.test.check :as tc]
