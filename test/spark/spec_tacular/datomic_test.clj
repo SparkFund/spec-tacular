@@ -10,6 +10,7 @@
   (:require [datomic.api :as db]
             [spark.spec-tacular.datomic :as sd]
             [spark.spec-tacular.schema :as schema]
+            [spark.spec-tacular.generators :as sgen]
             [clj-time.core :as time]
             [clojure.walk :as walk]
             [clojure.core.typed :as t]
@@ -40,6 +41,16 @@
                     (scm2 {:val1 42}))))))
 
 (deftest test-transaction-data
+  (testing "bool"
+    (let [switch (switch {:on? nil})
+          data (transaction-data nil Switch nil {:on? nil})
+          _ (is (= (map last data) [:Switch]))
+          data (transaction-data nil Switch {:db-ref {:eid 1}} {:on? true})
+          _ (is (= data [[:db/add 1 :switch/on? true]]))
+          data (transaction-data nil Switch {:db-ref {:eid 1} :on? true} {:on? false})
+          _ (is (= data [[:db/add 1 :switch/on? false]]))
+          ]))
+
   (testing "Scm2"
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
@@ -158,7 +169,15 @@
         (let [db (db/db *conn*)]
           (do (transaction-data db (get-spec e1) nil e1 tmps)
               (is (= (transaction-data db (get-spec e1) nil e1 tmps)
-                     []))))))))
+                     [])))))))
+
+  (testing "enum"
+    (let [sl1 (spotlight {:color :Color/red
+                          :shaders #{:Color/blue :Color/green}})
+          eid (db/tempid :db.part/user)
+          data (transaction-data nil Spotlight nil sl1 nil)]
+      (is (= (map last data)
+             [:Spotlight :Color/red :Color/blue :Color/green])))))
 
 (deftest test-commit-sp-transactions!
   (let [scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})})
@@ -955,7 +974,15 @@
         (is (= (count-all-by-spec (db) :Container) 4))
         (retract! {:conn *conn*} (:one c1))
         (is (= (:one (refresh {:conn *conn*} c1) nil)))
-        (is (= (count-all-by-spec (db) :Container) 3))))))
+        (is (= (count-all-by-spec (db) :Container) 3))))
+    (with-test-db simple-schema
+      (let [c1 (create! {:conn *conn*} (container {:number 1
+                                                   :one (container {:number 2})
+                                                   :many [(container {:number 3})
+                                                          (container {:number 4})]}))]
+        (is (= (count-all-by-spec (db) :Container) 4))
+        (assoc! {:conn *conn*} c1 :one (container {:number 5}))
+        (is (= (count-all-by-spec (db) :Container) 4))))))
 
 (deftest test-create!
   (with-test-db simple-schema
@@ -1228,49 +1255,70 @@
                 [:Birthday {:date ?date}])
              #{[(time/date-time 2015 7 24)]})))))
 
+(deftest test-enum
+  (with-test-db simple-schema
+    (let [conn-ctx {:conn *conn*}
+          sl1-e (spotlight {:color :Color/red
+                            :shaders #{:Color/blue :Color/green}})
+          sl2-e (spotlight {:color :Color/green
+                            :shaders #{:Color/orange :Color/red}})]
+      (let [sl1-a (create! conn-ctx sl1-e)
+            sl2-a (create! conn-ctx sl2-e)]
+        (is sl1-a)
+        (is (= (:color sl1-a) :Color/red))
+        (is (= (:shaders sl1-a) #{:Color/blue :Color/green}))
+        (is (refless= sl1-a sl1-e))
+        (is (refless= sl2-a sl2-e))
+        (is (not (= sl1-a sl2-a)))
+        (is (not (refless= sl1-a sl2-a)))
+
+        (is (= (q :find [:Color ...] :in (db) :where
+                  [:Spotlight {:color %}])
+               #{:Color/red :Color/green}))
+        (is (= (q :find :Color :in (db) :where
+                  [:Spotlight {:shaders %}])
+               #{[:Color/red] [:Color/green] [:Color/orange] [:Color/blue]}))
+        (is (= (q :find [:Color ...] :in (db) :where
+                  [:Spotlight {:color %}]
+                  [:Spotlight {:shaders %}])
+               #{:Color/red :Color/green}))
+        (is (= (let [color :Color/green]
+                 (q :find :Spotlight :in (db) :where
+                    [% {:color color}]))
+               #{[sl2-a]}))
+
+        (is (refless= (assoc! conn-ctx sl2-a :color nil)
+                      (assoc sl2-a :color nil)))
+        (is (refless= (assoc! conn-ctx sl2-a :shaders nil)
+                      (assoc sl2-a :color nil :shaders nil)))))))
+
+(deftest test-boolean
+  (with-test-db simple-schema
+    (let [conn-ctx {:conn *conn*}
+          switch (switch {:on? nil})
+          switch (create! conn-ctx switch)
+          _ (is (= (:on? switch) nil))
+          switch (assoc! conn-ctx switch :on? true)
+          _ (is (= (:on? switch) true))
+          data (transaction-data (sd/db conn-ctx) Switch switch {:on? false})
+          switch (assoc! conn-ctx switch :on? false)
+          _ (is (= (:on? switch) false))])))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
 
-(defn check-create! [conn-ctx original]
-  (let [actual (create! conn-ctx original)]
-    (if (refless= actual original) actual
-        (throw (ex-info "creation mismatch: output doesn't reflect input" 
-                        {:actual actual :expected original})))))
-
-(defn check-update!
-  "update-subset is a subset of key-vals from original-db-value to try updating.
-  returns {:ok true} or {:error {reasons}}"
-  [conn-ctx original updates]
-  (let [expected (merge original updates)
-        actual   (update! conn-ctx original updates)]
-    (if (refless= expected actual) actual
-        (throw (ex-info "update mismatch, output is not equivalent to input"
-                        {:original original :updates updates :actual actual})))))
-
-(defn prop-check-components
-  "property for verifying that check-component!, create!, and update! work correctly"
-  [spec-key]
+(defn- conn-ctx-thunk []
   (with-test-db simple-schema
-    (let [spec     (get-spec spec-key)
-          fields   (map :name (:items spec))
-          conn-ctx {:conn *conn*}]
-      (prop/for-all [{:keys [original updates]}
-                     (gen/bind (instance-generator spec-key)
-                       (fn [sp]
-                         (gen/bind (update-generator (get-spec sp))
-                           (fn [updates]
-                             (gen/return {:original sp :updates updates})))))]
-        (and (every? #(check-component! spec % (get original %)) fields)
-             (when-let [created (check-create! conn-ctx original)]
-               (or (= created :skip) (check-update! conn-ctx created updates))))))))
+    {:conn *conn*}))
 
-(ct/defspec gen-Scm2 10 (prop-check-components :Scm2))
-(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
-(ct/defspec gen-ScmM 10 (prop-check-components :ScmM))
-(ct/defspec gen-ScmParent 10 (prop-check-components :ScmParent))
-(ct/defspec gen-ScmMWrap 10 (prop-check-components :ScmMWrap))
-(ct/defspec gen-Scm 20 (prop-check-components :Scm))
-(ct/defspec gen-ScmLink 50 (prop-check-components :ScmLink))
+(ct/defspec gen-Scm2 10        (sgen/prop-creation-update conn-ctx-thunk :Scm2))
+(ct/defspec gen-ScmOwnsEnum 10 (sgen/prop-creation-update conn-ctx-thunk :ScmOwnsEnum))
+(ct/defspec gen-ScmM 10        (sgen/prop-creation-update conn-ctx-thunk :ScmM))
+(ct/defspec gen-ScmParent 10   (sgen/prop-creation-update conn-ctx-thunk :ScmParent))
+(ct/defspec gen-ScmMWrap 10    (sgen/prop-creation-update conn-ctx-thunk :ScmMWrap))
+(ct/defspec gen-Scm 20         (sgen/prop-creation-update conn-ctx-thunk :Scm))
+(ct/defspec gen-ScmLink 50     (sgen/prop-creation-update conn-ctx-thunk :ScmLink))
+(ct/defspec gen-Spotlight 50   (sgen/prop-creation-update conn-ctx-thunk :Spotlight))
 
 (defn prop-create-graph [spec-key]
   (let [spec (get-spec spec-key)

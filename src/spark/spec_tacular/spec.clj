@@ -11,6 +11,7 @@
 (defrecord Item [name type precondition required? unique? optional? identity? default-value])
 (defrecord UnionSpec [name elements])
 (defrecord SpecType [name type type-symbol coercion])
+(defrecord EnumSpec [name values])
 
 ;; -----------------------------------------------------------------------------
 ;; printing
@@ -72,4 +73,4 @@
            [:uri java.net.URI `java.net.URI nil]
            [:bytes Bytes `Bytes nil]])) 
 
-(def core-types (into #{} (keys type-map)))
+(def ^:constant core-types (into #{} (keys type-map)))

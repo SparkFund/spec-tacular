@@ -42,4 +42,21 @@
 (defn test-huh [x]
   (or (ts/scm? x)
       (ts/scmownsenum? x)
-      (ts/animal? x)))
+      (ts/animal? x)
+      (ts/color? x)))
+
+(t/ann ex-color ts/Color)
+(def ex-color :Color/red)
+
+(t/ann ex-spotlights (t/Vec ts/Spotlight))
+(def ex-spotlights
+  [(ts/spotlight {})
+   (ts/spotlight {:color :Color/red})
+   (ts/spotlight {:color :Color/green
+                  :shaders #{:Color/orange}})])
+
+(t/ann test-color-enum [sd/Database -> (t/Set ts/Color)])
+(defn test-color-enum [db]
+  (sd/q :find [:Color ...] :in (db) :where
+        [:Spotlight {:color %}]
+        [:Spotlight {:shaders %}]))

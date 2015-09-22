@@ -7,9 +7,11 @@
             [clojure.walk :as walk]
             [clojure.pprint :as pp]
             [clj-time.core :as time]
-            [spark.spec-tacular.grammar :refer [parse-spec parse-union]]
+            [spark.spec-tacular.grammar :refer :all]
             [spark.spec-tacular.spec :refer :all])
   (:import spark.spec_tacular.spec.Spec
+           spark.spec_tacular.spec.UnionSpec
+           spark.spec_tacular.spec.EnumSpec
            spark.spec_tacular.spec.SpecType))
 
 ;; -----------------------------------------------------------------------------
@@ -31,9 +33,9 @@
 
 (t/defalias SpecT
   "The type of a spec"
-  (t/HMap :mandatory {:name SpecName}
-          :optional  {:elements (t/Seqable SpecName)
-                      :items (t/Seqable Item)}))
+  (t/U '{:name SpecName :elements (t/Seqable SpecName)}
+       '{:name SpecName :items (t/Seqable Item)}
+       '{:name SpecName :values (t/Seqable t/Keyword)}))
 
 ;; -----------------------------------------------------------------------------
 ;; multimethods
@@ -41,15 +43,26 @@
 (defn- resolve-fn [o & rest]
   (cond
     (:spec-tacular/spec o) (:spec-tacular/spec o) 
-    (instance? Spec o) (:name o)
+    (or (instance? Spec o)
+        (instance? EnumSpec o)
+        (instance? UnionSpec o)) (:name o)
     (or (keyword? o) (= (class o) (class (class o)))) o
     :else (class o)))
 
 (t/ann ^:no-check get-spec [t/Any -> (t/Option SpecT)])
 (defmulti get-spec
-  "If the given object is a spec or union, or was defined
-  by [[defspec]] or [[defunion]], returns that spec or union,
-  otherwise `nil`."
+  "Acts like the identity function if sent an actual spec object.
+
+  Otherwise, if there is a spec (defined
+  with [[defspec]], [[defunion]], or [[defenum]]) such that:
+
+  * the spec has the `:name` denoted by the argument, when given a
+  keyword;
+  * the spec instance is an instance of that spec, when given an
+  actual spec instance;
+
+  then returns that spec, otherwise returns `nil`."
+
   resolve-fn)
 (defmethod get-spec :default [_] nil)
 
@@ -101,9 +114,13 @@
 (defn primitive?
   "Returns `true` if the given spec name is primitive (i.e. is part of
   the base type environment and not defined as a spec), `false`
-  otherwise.  See [[defspec]] for a list of primitive type keywords."
+  otherwise.  See [[defspec]] for a list of primitive type keywords.
+
+  Note that all specs defined by `defenum` are considered primitive,
+  since their values are all keywords."
   [spec-name]
-  (boolean (contains? core-types spec-name)))
+  (boolean (or (contains? core-types spec-name)
+               (instance? EnumSpec (get-spec spec-name)))))
 
 ;; Item -> (t/U (t/Val :non-rec) (t/Val :rec))
 (t/ann ^:no-check recursiveness [Item -> (t/U ':non-rec ':rec)])
@@ -132,13 +149,16 @@
   (some? (get-spec o)))
 
 (t/ann ^:no-check namespace->specs [clojure.lang.Namespace -> (t/Seq SpecT)])
-(t/defn namespace->specs
-  "Returns a sequence containing every spec in the given
-  namespace."
-  [namespace :- clojure.lang.Namespace] :- (t/Seq SpecT)
+(defn namespace->specs
+  "Returns a sequence containing every spec in the given namespace."
+  [namespace]
   (->> (ns-publics namespace)
        (map (fn [[sym v]] 
-              (some-> (meta v) :spec-tacular/spec get-spec)))
+              (some-> (meta v)
+                      (#(or (:spec-tacular/spec %)
+                            (:spec-tacular/union %)
+                            (:spec-tacular/enum %)))
+                      get-spec)))
        (filter identity)
        (into #{})))
 
@@ -343,36 +363,39 @@
 ;; -----------------------------------------------------------------------------
 ;; type alias
 
-(defn- spec->union-type [spec]
-  `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec))))
-
 (defn- spec->record-type [spec]
   (let [opts (for [{iname :name required? :required? [arity sub-sp-nm] :type :as item}
                    (:items spec)]
-               (let [item-type (if (primitive? sub-sp-nm)
-                                 (get-in type-map [sub-sp-nm :type-symbol])
-                                 (symbol (str *ns*) (name sub-sp-nm)))]
+               (let [item-type (or (get-in type-map [sub-sp-nm :type-symbol])
+                                   (symbol (str *ns*) (name sub-sp-nm)))]
                  [iname (let [t (case arity
                                   :one  item-type
                                   :many (list `t/Set item-type))]
-                          (if required? t (list `t/Option t)))]))]
-    `(t/HMap
-      ;; FIXME: This should be true but waiting on 
-      ;; http://dev.clojure.org/jira/browse/CTYP-198
-      :complete? false 
-      :optional ~(into {} opts)))) ;; TODO: aren't there required fields?
+                          (if required? t (list `t/Option t)))]))
+        opts (cons [:db-ref `(t/Option t/Any)] opts)
+        opts (cons [:spec-tacular/spec `(t/Option t/Keyword)] opts)]
+    ;; TODO: aren't there required fields?
+    `(t/HMap :complete? true :optional ~(into {} opts)))) 
 
 (defn- spec->type [spec]
-  (if (:elements spec) (spec->union-type spec) (spec->record-type spec)))
+  (condp instance? spec
+    Spec (spec->record-type spec)
+    UnionSpec `(t/U ~@(map #(symbol (str *ns*) (name %)) (:elements spec)))
+    EnumSpec `(t/U ~@(map (fn [val] `'~val) (:values spec)))))
 
 (defn- mk-type-alias
-  "defines an core.typed alias named after the given spec's name"
+  "Defines a core.typed alias named after the given spec's name"
   [spec]
   (let [alias (symbol (str *ns*) (name (:name spec)))
         type  (spec->type spec)]
     `(do (t/defalias ~alias ~type)
          (defmethod get-type ~(:name spec) [_#] 
-           {:name ~(:name spec) :type-symbol '~alias}))))
+           ~(condp instance? spec
+              Spec      (map->SpecType {:name (:name spec) :type-symbol alias})
+              UnionSpec (map->SpecType {:name (:name spec) :type-symbol alias})
+              EnumSpec  (map->SpecType {:name (:name spec)
+                                        :type clojure.lang.Keyword
+                                        :type-symbol alias}))))))
 
 ;; -----------------------------------------------------------------------------
 ;; constructors
@@ -406,44 +429,45 @@
    Any sub-sp that is already a SpecInstance of the correct type is acceptable as well."
   (let [spec  (get-spec spec-name orig-sp)
         db-sp (database-coercion orig-sp)
-        sp    (or (database-coercion orig-sp) orig-sp)]
+        sp    (or (database-coercion orig-sp) orig-sp)
+        spec-class (get-spec-class (:name spec))]
     (when-not (and spec sp)
       (throw (ex-info (str "cannot create " (name spec-name)) {:sp orig-sp})))
-    (when-not (instance? clojure.lang.IPersistentMap sp)
-      (throw (ex-info "sp is not a map" {:spec (:name spec) :sp sp})))
-    (if (if-let [spec-class (get-spec-class (:name spec))]
-          (instance? spec-class sp))
+    (if (instance? spec-class sp)
       sp
-      (let [sub-kvs
-            ,(for [{iname :name [arity sub-spec-name] :type :as item} (:items spec)
-                   :when (not (primitive? sub-spec-name))
-                   :let [sub-sp (get sp iname)]
-                   :when (some? sub-sp)]
-               (let [f (if db-sp identity #(recursive-ctor sub-spec-name %))]
-                 [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))]
-        (non-recursive-ctor (get-map-ctor (:name spec))
-                            spec
-                            (into sp sub-kvs)
-                            (when db-sp (hash orig-sp)))))))
+      (if (instance? spec-class db-sp)
+        db-sp
+        (do (when-not (instance? clojure.lang.IPersistentMap sp)
+              (throw (ex-info "sp is not a map" {:spec (:name spec) :sp sp})))
+            (let [sub-kvs
+                  ,(for [{iname :name [arity sub-spec-name] :type :as item} (:items spec)
+                         :when (not (primitive? sub-spec-name))
+                         :let [sub-sp (get sp iname)]
+                         :when (some? sub-sp)]
+                     (let [f (if db-sp identity #(recursive-ctor sub-spec-name %))]
+                       [iname (case arity :one (f sub-sp) :many (map f sub-sp))]))]
+              (non-recursive-ctor (get-map-ctor (:name spec))
+                                  spec
+                                  (into sp sub-kvs)
+                                  (when db-sp (hash orig-sp)))))))))
 
 (defn- mk-checking-ctor [spec]
   "For use in macros, creates a constructor that checks
   precondititions and types."
   (let [ctor-name (make-name spec lower-case)
         ctor-name-ann (with-meta ctor-name (assoc (meta ctor-name) :no-check true))
-        ctor-name-def (with-meta ctor-name (assoc (meta ctor-name) :spec-tacular/spec (:name spec)))
         core-type (-> spec :name name symbol)]
     `(do
        (t/ann ~ctor-name-ann
               ~(if (empty? (:items spec))
                  ['-> core-type]
                  [core-type '-> core-type]))
-       (defn ~ctor-name-def
+       (defn ~ctor-name
          ~(str "deep-walks a nested map structure to construct a "
               (-> spec :name name))
          [& [sp#]] (recursive-ctor ~(:name spec) (if (some? sp#) sp# {})))
-       (defmethod get-ctor ~(:name spec) [_#] ~ctor-name-def)
-       (defmethod get-ctor ~spec [_#] ~ctor-name-def))))
+       (defmethod get-ctor ~(:name spec) [_#] ~ctor-name)
+       (defmethod get-ctor ~spec [_#] ~ctor-name))))
 
 (defn- mk-get-map-ctor [spec]
   (let [class-ctor (str "i_" (name (:name spec)))
@@ -457,7 +481,7 @@
     `(do
        ;; the "map ctor" for an union means it's arg needs to 
        ;; be a tagged map or a record type of one of the union's ctors.
-       (defn ~(with-meta fac-sym (assoc (meta fac-sym) :spec-tacular/spec (:name spec))) [o# h#]
+       (defn ~fac-sym [o# h#]
          (let [subspec-name# (:name (get-spec o#))]
            (assert subspec-name#
                    (str "could not find spec for "o#))
@@ -497,31 +521,42 @@
        (defmethod get-spec ~(:name spec) [_# & [rest#]]
          (if (some? rest#)
            (or (member-of-union# ~spec (get-spec rest#))
-               (throw (ex-info "" {})))
+               (throw (ex-info "arguments to get-spec do not have the same spec"
+                               {:obj1 _# :obj2 rest#})))
            ~spec)))))
+
+(defn- mk-enum-get-spec [enum]
+  (let [values (:values enum)]
+    `(do ~@(map (fn [val] `(defmethod get-spec ~val [& _#] ~enum)) values)
+         (defmethod get-spec ~(:name enum) [& _#] ~enum))))
 
 ;; -----------------------------------------------------------------------------
 ;; get-spec-class
 
 (defn- mk-get-spec-class [spec]
-  (let [class-name (symbol (str "i_" (name (:name spec))))]
-    `(defmethod get-spec-class ~(:name spec) [_#] ~class-name)))
+  (cond
+    (instance? Spec spec)
+    ,(let [class-name (symbol (str "i_" (name (:name spec))))]
+       `(defmethod get-spec-class ~(:name spec) [_#] ~class-name))
+    (instance? EnumSpec spec)
+    ,`(defmethod get-spec-class ~(:name spec) [_#] clojure.lang.Keyword)))
 
 ;; -----------------------------------------------------------------------------
 ;; huh
 
-(defn- mk-huh [spec]
-  (let [class-name (spec->class spec)
-        huh (make-name spec #(str (lower-case %) "?"))
-        huh-name-ann (with-meta huh (assoc (meta huh) :no-check true))]
+(defn- mk-huh [thing]
+  (let [huh (make-name thing #(str (lower-case %) "?"))
+        huh-name-ann (with-meta huh (assoc (meta huh) :no-check true))
+        gs (gensym)]
     `(do (t/ann ~huh [t/Any ~'-> t/Bool])
-         (defn ~huh-name-ann [o#] (instance? ~class-name o#)))))
-
-(defn- mk-union-huh [spec]
-  (let [huh (make-name spec #(str (lower-case %) "?"))
-        huh-name-ann (with-meta huh (assoc (meta huh) :no-check true))]
-    `(do (t/ann ~huh-name-ann [t/Any ~'-> t/Bool])
-         (defn ~huh [o#] (contains? ~(:elements spec) (:name (get-spec o#)))))))
+         (defn ~huh-name-ann [~gs]
+           ~(cond
+              (instance? Spec thing)
+              ,`(instance? ~(spec->class thing) ~gs)
+              (instance? UnionSpec thing)
+              ,`(contains? ~(:elements thing) (:name (get-spec ~gs)))
+              (instance? EnumSpec thing)
+              ,`(contains? ~(:values thing) ~gs))))))
 
 ;; -----------------------------------------------------------------------------
 ;; defspec, defunion
@@ -560,7 +595,10 @@
   database-id}` containing the entity's `:db/id`."
   [& stx]
   (let [s (parse-spec stx)]
-    `(do ~(mk-type-alias s)
+    `(do ~(let [spec-name (:name s)
+                spec-sym  (-> s :name name symbol)]
+            `(def ~(with-meta spec-sym {:spec-tacular/spec spec-name}) ~s))
+         ~(mk-type-alias s)
          ~(mk-record s)
          ~(mk-get-map-ctor s)
          ~(mk-huh s)
@@ -577,16 +615,35 @@
 
   where each SpecName is another spec to be added to the union."
   [& stx]
-  (let [s (parse-union stx)]
-    `(do ~(let [spec-name (:name s)
-                spec-sym  (-> s :name name symbol)]
-            `(def ~(with-meta spec-sym 
-                     (assoc (meta spec-sym) :spec-tacular/spec spec-name))
-               ~spec-name))
-         ~(mk-type-alias s)
-         ~(mk-union-get-map-ctor s)
-         ~(mk-union-get-spec s)
-         ~(mk-union-huh s))))
+  (let [u (parse-union stx)]
+    `(do ~(let [spec-name (:name u)
+                spec-sym  (-> u :name name symbol)]
+            `(def ~(with-meta spec-sym {:spec-tacular/union spec-name}) ~u))
+         ~(mk-type-alias u)
+         ~(mk-union-get-map-ctor u)
+         ~(mk-union-get-spec u)
+         ~(mk-huh u))))
+
+(defmacro defenum
+  "Defines an enumeration of values under a parent name.
+
+  ```
+  (defenum Name symbol ...)
+  ```
+
+  The resulting enumeration recognizes `:Name/<symbol>` keywords,
+  which answer `true` to `name?`.  Enumerations do not define
+  constructors as keywords are already Clojure values."
+  {:added "0.6.0"}
+  [& stx]
+  (let [e (parse-enum stx)]
+    `(do ~(let [enum-name (-> e :name)
+                enum-sym  (-> enum-name name symbol)]
+            `(def ~(with-meta enum-sym {:spec-tacular/enum enum-name}) ~e))
+         ~(mk-type-alias e)
+         ~(mk-enum-get-spec e)
+         ~(mk-huh e)
+         ~(mk-get-spec-class e))))
 
 ;; -----------------------------------------------------------------------------
 ;; diffing
@@ -595,7 +652,7 @@
   "Takes two spec instances and returns a vector of three maps created
   by calling `clojure.data/diff` on each item of the spec.
 
-  Only well defined when sp1 and sp2 share the same spec.
+  Only well defined when `sp1` and `sp2` share the same spec.
 
   For `:is-many` fields, expect to see sets of similarities or
   differences in the result, as order should not matter."
@@ -642,13 +699,15 @@
 (defn- spec-refless= [x y]
   (if-let [x-spec (get-spec x)]
     (and (= x-spec (get-spec y))
-         (every? (fn [{iname :name [arity _] :type}]
-                   (let [v1 (iname x), v2 (iname y)]
-                     (case arity
-                       :one (spec-refless= v1 v2)
-                       :many (refless= v1 v2))))
-                 (:items x-spec)))
-    (= x y)))
+         (if-let [items (:items x-spec)] ;; Spec
+           (every? (fn [{iname :name [arity _] :type}]
+                     (let [v1 (iname x), v2 (iname y)]
+                       (case arity
+                         :one (spec-refless= v1 v2)
+                         :many (refless= v1 v2))))
+                   items)
+           (= x y))) ;; EnumSpec
+    (= x y))) ;; no spec
 
 (defn refless=
   "Given any walkable collection, returns `true` if the two

@@ -3,8 +3,7 @@
   with [clojure.test.check.generators](https://github.com/clojure/test.check)"
   (:refer-clojure :exclude [assoc!])
   (:use spark.spec-tacular
-        [spark.spec-tacular.datomic :exclude [db]]
-        spark.spec-tacular.test-utils)
+        [spark.spec-tacular.datomic :exclude [db]])
   (:require [datomic.api :as db]
             [spark.spec-tacular.schema :as schema]
             [clojure.test.check :as tc]
@@ -24,7 +23,8 @@
    :double  (fn [_] (gen/fmap #(float (/ % 100.0)) gen/int))
    :bigdec  (fn [_] (gen/fmap #(/ (java.math.BigDecimal. %) 100.0M) gen/int))
    :instant (fn [_] (gen/fmap #(java.util.Date. %) gen/int))
-   :uuid    (fn [_] (gen/fmap #(java.util.UUID/nameUUIDFromBytes %) gen/bytes))
+   :uuid    (fn [_] (gen/fmap #(java.util.UUID/nameUUIDFromBytes %)
+                              (gen/resize 10 gen/bytes)))
    :uri     (fn [_] (gen/fmap #(java.net.URI. %) gen/string-alpha-numeric))
    :bytes   (fn [_] gen/bytes)
    :ref     (fn [_] gen/simple-type-printable)})
@@ -35,7 +35,7 @@
   (let [generator ,((get spec-gen-env type-key) spec-gen-env)
         maybe-optionize ,(if required identity #(gen/one-of [(gen/return nil) %]))
         maybe-unique ,(if (and unique? (= type-key :string))
-                        #(gen/bind % (fn [s] (gen/return (str (str (gensym) s)))))
+                        #(gen/bind % (fn [s] (gen/return (str (gensym) s))))
                         identity)]
     (assert generator (str "missing definition of sub-generator: "
                            type-key))
@@ -49,21 +49,29 @@
                maybe-optionize)]))
 
 (defn- spec-gen [spec spec-gen-env & [pre]]
-  (if (:elements spec)
-    (gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
-    (gen/bind (gen/frequency [[8 (gen/return true)] [2 (gen/return false)]])
-      (fn [use-pre?]
-        (if-let [insts (and use-pre? pre (get @pre (:name spec)))]
-          (gen/return (rand-nth insts))
-          (let [kvs (->> (:items spec)
-                         (map #(item-gen % spec-gen-env)))
-                mapgen (apply gen/hash-map (apply concat kvs))
-                factory (get-ctor (:name spec))]
-            (gen/bind (gen/fmap factory mapgen)
-              (fn [sp]
-                (do (when (and pre sp)
-                      (swap! pre update-in [(:name spec)] #(conj % sp)))
-                    (gen/return sp))))))))))
+  (cond
+    (:elements spec)
+    ,(gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
+    (:items spec)
+    ,(gen/bind (gen/frequency [[8 (gen/return true)] [2 (gen/return false)]])
+       (fn [use-pre?]
+         (if-let [insts (and use-pre? pre (get @pre (:name spec)))]
+           (gen/return (rand-nth insts))
+           (let [kvs (->> (:items spec)
+                          (filter (fn [item]
+                                    (or (not (= (get-spec (second (:type item))) spec))
+                                        (not use-pre?)) ;; hijack use-pre? to stop infinite recursion
+                                    ))
+                          (map #(item-gen % spec-gen-env)))
+                 mapgen (apply gen/hash-map (apply concat kvs))
+                 factory (get-ctor (:name spec))]
+             (gen/bind (gen/fmap factory mapgen)
+               (fn [sp]
+                 (do (when (and pre sp)
+                       (swap! pre update-in [(:name spec)] #(conj % sp)))
+                     (gen/return sp))))))))
+    (:values spec)
+    (gen/one-of (map #(gen/return %) (:values spec)))))
 
 (defn- spec-subset
   "generates a map from a generator but with just a subset of the keys.
@@ -119,7 +127,11 @@
   (let [spec-gen-env (mk-spec-generators #{spec-key} prim-gens pre)]
     ((get spec-gen-env spec-key) spec-gen-env)))
 
-(defn ^:no-doc update-generator [spec]
+(defn update-generator 
+  "Returns a spec instance \"subset\" (intended to be smaller than
+  generating an instance of `spec` with [[instance-generator]])
+  suitable to use as an argument to [[assoc!]]."
+  [spec]
   (if-let [spec-key (:name (get-spec spec))]
     (let [sp-gen (mk-spec-generator spec-key)]
       (spec-subset sp-gen))
@@ -137,3 +149,46 @@
         sp-gen (mk-spec-generator (:name spec) pre)]
     (gen/bind (gen/such-that #(> (count %) 3) (gen/not-empty (gen/vector sp-gen)) 50)
       #(gen/return {:expected %}))))
+
+
+(defn check-create! 
+  "Checks that `original` can be created on the database."
+  {:added "0.6.0"}
+  [conn-ctx original]
+  (let [actual (create! conn-ctx original)]
+    (if (refless= actual original) actual
+        (throw (ex-info "creation mismatch: output doesn't reflect input" 
+                        {:actual actual :expected original})))))
+
+(defn check-update!
+  "Checks that `original` can be updated with `updates`, and the
+  result should be a shallow merge of `original` into `updates`.
+
+  Generate as suitable update map with [[update-generator]]."
+  {:added "0.6.0"}
+  [conn-ctx original updates]
+  (let [expected (merge original updates)
+        actual   (update! conn-ctx original updates)]
+    (if (refless= expected actual) actual
+        (throw (ex-info "update mismatch, output is not equivalent to input"
+                        {:original original :updates updates :actual actual})))))
+
+(defn prop-creation-update
+  "Defines a property that tests whether instances of a given spec
+  name can be created, updated, and sent to and from the database."
+  {:added "0.6.0"}
+  [conn-ctx-thunk spec-key]
+  (let [spec     (get-spec spec-key)
+        fields   (map :name (:items spec))]
+    (prop/for-all [{:keys [conn-ctx original updates]}
+                   (gen/bind (instance-generator spec-key)
+                     (fn [sp]
+                       (gen/bind (update-generator (get-spec sp))
+                         (fn [updates]
+                           (gen/return {:conn-ctx (conn-ctx-thunk)
+                                        :original sp
+                                        :updates updates})))))]
+      (and (every? #(check-component! spec % (get original %)) fields)
+           (when-let [created (check-create! conn-ctx original)]
+             (or (= created :skip) (check-update! conn-ctx created updates)))))))
+
