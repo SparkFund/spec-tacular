@@ -355,18 +355,16 @@
 (defn- spec->record-type [spec]
   (let [opts (for [{iname :name required? :required? [arity sub-sp-nm] :type :as item}
                    (:items spec)]
-               (let [item-type (if (primitive? sub-sp-nm)
-                                 (get-in type-map [sub-sp-nm :type-symbol])
-                                 (symbol (str *ns*) (name sub-sp-nm)))]
+               (let [item-type (or (get-in type-map [sub-sp-nm :type-symbol])
+                                   (symbol (str *ns*) (name sub-sp-nm)))]
                  [iname (let [t (case arity
                                   :one  item-type
                                   :many (list `t/Set item-type))]
-                          (if required? t (list `t/Option t)))]))]
-    `(t/HMap
-      ;; FIXME: This should be true but waiting on 
-      ;; http://dev.clojure.org/jira/browse/CTYP-198
-      :complete? false 
-      :optional ~(into {} opts)))) ;; TODO: aren't there required fields?
+                          (if required? t (list `t/Option t)))]))
+        opts (cons [:db-ref `(t/Option t/Any)] opts)
+        opts (cons [:spec-tacular/spec `(t/Option t/Keyword)] opts)]
+    ;; TODO: aren't there required fields?
+    `(t/HMap :complete? true :optional ~(into {} opts)))) 
 
 (defn- spec->type [spec]
   (condp instance? spec
