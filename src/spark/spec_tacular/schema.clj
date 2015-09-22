@@ -8,7 +8,9 @@
   (:require [clojure.core.typed :as t]
             [clojure.edn :as edn]
             [spark.spec-tacular.datomic :as sd]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io])
+  (:import spark.spec_tacular.spec.Spec
+           spark.spec_tacular.spec.EnumSpec))
 
 (t/typed-deps spark.spec-tacular
               spark.spec-tacular.datomic)
@@ -18,10 +20,10 @@
 (t/defalias EntityMap
   "An EntityMap is a (possibly partial) description of a Datomic entity."
   (t/HMap :mandatory
-          {:db/ident t/Keyword
-           :db/valueType t/Any}
+          {:db/ident t/Keyword}
           :optional 
           {:db/id datomic.db.DbId
+           :db/valueType t/Any
            :db/cardinality (t/U ':db.cardinality/one ':db.cardinality/many)
            :db/fn (t/Map t/Keyword t/Any)
            :db.install/_attribute t/Keyword}))
@@ -78,9 +80,11 @@
    {:db/id          (d/tempid :db.part/db)
     :db/ident       (keyword (datomic-ns spec) (name iname))
     :db/valueType   (if (primitive? type)
-                      (if (= type :calendarday)
-                        (keyword "db.type" "instant")
-                        (keyword "db.type" (name type)))
+                      (if (instance? EnumSpec (get-spec type))
+                        :db.type/ref
+                        (if (= type :calendarday)
+                          (keyword "db.type" "instant")
+                          (keyword "db.type" (name type))))
                       :db.type/ref)
     :db/cardinality (case cardinality
                       :one :db.cardinality/one
@@ -97,11 +101,15 @@
 (t/ann from-spec [(t/U SpecT t/Keyword) -> Schema])
 (defn from-spec
   "Generates a [[Schema]] that represents `spec`."
-  [spec]
-  (let [si (if (keyword? spec) (get-spec spec) spec)]
-    (assert si (str "cannot find spec for " spec))
-    (t/for [item :- Item (:items si)] :- EntityMap
-           (item->schema-map si item))))
+  [spec-kw]
+  (let [spec (if (keyword? spec-kw) (get-spec spec-kw) spec-kw)]
+    (assert spec (str "cannot find spec for " spec-kw))
+    (condp instance? spec
+      Spec (t/for [item :- Item (:items spec)] :- EntityMap
+                  (item->schema-map spec item))
+      EnumSpec (t/for [kw :- Keyword (:values spec)] :- EntityMap
+                      {:db/id (d/tempid :db.part/user)
+                       :db/ident kw}))))
 
 (t/ann normalize [Schema -> Schema])
 (defn normalize
@@ -225,7 +233,10 @@
 (defn from-namespace
   "Converts all specs in `namespace` into a [[Schema]]"
   [namespace]
-  (->> namespace namespace->specs from-specs))
+  (->> namespace
+       namespace->specs
+       (filter #(or (instance? EnumSpec %) (instance? Spec %)))
+       from-specs))
 
 (t/defalias URI "A URI is just a string, but it should probably look like `\"datomic:mem://<squiid>\"`" t/Str)
 (t/ann ^:no-check datomic.api/squuid [-> java.util.UUID])

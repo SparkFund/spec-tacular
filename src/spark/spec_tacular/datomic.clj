@@ -4,7 +4,9 @@
   (:refer-clojure :exclude [for remove assoc!])
   (:use spark.spec-tacular.spec
         spark.spec-tacular)
-  (:import clojure.lang.MapEntry)
+  (:import clojure.lang.MapEntry
+           spark.spec_tacular.spec.Spec
+           spark.spec_tacular.spec.EnumSpec)
   (:require [clj-time.coerce :as timec]
             [clojure.core.typed :as t :refer [for]]
             [clojure.string :refer [lower-case]]
@@ -13,7 +15,11 @@
             [clojure.data :as data]
             [clojure.tools.macro :as m]
             [clojure.walk :as walk]
-            [clojure.core.match :refer [match]]))
+            [clojure.core.match :refer [match]]
+            [taoensso.timbre :as timbre
+             :refer (log  trace  debug  info  warn  error  fatal  report
+                          logf tracef debugf infof warnf errorf fatalf reportf
+                          spy get-env log-env)]))
 
 (t/typed-deps spark.spec-tacular)
 
@@ -86,10 +92,8 @@
  ;; the returned map may be missing valid keys, but it will definitely
  ;; be of the correct spec and won't have completely invalid kws
  (defmethod database-coercion datomic.query.EntityMap [em]
-   (let [spec (get-spec em)]
-     (do (when (not spec)
-           (throw (ex-info "bad entity in database" {:entity em})))
-         (when-not (every? (fn [kw] (some #(= (db-keyword spec (:name %)) kw) (:items spec)))
+   (if-let [spec (get-spec em)] ;; Spec
+     (do (when-not (every? (fn [kw] (some #(= (db-keyword spec (:name %)) kw) (:items spec)))
                            (filter #(case % (:spec-tacular/spec :db-ref :db/txInstant) false true)
                                    (keys em)))
            (throw (ex-info "bad entity in database" {:entity em})))
@@ -98,7 +102,14 @@
               (cons [:db-ref {:eid (:db/id em)}])
               (cons [:spec-tacular/spec (:name spec)])
               (filter second)
-              (into {}))))))
+              (into {})))
+     (if-let [kw (:db/ident em)] ;; EnumSpec
+       (do (when-not (keyword? kw)
+             (throw (ex-info "bad enum in database" {:entity em})))
+           (if-let [spec (get-spec kw)]
+             (if (instance? EnumSpec spec) kw
+                 (throw (ex-info "bad enum in database" {:entity em})))))
+       (throw (ex-info "bad entity in database" {:entity em}))))))
 
 (t/ann ^:no-check get-all-eids [datomic.db.Db SpecT -> (t/ASeq Long)])
 (defn ^:no-doc get-all-eids
@@ -759,7 +770,8 @@
       (::patvar (meta rhs))
       ,(do (set-type! tenv rhs sub-spec-name)
            (vec (concat (if-let [spec (get-spec (get @tenv rhs))]
-                          [[`'~rhs :spec-tacular/spec (get @tenv rhs)]]
+                          (when (instance? Spec spec)
+                            [[`'~rhs :spec-tacular/spec (get @tenv rhs)]])
                           [])
                         [(mk-where-clause `'~rhs)])))
       (and (keyword? rhs)
@@ -1062,14 +1074,15 @@
         type-syms (map :type-symbol type-maps)
         err (fn [result t-s]
               `(throw (ex-info "possible spec mismatch"
-                               {:query-result  ~result
-                                :actual-type   ~(type result)
-                                :expected-type '~t-s})))
+                               {:actual-type   (type '~result)
+                                :expected-type ~t-s
+                                :query-result  ~result})))
         wrap (fn [result t-kw t-m t-s]
                (when-not (and t-kw t-m t-s)
                  (throw (ex-info (str "missing information about " result)
                                  {:type t-kw :type-sym t-s :syntax stx})))
-               (if (primitive? t-kw)
+               (if (and (primitive? t-kw)
+                        (not (instance? EnumSpec (get-spec t-kw))))
                  (if (= t-kw :calendarday)
                    `(if (instance? java.util.Date ~result) (timec/to-date-time ~result)
                         ~(err result t-s))
@@ -1080,7 +1093,8 @@
                               (db/entity ~db ~result) ~t-s)]
                       (recursive-ctor ~t-kw e#))
                     ~(err result t-s))))]
-    `(t/let [check# :- [~(if coll? `t/Any `(t/Vec t/Any)) ~'-> ~(if coll? (first type-syms) `(t/HVec ~(vec type-syms)))]
+    `(t/let [check# :- [~(if coll? `t/Any `(t/Vec t/Any)) ~'->
+                        ~(if coll? (first type-syms) `(t/HVec ~(vec type-syms)))]
              ~(if coll?
                 `(fn [~(first args)]
                    ~(wrap (first args) (first type-kws) (first type-maps) (first type-syms)))
@@ -1121,13 +1135,14 @@
                       (throw (ex-info "Unique entity already in database, cannot add by value."
                                       {:entity i :parent-spec parent-spec :field iname})))
                     (if (= (recursiveness item) :non-rec)
-                      (let [i (if (= type :calendarday) (timec/to-date i) i)]
+                      (let [sub-spec (get-spec type)
+                            i (if (= type :calendarday) (timec/to-date i) i)]
                         ;; TODO: throw exception if 
                         [[:db/add parent-eid datomic-key i]])
                       (let [sub-eid  (db/tempid :db.part/user)
                             _ (when (and tmps link?)
                                 (swap! tmps conj [i sub-eid]))
-                            sub-spec (get-spec (second (:type item)))
+                            sub-spec (get-spec type)
                             sub-spec (if (:elements sub-spec)
                                        (get-spec i) sub-spec)]
                         (concat [[:db/add parent-eid datomic-key sub-eid]
@@ -1251,7 +1266,10 @@
   [conn-ctx new-si-coll]
   (let [data (graph-transaction-data conn-ctx new-si-coll)        
         {:keys [tmpids specs]} (meta data)
-        txn-result @(db/transact (:conn conn-ctx) data)]    
+        txn-result (try @(db/transact (:conn conn-ctx) data)
+                        (catch java.util.concurrent.ExecutionException e
+                          (throw (ex-info "Datomic encountered an error"
+                                          {:message (.getMessage e) :data data}))))]
     ;; db side effect has occurred
     (let [db (db/db (:conn conn-ctx))
           db-si-coll (map #(some->> (db/resolve-tempid db (:tempids txn-result) %1)

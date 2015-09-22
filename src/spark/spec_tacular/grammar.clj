@@ -5,8 +5,8 @@
 
 (declare parse-spec parse-item parse-type parse-opts)
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; SPEC 
+;; -----------------------------------------------------------------------------
+;; spec 
 
 (defn parse-spec [stx & [loc]]
   (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
@@ -52,14 +52,36 @@
       ([:component & rest] :seq)         (k {:component? true}   rest)
       :else (throw (ex-info "invalid options" (merge loc {:syntax stx}))))))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;; UNION
+;; -----------------------------------------------------------------------------
+;; union
 
 (defn parse-union [stx & [loc]]
   (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
     (match stx
       ([name & specs] :seq)
-      (let [name (keyword name)]
-        (map->UnionSpec {:name name :elements (into #{} specs)}))
+      ,(let [name (keyword name)]
+         (map->UnionSpec {:name name :elements (into #{} specs)}))
       :else (throw (ex-info "expecting name followed by sequence of specs" 
+                            (merge loc {:syntax stx}))))))
+
+;; -----------------------------------------------------------------------------
+;; enum
+
+(defn parse-enum [stx & [loc]]
+  (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
+    (match stx
+      ([name & values] :seq)
+      ,(do (when-not (symbol? name)
+             (throw (ex-info (str "enumeration name must be a symbol, given " (type name))
+                             (merge loc {:syntax stx}))))
+           (when-not (every? symbol? values)
+             (throw (ex-info "some enumeration values are not symbols"
+                             (merge loc {:syntax stx :problems (filter (complement symbol?) values)}))))
+           (when (empty? values)
+             (throw (ex-info "enumeration can't be empty"
+                             (merge loc {:syntax stx}))))
+           (let [ename (keyword name)
+                 vals  (map #(keyword (str name) (str %)) values)]
+             (map->EnumSpec {:name ename :values (into #{} vals)})))
+      :else (throw (ex-info "expecting name followed by arbitrary number of symbols"
                             (merge loc {:syntax stx}))))))

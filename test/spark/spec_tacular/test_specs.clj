@@ -61,3 +61,9 @@
   [number :is-a :long]
   [one :is-a :Container :component]
   [many :is-many :Container :component])
+
+(defenum Color red blue green orange)
+
+(defspec Spotlight
+  [color :is-a :Color]
+  [shaders :is-many :Color])

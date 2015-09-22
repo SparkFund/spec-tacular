@@ -158,7 +158,15 @@
         (let [db (db/db *conn*)]
           (do (transaction-data db (get-spec e1) nil e1 tmps)
               (is (= (transaction-data db (get-spec e1) nil e1 tmps)
-                     []))))))))
+                     [])))))))
+
+  (testing "enum"
+    (let [sl1 (spotlight {:color :Color/red
+                          :shaders #{:Color/blue :Color/green}})
+          eid (db/tempid :db.part/user)
+          data (transaction-data nil Spotlight nil sl1 nil)]
+      (is (= (map last data)
+             [:Spotlight :Color/red :Color/blue :Color/green])))))
 
 (deftest test-commit-sp-transactions!
   (let [scm-1 (scm {:val1 "hi" :val2 323 :scm2 (scm2 {:val1 125})})
@@ -1227,6 +1235,34 @@
       (is (= (q :find ?date :in (db) :where
                 [:Birthday {:date ?date}])
              #{[(time/date-time 2015 7 24)]})))))
+
+(deftest test-enum
+  (with-test-db simple-schema
+    (let [conn-ctx {:conn *conn*}
+          sl1-e (spotlight {:color :Color/red
+                            :shaders #{:Color/blue :Color/green}})
+          sl2-e (spotlight {:color :Color/green
+                            :shaders #{:Color/orange :Color/red}})]
+      (let [sl1-a (create! conn-ctx sl1-e)
+            sl2-a (create! conn-ctx sl2-e)]
+        (is sl1-a)
+        (is (= (:color sl1-a) :Color/red))
+        (is (= (:shaders sl1-a) #{:Color/blue :Color/green}))
+        (is (refless= sl1-a sl1-e))
+        (is (refless= sl2-a sl2-e))
+        (is (not (= sl1-a sl2-a)))
+        (is (not (refless= sl1-a sl2-a)))
+
+        (is (= (q :find [:Color ...] :in (db) :where
+                  [:Spotlight {:color %}])
+               #{:Color/red :Color/green}))
+        (is (= (q :find :Color :in (db) :where
+                  [:Spotlight {:shaders %}])
+               #{[:Color/red] [:Color/green] [:Color/orange] [:Color/blue]}))
+        (is (= (q :find [:Color ...] :in (db) :where
+                  [:Spotlight {:color %}]
+                  [:Spotlight {:shaders %}])
+               #{:Color/red :Color/green}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing

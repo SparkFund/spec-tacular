@@ -6,7 +6,8 @@
         spark.spec-tacular.schema
         spark.spec-tacular.test-utils)
   (:require [datomic.api :as d]
-            [clojure.java.io :as io]))
+            [clojure.java.io :as io]
+            [spark.spec-tacular-test :as spt]))
 
 ;;;; check tests
 
@@ -134,3 +135,24 @@
               ns-schema)]
     (is (nil? missing) "no missing entries")
     (is (nil? extra) "no extra entries")))
+
+(deftest test-enums
+  (is (= (set (normalize (from-specs [spt/IsEnum spt/HasEnum])))
+         #{{:db/unique nil,
+             :db/ident :hasenum/word,
+             :db/valueType :db.type/ref,
+             :db/cardinality :db.cardinality/one,
+            :db/doc ""}
+           {:db/unique nil,
+            :db/ident :hasenum/words,
+            :db/valueType :db.type/ref,
+            :db/cardinality :db.cardinality/many,
+            :db/doc ""}
+           {:db/ident :IsEnum/how,
+            :db/unique nil}
+           {:db/ident :IsEnum/now,
+            :db/unique nil}
+           {:db/ident :IsEnum/brown,
+            :db/unique nil}
+           {:db/ident :IsEnum/cow,
+            :db/unique nil}})))

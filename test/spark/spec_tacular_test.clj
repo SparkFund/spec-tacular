@@ -8,7 +8,7 @@
             [clojure.test.check.properties :as prop]
             [clojure.test.check.clojure-test :as ct]))
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; -----------------------------------------------------------------------------
 ;; defspec
 
 (defspec TestSpec1
@@ -55,6 +55,9 @@
     (is (thrown? clojure.lang.ExceptionInfo (testspec1 {:val1 3 :extra-key true}))
         "extra key")))
 
+;; -----------------------------------------------------------------------------
+;; link
+
 (defspec TestSpec2
   (:link [ts1 :is-a :TestSpec1]))
 (defspec TestSpec3)
@@ -69,6 +72,9 @@
     (let [ts1 (i_TestSpec1. {::bad-key true} (atom {}) nil)]
       (is (testspec2 {:ts1 ts1})))))
 
+;; -----------------------------------------------------------------------------
+;; booleans, is-many
+
 (defspec TestSpec4
   [val1 :is-a :boolean]
   [val2 :is-many :boolean])
@@ -79,6 +85,9 @@
     (is (testspec4? (testspec4 {:val1 false})))
     (is (some? (re-find #"false" (pr-str (testspec4 {:val1 false})))))))
 
+;; -----------------------------------------------------------------------------
+;; required
+
 (defspec TestSpec5
   [name :is-a :string :required])
 
@@ -86,11 +95,13 @@
   (testing "empty string"
     (is (some? (check-component! (get-spec :TestSpec5) :name "")))))
 
+;; -----------------------------------------------------------------------------
 ;; forward references
+
 (defspec A [b :is-a :B])
 (defspec B [a :is-a :A])
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; -----------------------------------------------------------------------------
 ;; unions
 
 (defunion testunion :TestSpec2 :TestSpec3)
@@ -105,7 +116,7 @@
          #{:TestSpec2 :TestSpec3}))
   
   (is (testunion? (testspec2 {})))
-  (is (instance? spark.spec_tacular.spec.UnionSpec (get-spec testunion)))
+  (is (instance? spark.spec_tacular.spec.UnionSpec (get-spec :testunion)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
   (is (thrown? clojure.lang.ExceptionInfo (check-component! (get-spec :ES) :foo :nope)))
   (is (thrown? clojure.lang.ExceptionInfo (es (testspec1 {:val1 1}))))
@@ -113,12 +124,35 @@
   (is (thrown? clojure.lang.ExceptionInfo (esparent {:es {:foo (testspec1 {:val1 1})}})))
   (is (thrown? clojure.lang.ExceptionInfo (es {:foo (a {})}))))
 
-;; forward union reference
 (defunion UnionFoo :UnionForward)
 (defspec UnionForward)
 
 (defspec TestSpec6
   [union :is-many :UnionFoo])
+
+;; -----------------------------------------------------------------------------
+;; enums
+
+(defenum IsEnum how now brown cow)
+(defspec HasEnum
+  [word :is-a :IsEnum]
+  [words :is-many :IsEnum])
+
+(deftest test-defenum
+  (is (isenum? :IsEnum/how))
+  (is (isenum? :IsEnum/cow))
+
+  (is (= (get-spec :IsEnum)
+         (get-spec :IsEnum/how)
+         IsEnum))
+
+  (is (hasenum {:word :IsEnum/how}))
+  (is (hasenum? (hasenum {:word :IsEnum/now})))
+  (is (isenum? (:word (hasenum {:word :IsEnum/brown}))))
+  (is (every? isenum? (:words (hasenum {:words #{:IsEnum/how :IsEnum/cow}})))))
+
+;; -----------------------------------------------------------------------------
+;; complex
 
 (defspec Link
   (:link
@@ -232,6 +266,7 @@
                     (into #{} (map :name ns-specs))
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testunion :ES :ESParent :UnionFoo :UnionForward :A :B
-                      :Link :Human :TestSpec6 :TestSpec7})]
+                      :Link :Human :TestSpec6 :TestSpec7 :IsEnum :HasEnum})]
+    (is (= (count both) 18) "total number of specs")
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))
