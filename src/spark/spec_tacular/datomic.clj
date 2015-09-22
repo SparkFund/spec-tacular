@@ -1075,7 +1075,7 @@
         err (fn [result t-s]
               `(throw (ex-info "possible spec mismatch"
                                {:actual-type   (type '~result)
-                                :expected-type ~t-s
+                                :expected-type '~t-s
                                 :query-result  ~result})))
         wrap (fn [result t-kw t-m t-s]
                (when-not (and t-kw t-m t-s)

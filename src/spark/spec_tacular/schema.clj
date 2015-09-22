@@ -98,7 +98,7 @@
    (when (:component? item)
      {:db/isComponent true})))
 
-(t/ann from-spec [(t/U SpecT t/Keyword) -> Schema])
+(t/ann ^:no-check from-spec [(t/U SpecT t/Keyword) -> Schema])
 (defn from-spec
   "Generates a [[Schema]] that represents `spec`."
   [spec-kw]
@@ -107,7 +107,7 @@
     (condp instance? spec
       Spec (t/for [item :- Item (:items spec)] :- EntityMap
                   (item->schema-map spec item))
-      EnumSpec (t/for [kw :- Keyword (:values spec)] :- EntityMap
+      EnumSpec (t/for [kw :- t/Keyword (:values spec)] :- EntityMap
                       {:db/id (d/tempid :db.part/user)
                        :db/ident kw}))))
 
@@ -229,7 +229,7 @@
   [specs]
   (->> specs (mapcat from-spec)))
 
-(t/ann from-namespace [clojure.lang.Namespace -> Schema])
+(t/ann ^:no-check from-namespace [clojure.lang.Namespace -> Schema])
 (defn from-namespace
   "Converts all specs in `namespace` into a [[Schema]]"
   [namespace]

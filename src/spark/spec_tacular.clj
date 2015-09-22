@@ -35,7 +35,8 @@
   "The type of a spec"
   (t/HMap :mandatory {:name SpecName}
           :optional  {:elements (t/Seqable SpecName)
-                      :items (t/Seqable Item)}))
+                      :items (t/Seqable Item)
+                      :values (t/Seqable t/Keyword)}))
 
 ;; -----------------------------------------------------------------------------
 ;; multimethods
@@ -381,9 +382,11 @@
     `(do (t/defalias ~alias ~type)
          (defmethod get-type ~(:name spec) [_#] 
            ~(condp instance? spec
-              Spec      (map->SpecType {:name (:name spec) :type-symbol `'~alias})
-              UnionSpec (map->SpecType {:name (:name spec) :type-symbol `'~alias})
-              EnumSpec  (map->SpecType {:name (:name spec) :type-symbol 'clojure.lang.Keyword}))))))
+              Spec      (map->SpecType {:name (:name spec) :type-symbol alias})
+              UnionSpec (map->SpecType {:name (:name spec) :type-symbol alias})
+              EnumSpec  (map->SpecType {:name (:name spec)
+                                        :type clojure.lang.Keyword
+                                        :type-symbol alias}))))))
 
 ;; -----------------------------------------------------------------------------
 ;; constructors
