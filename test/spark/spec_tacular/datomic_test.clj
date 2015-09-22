@@ -1262,7 +1262,11 @@
         (is (= (q :find [:Color ...] :in (db) :where
                   [:Spotlight {:color %}]
                   [:Spotlight {:shaders %}])
-               #{:Color/red :Color/green}))))))
+               #{:Color/red :Color/green}))
+        (is (= (let [color :Color/green]
+                 (q :find :Spotlight :in (db) :where
+                    [% {:color color}]))
+               #{[sl2-a]}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing

@@ -823,20 +823,17 @@
             (when (nil? ~z)
               (throw (ex-info "Maps cannot have nil values at runtime"
                               {:field ~sub-spec-name :syntax '~rhs})))
-            (if rhs-spec#
+            (if (and rhs-spec# (instance? Spec rhs-spec#)) ;; Spec
               (if-let [eid# (get-in ~z [:db-ref :eid])]
                 [['~x ~db-kw eid#]]
-                (t/let [item# :- (t/Option Item)
-                        ,(some (t/ann-form #(if (:unique? %) %)
-                                           [Item ~'-> (t/Option Item)]) ;; core.typed srs
-                               (:items rhs-spec#))
-                        val#  :- t/Any (and item# ((:name item#) ~z))]
+                (let [item# (some #(if (:unique? %) %) (:items rhs-spec#))
+                      val#  (and item# ((:name item#) ~z))]
                   (if (and item# (some? val#))
                     [['~x ~db-kw '~y]
                      ['~y (db-keyword rhs-spec# (:name item#)) val#]]
                     (throw (ex-info "Cannot uniquely describe the given value"
                                     {:syntax ~rhs :value ~z})))))
-              ~[(mk-where-clause z)]))))))
+              ~[(mk-where-clause z)])))))) ;; EnumSpec; everything else
 
 ;; map = {:kw (ident | clause | map | value),+}
 (t/ann ^:no-check expand-map [QueryMap t/Sym SpecT QueryUEnv QueryTEnv -> t/Any])
