@@ -1146,7 +1146,7 @@
                                  [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
                                 (transaction-data db sub-spec {:db-ref {:eid sub-eid}} i tmps)))))))
             (retract [i] ;; removes i from field datomic-key in entity eid
-              (when (not i)
+              (when (not (some? i))
                 (throw (ex-info "cannot retract nil" {:spec (:name parent-spec) :old old :new new})))
               (when required?
                 (throw (ex-info "attempt to delete a required field"
@@ -1155,7 +1155,9 @@
                 (if (:component? item)
                   [[:db.fn/retractEntity eid]]
                   [[:db/retract parent-eid datomic-key eid]])
-                (do (when link? (throw (ex-info "retracted link missing eid" {:entity i})))
+                (do (let [sub-spec (get-spec type)]
+                      (when (and link? (not (instance? EnumSpec sub-spec)))
+                        (throw (ex-info "retracted link missing eid" {:entity i}))))
                     [[:db/retract parent-eid datomic-key i]])))]
       (cond
         (= cardinality :one)

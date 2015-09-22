@@ -35,7 +35,7 @@
   (let [generator ,((get spec-gen-env type-key) spec-gen-env)
         maybe-optionize ,(if required identity #(gen/one-of [(gen/return nil) %]))
         maybe-unique ,(if (and unique? (= type-key :string))
-                        #(gen/bind % (fn [s] (gen/return (str (str (gensym) s)))))
+                        #(gen/bind % (fn [s] (gen/return (str (gensym) s))))
                         identity)]
     (assert generator (str "missing definition of sub-generator: "
                            type-key))
@@ -49,21 +49,29 @@
                maybe-optionize)]))
 
 (defn- spec-gen [spec spec-gen-env & [pre]]
-  (if (:elements spec)
-    (gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
-    (gen/bind (gen/frequency [[8 (gen/return true)] [2 (gen/return false)]])
-      (fn [use-pre?]
-        (if-let [insts (and use-pre? pre (get @pre (:name spec)))]
-          (gen/return (rand-nth insts))
-          (let [kvs (->> (:items spec)
-                         (map #(item-gen % spec-gen-env)))
-                mapgen (apply gen/hash-map (apply concat kvs))
-                factory (get-ctor (:name spec))]
-            (gen/bind (gen/fmap factory mapgen)
-              (fn [sp]
-                (do (when (and pre sp)
-                      (swap! pre update-in [(:name spec)] #(conj % sp)))
-                    (gen/return sp))))))))))
+  (cond
+    (:elements spec)
+    ,(gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
+    (:items spec)
+    ,(gen/bind (gen/frequency [[8 (gen/return true)] [2 (gen/return false)]])
+       (fn [use-pre?]
+         (if-let [insts (and use-pre? pre (get @pre (:name spec)))]
+           (gen/return (rand-nth insts))
+           (let [kvs (->> (:items spec)
+                          (filter (fn [item]
+                                    (or (not (= (get-spec (second (:type item))) spec))
+                                        (not use-pre?)) ;; hijack use-pre? to stop infinite recursion
+                                    ))
+                          (map #(item-gen % spec-gen-env)))
+                 mapgen (apply gen/hash-map (apply concat kvs))
+                 factory (get-ctor (:name spec))]
+             (gen/bind (gen/fmap factory mapgen)
+               (fn [sp]
+                 (do (when (and pre sp)
+                       (swap! pre update-in [(:name spec)] #(conj % sp)))
+                     (gen/return sp))))))))
+    (:values spec)
+    (gen/one-of (map #(gen/return %) (:values spec)))))
 
 (defn- spec-subset
   "generates a map from a generator but with just a subset of the keys.

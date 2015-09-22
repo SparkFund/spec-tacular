@@ -1276,7 +1276,12 @@
         (is (= (let [color :Color/green]
                  (q :find :Spotlight :in (db) :where
                     [% {:color color}]))
-               #{[sl2-a]}))))))
+               #{[sl2-a]}))
+
+        (is (refless= (assoc! conn-ctx sl2-a :color nil)
+                      (assoc sl2-a :color nil)))
+        (is (refless= (assoc! conn-ctx sl2-a :shaders nil)
+                      (assoc sl2-a :color nil :shaders nil)))))))
 
 (deftest test-boolean
   (with-test-db simple-schema
@@ -1311,27 +1316,34 @@
 
 (defn prop-check-components
   "property for verifying that check-component!, create!, and update! work correctly"
-  [conn-ctx spec-key]
+  [conn-ctx-thunk spec-key]
   (with-test-db simple-schema
     (let [spec     (get-spec spec-key)
           fields   (map :name (:items spec))]
-      (prop/for-all [{:keys [original updates]}
+      (prop/for-all [{:keys [conn-ctx original updates]}
                      (gen/bind (instance-generator spec-key)
                        (fn [sp]
                          (gen/bind (update-generator (get-spec sp))
                            (fn [updates]
-                             (gen/return {:original sp :updates updates})))))]
+                             (gen/return {:conn-ctx (conn-ctx-thunk)
+                                          :original sp
+                                          :updates updates})))))]
         (and (every? #(check-component! spec % (get original %)) fields)
              (when-let [created (check-create! conn-ctx original)]
                (or (= created :skip) (check-update! conn-ctx created updates))))))))
 
-(ct/defspec gen-Scm2 10        (prop-check-components {:conn *conn*} :Scm2))
-(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components {:conn *conn*} :ScmOwnsEnum))
-(ct/defspec gen-ScmM 10        (prop-check-components {:conn *conn*} :ScmM))
-(ct/defspec gen-ScmParent 10   (prop-check-components {:conn *conn*} :ScmParent))
-(ct/defspec gen-ScmMWrap 10    (prop-check-components {:conn *conn*} :ScmMWrap))
-(ct/defspec gen-Scm 20         (prop-check-components {:conn *conn*} :Scm))
-(ct/defspec gen-ScmLink 50     (prop-check-components {:conn *conn*} :ScmLink))
+(defn- conn-ctx-thunk []
+  (with-test-db simple-schema
+    {:conn *conn*}))
+
+(ct/defspec gen-Scm2 10        (prop-check-components conn-ctx-thunk :Scm2))
+(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components conn-ctx-thunk :ScmOwnsEnum))
+(ct/defspec gen-ScmM 10        (prop-check-components conn-ctx-thunk :ScmM))
+(ct/defspec gen-ScmParent 10   (prop-check-components conn-ctx-thunk :ScmParent))
+(ct/defspec gen-ScmMWrap 10    (prop-check-components conn-ctx-thunk :ScmMWrap))
+(ct/defspec gen-Scm 20         (prop-check-components conn-ctx-thunk :Scm))
+(ct/defspec gen-ScmLink 50     (prop-check-components conn-ctx-thunk :ScmLink))
+(ct/defspec gen-Spotlight 50   (prop-check-components conn-ctx-thunk :Spotlight))
 
 (defn prop-create-graph [spec-key]
   (let [spec (get-spec spec-key)
