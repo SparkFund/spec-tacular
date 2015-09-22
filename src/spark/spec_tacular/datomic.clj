@@ -101,7 +101,7 @@
                 [iname (get em (db-keyword spec iname))])
               (cons [:db-ref {:eid (:db/id em)}])
               (cons [:spec-tacular/spec (:name spec)])
-              (filter second)
+              (filter (comp some? second))
               (into {})))
      (if-let [kw (:db/ident em)] ;; EnumSpec
        (do (when-not (keyword? kw)

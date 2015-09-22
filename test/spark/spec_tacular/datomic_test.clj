@@ -40,6 +40,16 @@
                     (scm2 {:val1 42}))))))
 
 (deftest test-transaction-data
+  (testing "bool"
+    (let [switch (switch {:on? nil})
+          data (transaction-data nil Switch nil {:on? nil})
+          _ (is (= (map last data) [:Switch]))
+          data (transaction-data nil Switch {:db-ref {:eid 1}} {:on? true})
+          _ (is (= data [[:db/add 1 :switch/on? true]]))
+          data (transaction-data nil Switch {:db-ref {:eid 1} :on? true} {:on? false})
+          _ (is (= data [[:db/add 1 :switch/on? false]]))
+          ]))
+
   (testing "Scm2"
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
@@ -1268,6 +1278,18 @@
                     [% {:color color}]))
                #{[sl2-a]}))))))
 
+(deftest test-boolean
+  (with-test-db simple-schema
+    (let [conn-ctx {:conn *conn*}
+          switch (switch {:on? nil})
+          switch (create! conn-ctx switch)
+          _ (is (= (:on? switch) nil))
+          switch (assoc! conn-ctx switch :on? true)
+          _ (is (= (:on? switch) true))
+          data (transaction-data (sd/db conn-ctx) Switch switch {:on? false})
+          switch (assoc! conn-ctx switch :on? false)
+          _ (is (= (:on? switch) false))])))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
 
@@ -1289,11 +1311,10 @@
 
 (defn prop-check-components
   "property for verifying that check-component!, create!, and update! work correctly"
-  [spec-key]
+  [conn-ctx spec-key]
   (with-test-db simple-schema
     (let [spec     (get-spec spec-key)
-          fields   (map :name (:items spec))
-          conn-ctx {:conn *conn*}]
+          fields   (map :name (:items spec))]
       (prop/for-all [{:keys [original updates]}
                      (gen/bind (instance-generator spec-key)
                        (fn [sp]
@@ -1304,13 +1325,13 @@
              (when-let [created (check-create! conn-ctx original)]
                (or (= created :skip) (check-update! conn-ctx created updates))))))))
 
-(ct/defspec gen-Scm2 10 (prop-check-components :Scm2))
-(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components :ScmOwnsEnum))
-(ct/defspec gen-ScmM 10 (prop-check-components :ScmM))
-(ct/defspec gen-ScmParent 10 (prop-check-components :ScmParent))
-(ct/defspec gen-ScmMWrap 10 (prop-check-components :ScmMWrap))
-(ct/defspec gen-Scm 20 (prop-check-components :Scm))
-(ct/defspec gen-ScmLink 50 (prop-check-components :ScmLink))
+(ct/defspec gen-Scm2 10        (prop-check-components {:conn *conn*} :Scm2))
+(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components {:conn *conn*} :ScmOwnsEnum))
+(ct/defspec gen-ScmM 10        (prop-check-components {:conn *conn*} :ScmM))
+(ct/defspec gen-ScmParent 10   (prop-check-components {:conn *conn*} :ScmParent))
+(ct/defspec gen-ScmMWrap 10    (prop-check-components {:conn *conn*} :ScmMWrap))
+(ct/defspec gen-Scm 20         (prop-check-components {:conn *conn*} :Scm))
+(ct/defspec gen-ScmLink 50     (prop-check-components {:conn *conn*} :ScmLink))
 
 (defn prop-create-graph [spec-key]
   (let [spec (get-spec spec-key)

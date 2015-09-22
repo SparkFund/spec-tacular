@@ -67,3 +67,6 @@
 (defspec Spotlight
   [color :is-a :Color]
   [shaders :is-many :Color])
+
+(defspec Switch
+  [on? :is-a :boolean])
