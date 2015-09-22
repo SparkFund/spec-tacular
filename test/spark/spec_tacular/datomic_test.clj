@@ -10,6 +10,7 @@
   (:require [datomic.api :as db]
             [spark.spec-tacular.datomic :as sd]
             [spark.spec-tacular.schema :as schema]
+            [spark.spec-tacular.generators :as sgen]
             [clj-time.core :as time]
             [clojure.walk :as walk]
             [clojure.core.typed :as t]
@@ -1306,52 +1307,18 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
 
-(defn check-create! [conn-ctx original]
-  (let [actual (create! conn-ctx original)]
-    (if (refless= actual original) actual
-        (throw (ex-info "creation mismatch: output doesn't reflect input" 
-                        {:actual actual :expected original})))))
-
-(defn check-update!
-  "update-subset is a subset of key-vals from original-db-value to try updating.
-  returns {:ok true} or {:error {reasons}}"
-  [conn-ctx original updates]
-  (let [expected (merge original updates)
-        actual   (update! conn-ctx original updates)]
-    (if (refless= expected actual) actual
-        (throw (ex-info "update mismatch, output is not equivalent to input"
-                        {:original original :updates updates :actual actual})))))
-
-(defn prop-check-components
-  "property for verifying that check-component!, create!, and update! work correctly"
-  [conn-ctx-thunk spec-key]
-  (with-test-db simple-schema
-    (let [spec     (get-spec spec-key)
-          fields   (map :name (:items spec))]
-      (prop/for-all [{:keys [conn-ctx original updates]}
-                     (gen/bind (instance-generator spec-key)
-                       (fn [sp]
-                         (gen/bind (update-generator (get-spec sp))
-                           (fn [updates]
-                             (gen/return {:conn-ctx (conn-ctx-thunk)
-                                          :original sp
-                                          :updates updates})))))]
-        (and (every? #(check-component! spec % (get original %)) fields)
-             (when-let [created (check-create! conn-ctx original)]
-               (or (= created :skip) (check-update! conn-ctx created updates))))))))
-
 (defn- conn-ctx-thunk []
   (with-test-db simple-schema
     {:conn *conn*}))
 
-(ct/defspec gen-Scm2 10        (prop-check-components conn-ctx-thunk :Scm2))
-(ct/defspec gen-ScmOwnsEnum 10 (prop-check-components conn-ctx-thunk :ScmOwnsEnum))
-(ct/defspec gen-ScmM 10        (prop-check-components conn-ctx-thunk :ScmM))
-(ct/defspec gen-ScmParent 10   (prop-check-components conn-ctx-thunk :ScmParent))
-(ct/defspec gen-ScmMWrap 10    (prop-check-components conn-ctx-thunk :ScmMWrap))
-(ct/defspec gen-Scm 20         (prop-check-components conn-ctx-thunk :Scm))
-(ct/defspec gen-ScmLink 50     (prop-check-components conn-ctx-thunk :ScmLink))
-(ct/defspec gen-Spotlight 50   (prop-check-components conn-ctx-thunk :Spotlight))
+(ct/defspec gen-Scm2 10        (sgen/prop-creation-update conn-ctx-thunk :Scm2))
+(ct/defspec gen-ScmOwnsEnum 10 (sgen/prop-creation-update conn-ctx-thunk :ScmOwnsEnum))
+(ct/defspec gen-ScmM 10        (sgen/prop-creation-update conn-ctx-thunk :ScmM))
+(ct/defspec gen-ScmParent 10   (sgen/prop-creation-update conn-ctx-thunk :ScmParent))
+(ct/defspec gen-ScmMWrap 10    (sgen/prop-creation-update conn-ctx-thunk :ScmMWrap))
+(ct/defspec gen-Scm 20         (sgen/prop-creation-update conn-ctx-thunk :Scm))
+(ct/defspec gen-ScmLink 50     (sgen/prop-creation-update conn-ctx-thunk :ScmLink))
+(ct/defspec gen-Spotlight 50   (sgen/prop-creation-update conn-ctx-thunk :Spotlight))
 
 (defn prop-create-graph [spec-key]
   (let [spec (get-spec spec-key)

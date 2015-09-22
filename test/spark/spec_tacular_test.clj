@@ -1,7 +1,7 @@
 (ns spark.spec-tacular-test
   (:use spark.spec-tacular
         clojure.test
-        spark.spec-tacular.generators)
+        [spark.spec-tacular.generators :exclude [prop-check-components]])
   (:require [clojure.core.typed :as t]
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
