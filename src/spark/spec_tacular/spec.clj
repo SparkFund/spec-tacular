@@ -48,6 +48,19 @@
   [spec]
   (make-name spec #(str "i_" %)))
 
+(defn spec->ctor
+  "Returns the symbol for the spec's ctor"
+  [spec]
+  (make-name spec clojure.string/lower-case))
+
+(defn spec->huh
+  [spec]
+  (make-name spec #(str (clojure.string/lower-case %) "?")))
+
+(defn spec->alias
+  [spec]
+  (make-name spec identity))
+
 ;; -----------------------------------------------------------------------------
 ;; primitive types
 

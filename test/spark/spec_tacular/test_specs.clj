@@ -62,11 +62,12 @@
   [one :is-a :Container :component]
   [many :is-many :Container :component])
 
-(defenum Color red blue green orange)
+(defenum LenseColor
+  red blue green orange)
 
 (defspec Spotlight
-  [color :is-a :Color]
-  [shaders :is-many :Color])
+  [color :is-a :LenseColor]
+  [shaders :is-many :LenseColor])
 
 (defspec Switch
   [on? :is-a :boolean])

@@ -385,8 +385,8 @@
 
 (defn- mk-type-alias
   "Defines a core.typed alias named after the given spec's name"
-  [spec]
-  (let [alias (symbol (str *ns*) (name (:name spec)))
+  [spec alias-name]
+  (let [alias (symbol (str *ns*) (str alias-name))
         type  (spec->type spec)]
     `(do (t/defalias ~alias ~type)
          (defmethod get-type ~(:name spec) [_#] 
@@ -451,20 +451,19 @@
                                   (into sp sub-kvs)
                                   (when db-sp (hash orig-sp)))))))))
 
-(defn- mk-checking-ctor [spec]
+(defn- mk-checking-ctor [spec ctor-name alias-name]
   "For use in macros, creates a constructor that checks
   precondititions and types."
-  (let [ctor-name (make-name spec lower-case)
+  (let [ctor-name (symbol ctor-name)
         ctor-name-ann (with-meta ctor-name (assoc (meta ctor-name) :no-check true))
-        core-type (-> spec :name name symbol)]
+        core-type (symbol alias-name)]
     `(do
        (t/ann ~ctor-name-ann
               ~(if (empty? (:items spec))
                  ['-> core-type]
                  [core-type '-> core-type]))
        (defn ~ctor-name
-         ~(str "deep-walks a nested map structure to construct a "
-              (-> spec :name name))
+         ~(str "Constructs a " (-> spec :name name) " from the given map")
          [& [sp#]] (recursive-ctor ~(:name spec) (if (some? sp#) sp# {})))
        (defmethod get-ctor ~(:name spec) [_#] ~ctor-name)
        (defmethod get-ctor ~spec [_#] ~ctor-name))))
@@ -544,22 +543,82 @@
 ;; -----------------------------------------------------------------------------
 ;; huh
 
-(defn- mk-huh [thing]
-  (let [huh (make-name thing #(str (lower-case %) "?"))
+(defn- mk-huh [spec huh-name]
+  (let [huh (symbol huh-name)
         huh-name-ann (with-meta huh (assoc (meta huh) :no-check true))
         gs (gensym)]
     `(do (t/ann ~huh [t/Any ~'-> t/Bool])
          (defn ~huh-name-ann [~gs]
-           ~(cond
-              (instance? Spec thing)
-              ,`(instance? ~(spec->class thing) ~gs)
-              (instance? UnionSpec thing)
-              ,`(contains? ~(:elements thing) (:name (get-spec ~gs)))
-              (instance? EnumSpec thing)
-              ,`(contains? ~(:values thing) ~gs))))))
+           ~(condp instance? spec
+              Spec      `(instance? ~(spec->class spec) ~gs)
+              UnionSpec `(contains? ~(:elements spec) (:name (get-spec ~gs)))
+              EnumSpec  `(contains? ~(:values spec) ~gs))))))
 
 ;; -----------------------------------------------------------------------------
-;; defspec, defunion
+;; meta
+
+(defn spec-meta
+  "Parses the meta-data that can be placed on a namespace containing
+  spec definitions, or on spec definitions themselves.  Not intended
+  to be called directly.
+
+  Currently, it is possible to override the constructor, predicate,
+  and type aliases name for a single spec or all specs in a namespace.
+
+  ```
+  (ns my-ns
+   {....
+    :spec-tacular
+    {:ctor-name-fn  (fn [s] ....)
+     :huh-name-fn   (fn [s] ....)
+     :alias-name-fn (fn [s] ....)}
+    ....}
+    (:require ....))
+  ```
+
+  Each function should expect a string and return a string.  The
+  function is currently `eval`uated in the [[spark.spec-tacular]]
+  namespace, so plan accordingly.
+
+  These names can be overriden on a per-spec basis in a similar
+  fashion.
+
+  ```
+  (defspec
+    ^{:ctor-name  \"mk-my-spec\"
+      :huh-name   false ;; fall back to default
+      :alias-name \"my-spec-type\"}
+    my-spec
+    ....)
+  ```
+
+  The spec-level meta-data has higher priority than the
+  namespace-level meta-data.
+  "
+  {:added "0.6.0"}
+  [ns spec spec-meta]
+  (let [{:keys [ctor-name-fn huh-name-fn alias-name-fn]}
+        ,(:spec-tacular (meta *ns*))
+        {:keys [ctor-name huh-name alias-name]} spec-meta
+        spec-name-str (-> spec :name name)]
+    {:ctor-name  (cond
+                   (and (not (some? ctor-name)) ctor-name-fn)
+                   ,(symbol ((eval ctor-name-fn) spec-name-str))
+                   ctor-name (symbol ctor-name)
+                   :else (spec->ctor spec))
+     :huh-name   (cond
+                   (and (not (some? huh-name)) huh-name-fn)
+                   ,(symbol ((eval huh-name-fn) spec-name-str))
+                   huh-name (symbol huh-name)
+                   :else (spec->huh spec))
+     :alias-name (cond
+                   (and (not (some? alias-name)) alias-name-fn)
+                   (symbol ((eval alias-name-fn) spec-name-str))
+                   alias-name (symbol alias-name)
+                   :else (spec->alias spec))}))
+
+;; -----------------------------------------------------------------------------
+;; defspec, defunion, defenum
 
 (defmacro defspec
   "Defines a spec-tacular spec type.
@@ -594,15 +653,15 @@
   `:db-ref` field which, in the case of Datomic, contains a map `{:eid
   database-id}` containing the entity's `:db/id`."
   [& stx]
-  (let [s (parse-spec stx)]
-    `(do ~(let [spec-name (:name s)
-                spec-sym  (-> s :name name symbol)]
-            `(def ~(with-meta spec-sym {:spec-tacular/spec spec-name}) ~s))
-         ~(mk-type-alias s)
+  (let [s (parse-spec stx)
+        {:keys [ctor-name huh-name alias-name]} (spec-meta *ns* s (meta (first stx)))
+        spec-name (make-name s identity)]
+    `(do (def ~(with-meta spec-name {:spec-tacular/spec (:name s)}) ~s)
+         ~(mk-type-alias s alias-name)
          ~(mk-record s)
          ~(mk-get-map-ctor s)
-         ~(mk-huh s)
-         ~(mk-checking-ctor s)
+         ~(mk-huh s huh-name)
+         ~(mk-checking-ctor s ctor-name alias-name)
          ~(mk-get-spec s)
          ~(mk-get-spec-class s))))
 
@@ -615,14 +674,14 @@
 
   where each SpecName is another spec to be added to the union."
   [& stx]
-  (let [u (parse-union stx)]
-    `(do ~(let [spec-name (:name u)
-                spec-sym  (-> u :name name symbol)]
-            `(def ~(with-meta spec-sym {:spec-tacular/union spec-name}) ~u))
-         ~(mk-type-alias u)
+  (let [u (parse-union stx)
+        {:keys [huh-name alias-name]} (spec-meta *ns* u (meta (first stx)))
+        spec-name (make-name u identity)]
+    `(do (def ~(with-meta spec-name {:spec-tacular/union (:name u)}) ~u)
+         ~(mk-type-alias u alias-name)
          ~(mk-union-get-map-ctor u)
          ~(mk-union-get-spec u)
-         ~(mk-huh u))))
+         ~(mk-huh u huh-name))))
 
 (defmacro defenum
   "Defines an enumeration of values under a parent name.
@@ -636,13 +695,13 @@
   constructors as keywords are already Clojure values."
   {:added "0.6.0"}
   [& stx]
-  (let [e (parse-enum stx)]
-    `(do ~(let [enum-name (-> e :name)
-                enum-sym  (-> enum-name name symbol)]
-            `(def ~(with-meta enum-sym {:spec-tacular/enum enum-name}) ~e))
-         ~(mk-type-alias e)
+  (let [e (parse-enum stx)
+        {:keys [huh-name alias-name]} (spec-meta *ns* e (meta (first stx)))
+        spec-name (make-name e identity)]
+    `(do (def ~(with-meta spec-name {:spec-tacular/enum (:name e)}) ~e)
+         ~(mk-type-alias e alias-name)
          ~(mk-enum-get-spec e)
-         ~(mk-huh e)
+         ~(mk-huh e huh-name)
          ~(mk-get-spec-class e))))
 
 ;; -----------------------------------------------------------------------------

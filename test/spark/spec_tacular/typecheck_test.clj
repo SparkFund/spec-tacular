@@ -43,20 +43,20 @@
   (or (ts/scm? x)
       (ts/scmownsenum? x)
       (ts/animal? x)
-      (ts/color? x)))
+      (ts/lensecolor? x)))
 
-(t/ann ex-color ts/Color)
-(def ex-color :Color/red)
+(t/ann ex-color ts/LenseColor)
+(def ex-color :LenseColor/red)
 
 (t/ann ex-spotlights (t/Vec ts/Spotlight))
 (def ex-spotlights
   [(ts/spotlight {})
-   (ts/spotlight {:color :Color/red})
-   (ts/spotlight {:color :Color/green
-                  :shaders #{:Color/orange}})])
+   (ts/spotlight {:color :LenseColor/red})
+   (ts/spotlight {:color :LenseColor/green
+                  :shaders #{:LenseColor/orange}})])
 
-(t/ann test-color-enum [sd/Database -> (t/Set ts/Color)])
+(t/ann test-color-enum [sd/Database -> (t/Set ts/LenseColor)])
 (defn test-color-enum [db]
-  (sd/q :find [:Color ...] :in (db) :where
+  (sd/q :find [:LenseColor ...] :in (db) :where
         [:Spotlight {:color %}]
         [:Spotlight {:shaders %}]))
