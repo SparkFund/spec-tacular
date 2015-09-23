@@ -618,7 +618,7 @@
                    :else (spec->alias spec))}))
 
 ;; -----------------------------------------------------------------------------
-;; defspec, defunion
+;; defspec, defunion, defenum
 
 (defmacro defspec
   "Defines a spec-tacular spec type.
@@ -698,7 +698,7 @@
   (let [e (parse-enum stx)
         {:keys [huh-name alias-name]} (spec-meta *ns* e (meta (first stx)))
         spec-name (make-name e identity)]
-    `(do (def ~(with-meta spec-name {:spec-tacular/enum (:name spec-name)}) ~e)
+    `(do (def ~(with-meta spec-name {:spec-tacular/enum (:name e)}) ~e)
          ~(mk-type-alias e alias-name)
          ~(mk-enum-get-spec e)
          ~(mk-huh e huh-name)
