@@ -119,7 +119,7 @@ the following in return:
 ;; Use the House schema to create a database and connection
 (def conn-ctx {:conn (schema/to-database! (schema/from-namespace *ns*))})
 
-;; Create a red house:
+;; Create a green house:
 (def h (sd/create! conn-ctx (house {:color :Color/green})))
 
 ;; Some quick semantics:
@@ -137,7 +137,7 @@ the following in return:
 (def new-h (sd/assoc! conn-ctx h :occupants [joe bernard]))
 ;; => assoc! returns a new House with the new field
 
-h ;; => is still the simple red house
+h ;; => is still the simple green house
 (sd/refresh conn-ctx h) ;; => new-h
 ;; In most cases, you can forego the `refresh` and just use the return
 ;; value of `assoc!`
