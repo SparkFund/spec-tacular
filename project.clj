@@ -9,7 +9,8 @@
                  [prismatic/schema "0.2.4"]
                  [org.clojure/test.check "0.7.0"]
                  [org.clojure/tools.macro "0.1.2"]
-                 [org.clojure/core.typed "0.2.79"]
+                 [org.clojure/core.typed "0.3.0"
+                  :exclusions [org.clojure/clojure]]
                  [org.clojure/core.match "0.3.0-alpha4"
                   :exclusions [org.ow2.asm/asm-all
                                org.clojure/tools.analyzer

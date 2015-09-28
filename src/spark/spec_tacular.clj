@@ -386,16 +386,17 @@
 (defn- mk-type-alias
   "Defines a core.typed alias named after the given spec's name"
   [spec alias-name]
-  (let [alias (symbol (str *ns*) (str alias-name))
+  (let [alias (symbol (str alias-name))
+        nsd-alias (symbol (str *ns*) (str alias-name))
         type  (spec->type spec)]
     `(do (t/defalias ~alias ~type)
          (defmethod get-type ~(:name spec) [_#] 
            ~(condp instance? spec
-              Spec      (map->SpecType {:name (:name spec) :type-symbol alias})
-              UnionSpec (map->SpecType {:name (:name spec) :type-symbol alias})
+              Spec      (map->SpecType {:name (:name spec) :type-symbol nsd-alias})
+              UnionSpec (map->SpecType {:name (:name spec) :type-symbol nsd-alias})
               EnumSpec  (map->SpecType {:name (:name spec)
                                         :type clojure.lang.Keyword
-                                        :type-symbol alias}))))))
+                                        :type-symbol nsd-alias}))))))
 
 ;; -----------------------------------------------------------------------------
 ;; constructors
@@ -656,8 +657,8 @@
   (let [s (parse-spec stx)
         {:keys [ctor-name huh-name alias-name]} (spec-meta *ns* s (meta (first stx)))
         spec-name (make-name s identity)]
-    `(do (def ~(with-meta spec-name {:spec-tacular/spec (:name s)}) ~s)
-         ~(mk-type-alias s alias-name)
+    `(do ~(mk-type-alias s alias-name)
+         (def ~(with-meta spec-name {:spec-tacular/spec (:name s)}) ~s)
          ~(mk-record s)
          ~(mk-get-map-ctor s)
          ~(mk-huh s huh-name)
@@ -677,8 +678,8 @@
   (let [u (parse-union stx)
         {:keys [huh-name alias-name]} (spec-meta *ns* u (meta (first stx)))
         spec-name (make-name u identity)]
-    `(do (def ~(with-meta spec-name {:spec-tacular/union (:name u)}) ~u)
-         ~(mk-type-alias u alias-name)
+    `(do ~(mk-type-alias u alias-name)
+         (def ~(with-meta spec-name {:spec-tacular/union (:name u)}) ~u)
          ~(mk-union-get-map-ctor u)
          ~(mk-union-get-spec u)
          ~(mk-huh u huh-name))))
@@ -698,8 +699,8 @@
   (let [e (parse-enum stx)
         {:keys [huh-name alias-name]} (spec-meta *ns* e (meta (first stx)))
         spec-name (make-name e identity)]
-    `(do (def ~(with-meta spec-name {:spec-tacular/enum (:name e)}) ~e)
-         ~(mk-type-alias e alias-name)
+    `(do ~(mk-type-alias e alias-name)
+         (def ~(with-meta spec-name {:spec-tacular/enum (:name e)}) ~e)
          ~(mk-enum-get-spec e)
          ~(mk-huh e huh-name)
          ~(mk-get-spec-class e))))
