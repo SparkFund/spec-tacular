@@ -50,6 +50,7 @@
       ([:link & rest] :seq)              (k {:link? true}        rest)
       ([:default-value v & rest] :seq)   (k {:default-value v}   rest)
       ([:component & rest] :seq)         (k {:component? true}   rest)
+      ([:doc doc-string & rest] :seq)    (k {}                   rest)
       :else (throw (ex-info "invalid options" (merge loc {:syntax stx}))))))
 
 ;; -----------------------------------------------------------------------------
