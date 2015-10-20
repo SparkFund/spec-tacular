@@ -64,7 +64,7 @@
   then returns that spec, otherwise returns `nil`."
 
   resolve-fn)
-(defmethod get-spec :default [_] nil)
+(defmethod get-spec :default [& _] nil)
 
 (t/ann ^:no-check get-type [(t/U SpecInstance t/Keyword) -> SpecType])
 (defmulti get-type

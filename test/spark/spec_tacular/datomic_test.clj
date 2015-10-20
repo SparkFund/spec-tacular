@@ -43,11 +43,11 @@
 (deftest test-transaction-data
   (testing "bool"
     (let [switch (switch {:on? nil})
-          data (transaction-data nil Switch nil {:on? nil})
+          data (transaction-data nil {} Switch nil {:on? nil})
           _ (is (= (map last data) [:Switch]))
-          data (transaction-data nil Switch {:db-ref {:eid 1}} {:on? true})
+          data (transaction-data nil {} Switch {:db-ref {:eid 1}} {:on? true})
           _ (is (= data [[:db/add 1 :switch/on? true]]))
-          data (transaction-data nil Switch {:db-ref {:eid 1} :on? true} {:on? false})
+          data (transaction-data nil {} Switch {:db-ref {:eid 1} :on? true} {:on? false})
           _ (is (= data [[:db/add 1 :switch/on? false]]))
           ]))
 
@@ -55,7 +55,7 @@
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :Scm2)
-          td #(transaction-data nil spec %1 %2)]
+          td #(transaction-data nil {} spec %1 %2)]
       (testing "valid"
         (is (= (td si {:val1 125})
                [[:db/add gs :scm2/val1 125]]))
@@ -71,7 +71,7 @@
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :Scm)
-          td #(transaction-data nil spec %1 %2)]
+          td #(transaction-data nil {} spec %1 %2)]
       (testing "valid"
         (is (= (td si {:val1 "125" :val2 125})
                [[:db/add gs :scm/val1 "125"]
@@ -96,7 +96,7 @@
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :ScmOwnsEnum)
-          td #(transaction-data nil spec %1 %2)
+          td #(transaction-data nil {} spec %1 %2)
           a-scm3 (assoc (scm3) :db-ref {:eid 5})
           a-scm2 (assoc (scm2) :db-ref {:eid 120})]
       (testing "valid"
@@ -129,7 +129,7 @@
     (let [gs (gensym)
           si {:db-ref {:eid gs}}
           spec (get-spec :ScmLink)
-          td #(transaction-data nil spec %1 %2)
+          td #(transaction-data nil {} spec %1 %2)
           a-scm  (assoc (scm {:val1 "hi"}) :db-ref {:eid 1})
           a-scmp (assoc (scmparent {:scm a-scm}) :db-ref {:eid 2})
           a-scml (assoc (scmlink {:val1 a-scmp}) :db-ref {:eid 3})]
@@ -149,13 +149,13 @@
   (testing "graph"
     (let [s (scm {:val1 "string"})
           eid (db/tempid :db.part/user)]
-      (is (= (meta (transaction-data nil (get-spec :Scm) nil s
+      (is (= (meta (transaction-data nil {} (get-spec :Scm) nil s
                                      (atom {s eid})))
              {:eid eid})))
 
     (let [s   (scm2 {:val1 42})
           eid (db/tempid :db.part/user)]
-      (is (= (count (transaction-data nil (get-spec :ScmM) nil
+      (is (= (count (transaction-data nil {} (get-spec :ScmM) nil
                                       {:val s :vals [s]}
                                       (atom {})))
              (count '[[:db/add id1 :spec-tacular/spec :ScmM] ;; edited out ids
@@ -167,15 +167,15 @@
           tmps (atom [])]
       (with-test-db simple-schema
         (let [db (db/db *conn*)]
-          (do (transaction-data db (get-spec e1) nil e1 tmps)
-              (is (= (transaction-data db (get-spec e1) nil e1 tmps)
+          (do (transaction-data db {} (get-spec e1) nil e1 tmps)
+              (is (= (transaction-data db {} (get-spec e1) nil e1 tmps)
                      [])))))))
 
   (testing "enum"
     (let [sl1 (spotlight {:color :LenseColor/red
                           :shaders #{:LenseColor/blue :LenseColor/green}})
           eid (db/tempid :db.part/user)
-          data (transaction-data nil Spotlight nil sl1 nil)]
+          data (transaction-data nil {} Spotlight nil sl1 nil)]
       (is (= (set (map last data))
              #{:Spotlight :LenseColor/red :LenseColor/blue :LenseColor/green})))))
 
@@ -1300,7 +1300,7 @@
           _ (is (= (:on? switch) nil))
           switch (assoc! conn-ctx switch :on? true)
           _ (is (= (:on? switch) true))
-          data (transaction-data (sd/db conn-ctx) Switch switch {:on? false})
+          data (transaction-data (sd/db conn-ctx) {} Switch switch {:on? false})
           switch (assoc! conn-ctx switch :on? false)
           _ (is (= (:on? switch) false))])))
 
