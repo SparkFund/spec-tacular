@@ -6,6 +6,8 @@
         [spark.spec-tacular.datomic :exclude [db]])
   (:require [datomic.api :as db]
             [spark.spec-tacular.schema :as schema]
+            [clj-time.core :as time]
+            [clj-time.coerce :as timec]
             [clojure.test.check :as tc]
             [clojure.test.check.properties :as prop]
             [clojure.test.check.generators :as gen]
@@ -27,7 +29,14 @@
                               (gen/resize 10 gen/bytes)))
    :uri     (fn [_] (gen/fmap #(java.net.URI. %) gen/string-alpha-numeric))
    :bytes   (fn [_] gen/bytes)
-   :ref     (fn [_] gen/simple-type-printable)})
+   :ref     (fn [_] gen/simple-type-printable)
+   :calendarday
+   (fn [& [_]] (gen/fmap (fn [date]
+                           (clojure.core/let [dt (timec/from-date date)]
+                             (time/date-time (time/year dt) (time/month dt) (time/day dt))))
+                         (gen/fmap #(java.util.Date. %) gen/int)))
+   })
+
 
 (defn- item-gen
   [{iname :name [cardinality type-key] :type required :required? unique? :unique?}
