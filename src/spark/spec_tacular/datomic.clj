@@ -311,40 +311,6 @@
       (map? mb) mb
       :else (or ma mb))))
 
-(t/ann ^:no-check item-mask [SpecT SpecInstance -> Mask])
-(defn ^:no-doc item-mask
-  "Builds a mask-map representing a specific sp value,
-   where missing keys represent masked out fields and sp objects
-   consisting only of a db-ref are considered 'true' valued leaves
-   for identity updates only."
-  [spec-name sp]
-  (let [spec (get-spec spec-name)]
-    (if (and (some? spec) (and (some? sp)
-                               (if (and (coll? sp) (not (map? sp))) ; union-masks over empty lists would result in the nil mask, but we want an empty list to mean 'true' -- i.e. explicitly empty.
-                                 (not-empty sp)
-                                 true)))
-      (if (:elements spec)
-        (let [union-mask (fn [sp-item]
-                          (let [sub-spec-name (:name (get-spec sp-item))]
-                            {sub-spec-name (item-mask sub-spec-name sp-item)}))]
-          (if (and (coll? sp) (not (map? sp)))
-            (reduce union-masks (map union-mask sp)) ; only recover mask from the particular union types used by the instance
-            (union-mask sp)))
-        (let [field-mask
-              , (fn [sp-item]
-                  (if (= [:db-ref] (keys sp-item))
-                    true
-                    (into {} (map (fn [{iname :name [_ sub-spec-name] :type}]
-                                    (when (contains? sp-item iname) ; the "parent" 
-                                      [iname (item-mask sub-spec-name 
-                                                        (get sp-item iname))]))
-                                  (:items spec)))))]
-          (if (and (coll? sp) (not (map? sp)))
-            (reduce union-masks (map field-mask sp)) ; only recover mask from the particular union types used by the instance
-            (field-mask sp))))
-      true)))
-
-
 (t/ann ^:no-check shallow-mask [SpecT -> Mask])
 (defn ^:no-doc shallow-mask
   "Builds a mask-map of the given spec for consumption by
@@ -570,36 +536,6 @@
       (if (= true mask)
         sp
         nil))))
-
-(t/ann ^:no-check update-sp!
-       [ConnCtx SpecInstance SpecInstance -> Long])
-(defn ^:no-doc update-sp!
-  "old-sp and new-sp need {:db-ref {:eid eid}} defined.
-  Uses the semantics of item-mask, so keys that are not present in
-  new-sp won't be updated or checked for comparing old vs new.  
-
-  We may want to consider more conservative transaction semantics,
-  i.e.  take the maximum/union of old-sp and new-sp masks, (i.e. if
-  some property of new-sp is calculated as a function of other
-  proeprties, but those source properties aren't mentioned in the
-  sp-new they won't be locked for the update."
-  [conn-ctx old-sp new-sp]
-  (assert old-sp "must be updating something")
-  (let [spec (get-spec old-sp)
-        _ (when (not= spec (get-spec new-sp)) (throw (ex-info "old-sp and new-sp have mismatched specs" {:old-spec spec :new-spec (get-spec new-sp)})))
-        mask (item-mask (:name spec) new-sp) ;(union-masks (item-mask (:name spec) old-sp) (item-mask (:name spec) new-sp)) ; Summed because we could be adding more "precise" keys etc than were present in old.
-        db (db/db (:conn conn-ctx))
-        old-eid (get-in old-sp [:db-ref :eid])
-        _ (when (not= old-eid (get-in new-sp [:db-ref :eid])) (throw (ex-info "old-sp and new-sp need to have matching eids to update."  {:old-eid old-eid :new-eid (get-in new-sp [:db-ref :eid])})))
-        current (sp-filter-with-mask mask (:name spec) (db->sp db (db/entity db old-eid) (:name spec)))]
-    (when (not= (sp-filter-with-mask mask (:name spec) old-sp) current)
-      (throw (ex-info "Aborting transaction: old-sp has changed." {:old old-sp :current current})))
-    (let [deletions (atom '())
-          datomic-data (build-transactions db new-sp mask deletions)
-          txns  (with-meta
-                  (cons datomic-data @deletions)
-                  (meta datomic-data))]
-      (commit-sp-transactions! conn-ctx txns))))
 
 ; TODO consider replocing the old "update-sp" etc with something more explicitly masked like this?
 (t/ann ^:no-check masked-update-sp!
@@ -1157,7 +1093,8 @@
                 (do (let [sub-spec (get-spec type)]
                       (when (and link? (not (instance? EnumSpec sub-spec)))
                         (throw (ex-info "retracted link missing eid" {:entity i}))))
-                    [[:db/retract parent-eid datomic-key i]])))]
+                    (let [i (if (= type :calendarday) (timec/to-date i) i)]
+                      [[:db/retract parent-eid datomic-key i]]))))]
       (cond
         (= cardinality :one)
         ,(cond

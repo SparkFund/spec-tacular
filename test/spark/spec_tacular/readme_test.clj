@@ -1,4 +1,5 @@
 (ns spark.spec-tacular.readme-test
+  (:refer-clojure :exclude [cat])
   (:use clojure.test)
   (:require [spark.spec-tacular.schema :as schema]
             [spark.spec-tacular.datomic :as sd]

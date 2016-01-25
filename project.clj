@@ -3,7 +3,7 @@
   :url "https://github.com/SparkFund/spec-tacular"
   :license {:name "Apache License, Version 2.0"
             :url "http://www.apache.org/licenses/LICENSE-2.0.html"}
-  :dependencies [[org.clojure/clojure "1.6.0"]
+  :dependencies [[org.clojure/clojure "1.7.0"]
                  [com.datomic/datomic-free "0.9.5130"
                   :exclusions [joda-time]]
                  [prismatic/schema "0.2.4"]
