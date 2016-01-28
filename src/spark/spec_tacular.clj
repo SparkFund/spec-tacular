@@ -129,7 +129,7 @@
   [{[_ t] :type}]
   (if (primitive? t) :non-rec :rec)) ;; TODO
 
-(defn- coerce
+(defn coerce
   "Coerces `val` into something that could be put in the `kw` field of
   `spec`.  Returns `nil` only if the value is coerced to `nil`; i.e.
   if `val` does not have a `coercion` the `val` is returned unharmed."
@@ -267,7 +267,7 @@
                  (throw (ex-info "attempt to associate field not in the spec" {:instance this# :field k#})))
                (new ~class-name
                     (reduce
-                     (fn [m# [k1# v1#]] (assoc m# k1# v1#))
+                     (fn [m# [k1# v1#]] (assoc m# k1# (coerce ~spec k1# v1#)))
                      ~'atmap (conj (deref ~'cache) [k# v#])) ;; order important - k#/v# win
                     (atom {})
                     nil)))

@@ -206,6 +206,13 @@
   (is (= (testspec7 {:nums  [1 2 3 4]})
          (testspec7 {:nums #{1 2 3 4}}))))
 
+(defspec TestSpec8
+  [day :is-a :calendarday])
+
+(deftest test-calendarday
+  (is (= (:day (assoc (testspec8) :day "2015-1-1"))
+         (clj-time.core/date-time 2015 1 1))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; random testing
 
@@ -266,7 +273,8 @@
                     (into #{} (map :name ns-specs))
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testunion :ES :ESParent :UnionFoo :UnionForward :A :B
-                      :Link :Human :TestSpec6 :TestSpec7 :IsEnum :HasEnum})]
-    (is (= (count both) 18) "total number of specs")
+                      :Link :Human :TestSpec6 :TestSpec7 :IsEnum :HasEnum
+                      :TestSpec8})]
+    (is (= (count both) 19) "total number of specs")
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))
