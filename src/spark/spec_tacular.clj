@@ -375,7 +375,8 @@
         opts (cons [:db-ref `(t/Option t/Any)] opts)
         opts (cons [:spec-tacular/spec `(t/Option t/Keyword)] opts)]
     ;; TODO: aren't there required fields?
-    `(t/HMap :complete? true :optional ~(into {} opts)))) 
+    #_`(t/HMap :complete? true :optional ~(into {} opts))
+    (spec->class spec)))
 
 (defn- spec->type [spec]
   (condp instance? spec
