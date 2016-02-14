@@ -1046,9 +1046,9 @@
 (t/defalias ^:no-doc TransactionData (t/List (t/HVec [t/Keyword Long t/Keyword t/Any])))
 
 (t/ann ^:no-check transaction-data-item
-       [Database SpecT Long Item t/Any t/Any -> TransactionData])
+       [SpecT Long t/Any Item t/Any t/Any -> TransactionData])
 (defn ^:no-doc transaction-data-item
-  [db parent-spec parent-eid txn-fns
+  [parent-spec parent-eid txn-fns
    {iname :name required? :required? link? :link? [cardinality type] :type :as item}
    old new & [tmps]]
   (let [datomic-key (keyword (datomic-ns parent-spec) (name iname))]
@@ -1062,27 +1062,25 @@
                 ;; adding by reference
                 [[:db/add parent-eid datomic-key sub-eid]]
                 ;; adding by value
-                (do (when (and db (get-eid db i))
-                      (throw (ex-info "Unique entity already in database, cannot add by value."
-                                      {:entity i :parent-spec parent-spec :field iname})))
-                    (if (= (recursiveness item) :non-rec)
-                      (let [sub-spec (get-spec type)
-                            i (if (= type :calendarday) (timec/to-date i) i)]
-                        (if-let [fn (get-in txn-fns [parent-spec iname])]
-                          [[fn parent-eid datomic-key i]]
-                          [[:db/add parent-eid datomic-key i]]))
-                      (let [sub-eid  (db/tempid :db.part/user)
-                            _ (when (and tmps link?)
-                                (swap! tmps conj [i sub-eid]))
-                            sub-spec (get-spec type)
-                            sub-spec (if (:elements sub-spec)
-                                       (get-spec i) sub-spec)]
-                        (concat [[:db/add parent-eid datomic-key sub-eid]
-                                 [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
-                                (transaction-data db txn-fns sub-spec {:db-ref {:eid sub-eid}} i tmps)))))))
+                (if (= (recursiveness item) :non-rec)
+                  (let [sub-spec (get-spec type)
+                        i (if (= type :calendarday) (timec/to-date i) i)]
+                    (if-let [fn (get-in txn-fns [parent-spec iname])]
+                      [[fn parent-eid datomic-key i]]
+                      [[:db/add parent-eid datomic-key i]]))
+                  (let [sub-eid  (db/tempid :db.part/user)
+                        _ (when (and tmps link?)
+                            (swap! tmps conj [i sub-eid]))
+                        sub-spec (get-spec type)
+                        sub-spec (if (:elements sub-spec)
+                                   (get-spec i) sub-spec)]
+                    (concat [[:db/add parent-eid datomic-key sub-eid]
+                             [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
+                            (transaction-data txn-fns sub-spec {:db-ref {:eid sub-eid}} i tmps))))))
             (retract [i] ;; removes i from field datomic-key in entity eid
               (when (not (some? i))
-                (throw (ex-info "cannot retract nil" {:spec (:name parent-spec) :old old :new new})))
+                (throw (ex-info "cannot retract nil"
+                                {:spec (:name parent-spec) :old old :new new})))
               (when required?
                 (throw (ex-info "attempt to delete a required field"
                                 {:item item :field iname :spec parent-spec})))
@@ -1127,8 +1125,8 @@
                (apply concat)))))))
 
 (t/ann ^:no-check transaction-data
-       [Database SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
-(defn ^:no-doc transaction-data [db txn-fns spec old-si updates & [tmps]]
+       [SpecT t/Any (t/Map t/Keyword t/Any) -> TransactionData])
+(defn ^:no-doc transaction-data [txn-fns spec old-si updates & [tmps]]
   "Given a possibly nil, possibly out of date old entity.
    Returns the transaction data to do the desired updates to something of type spec."
   (if-let [eid (when (and (nil? old-si) tmps)
@@ -1144,7 +1142,7 @@
           (throw (ex-info "Cannot add keys not in the spec." {:keys diff}))))
       (->> (for [{iname :name :as item} (:items spec)
                  :when (contains? updates iname)]
-             (transaction-data-item db spec eid txn-fns item (iname old-si) (iname updates) tmps))
+             (transaction-data-item spec eid txn-fns item (iname old-si) (iname updates) tmps))
            (apply concat)
            (#(if (get-in old-si [:db-ref :eid]) %
                  (cons [:db/add eid :spec-tacular/spec (:name spec)] %)))
@@ -1166,7 +1164,7 @@
                          (throw (ex-info "could not find spec" {:entity si})))
                        (when (or (get si :db-ref) (get-eid db si))
                          (throw (ex-info "entity already in database" {:entity si})))
-                       (transaction-data db (:txn-fns conn-ctx) spec nil si tmps))
+                       (transaction-data (:txn-fns conn-ctx) spec nil si tmps))
                      new-si-coll specs))
         tmpids (map (comp :eid meta) data)
         data   (apply concat data)
@@ -1249,8 +1247,7 @@
   (when-not (get si :db-ref)
     (throw (ex-info "entity must be on database already" {:entity si})))
   (let [spec (get-spec si)
-        eid  (->> (transaction-data (db/db (:conn conn-ctx))
-                                    (:txn-fns conn-ctx)
+        eid  (->> (transaction-data (:txn-fns conn-ctx)
                                     spec
                                     si
                                     updates)
