@@ -415,13 +415,16 @@
                          defaults (keys sp))
         sp-map   (dissoc sp-map :spec-tacular/spec)
         actual-kws   (keys (dissoc sp :spec-tacular/spec :db-ref))
-        required-kws (keep #(if (:required? %) (:name %)) items)
         rec-kws      (set (keep (fn [{iname :name [arity sub-spec-name] :type}]
                                   (when-not (primitive? sub-spec-name) iname))
-                                items))]
-    (do (doseq [kw (concat required-kws actual-kws)
-                :when (not (contains? rec-kws kw))]
-          (check-component! spec kw (get sp-map kw)))
+                                items))
+        required-kws (set (keep #(if (:required? %) (:name %)) items))]
+    (do (doseq [kw (concat required-kws actual-kws)]
+          (when (and (contains? required-kws kw)
+                     (not (some? (get sp-map kw))))
+            (throw (ex-info "missing required field" {:field kw :spec spec})))
+          (when-not (contains? rec-kws kw)
+            (check-component! spec kw (get sp-map kw))))
         (map-ctor sp-map h))))
 
 (t/ann ^:no-check recursive-ctor (t/All [a] [t/Keyword a -> a]))
