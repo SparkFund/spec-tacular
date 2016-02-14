@@ -31,6 +31,9 @@
     ([:link & items*] :seq)
     ,(mapcat parse-item (map #(conj % :link) items*))
 
+    ([:component & items*] :seq)
+    ,(mapcat parse-item (map #(conj % :component) items*))
+
     (([name card t & opts] :seq) :guard vector?)
     ,(let [cardinality (case card (:is-a :is-an) :one (:is-many) :many)
            item-info (->> (parse-opts opts loc)
