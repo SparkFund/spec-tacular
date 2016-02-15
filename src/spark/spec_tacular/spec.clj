@@ -84,6 +84,6 @@
            [:calendarday org.joda.time.DateTime `org.joda.time.DateTime timec/to-date-time]
            [:uuid java.util.UUID `java.util.UUID #(if (string? %) (java.util.UUID/fromString %) %)]
            [:uri java.net.URI `java.net.URI nil]
-           [:bytes Bytes `Bytes nil]])) 
+           [:bytes Bytes `Bytes nil]]))
 
 (def ^:constant core-types (into #{} (keys type-map)))

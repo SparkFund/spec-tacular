@@ -6,16 +6,25 @@
 (declare parse-spec parse-item parse-type parse-opts)
 
 ;; -----------------------------------------------------------------------------
-;; spec 
+;; spec
 
 (defn parse-spec [stx & [loc]]
   (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
     (match stx
+      ([name (docstring :guard string?) & items] :seq)
+      (let [name  (keyword name)
+            items (mapcat #(parse-item % loc) items)]
+        (map->Spec {:name name
+                    :doc docstring
+                    :items items
+                    :syntax (cons 'defspec stx)}))
       ([name & items] :seq)
-      ,(let [name  (keyword name)
-             items (mapcat #(parse-item % loc) items)]
-         (map->Spec {:name name :items items :syntax (cons 'defspec stx)}))
-      :else (throw (ex-info "expecting name followed by sequence of items" 
+      (let [name  (keyword name)
+            items (mapcat #(parse-item % loc) items)]
+        (map->Spec {:name name
+                    :items items
+                    :syntax (cons 'defspec stx)}))
+      :else (throw (ex-info "expecting name followed by sequence of items"
                             (merge loc {:syntax stx}))))))
 
 (defn parse-item [stx & [loc]]
@@ -35,7 +44,7 @@
          (throw (ex-info (str "expecting keyword type, got " (type t))
                          (merge loc {:syntax stx}))))
        [(map->Item (merge {:name item-name :type [cardinality t]} item-info))])
-    
+
     :else (throw (ex-info "expecting item [item-name cardinality type opts*] or (:link item*)"
                           (merge loc {:syntax stx})))))
 
@@ -62,7 +71,7 @@
       ([name & specs] :seq)
       ,(let [name (keyword name)]
          (map->UnionSpec {:name name :elements (into #{} specs)}))
-      :else (throw (ex-info "expecting name followed by sequence of specs" 
+      :else (throw (ex-info "expecting name followed by sequence of specs"
                             (merge loc {:syntax stx}))))))
 
 ;; -----------------------------------------------------------------------------
