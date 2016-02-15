@@ -673,16 +673,18 @@
   "Defines a spec-tacular union.
 
   ```
-  (defunion Name :SpecName ...)
+  (defunion Name docstring? :SpecName ...)
   ```
 
   where each SpecName is another spec to be added to the union."
   [& stx]
   (let [u (parse-union stx)
         {:keys [huh-name alias-name]} (spec-meta *ns* u (meta (first stx)))
-        spec-name (make-name u identity)]
+        spec-name (make-name u identity)
+        {:keys [doc]} u]
     `(do ~(mk-type-alias u alias-name)
-         (def ~(with-meta spec-name {:spec-tacular/union (:name u)}) ~u)
+         (def ~(with-meta spec-name {:spec-tacular/union (:name u)
+                                     :doc doc}) ~u)
          ~(mk-union-get-map-ctor u)
          ~(mk-union-get-spec u)
          ~(mk-huh u huh-name))))
@@ -691,7 +693,7 @@
   "Defines an enumeration of values under a parent name.
 
   ```
-  (defenum Name symbol ...)
+  (defenum Name docstring? symbol ...)
   ```
 
   The resulting enumeration recognizes `:Name/<symbol>` keywords,
@@ -701,9 +703,11 @@
   [& stx]
   (let [e (parse-enum stx)
         {:keys [huh-name alias-name]} (spec-meta *ns* e (meta (first stx)))
-        spec-name (make-name e identity)]
+        spec-name (make-name e identity)
+        {:keys [doc]} e]
     `(do ~(mk-type-alias e alias-name)
-         (def ~(with-meta spec-name {:spec-tacular/enum (:name e)}) ~e)
+         (def ~(with-meta spec-name {:spec-tacular/enum (:name e)
+                                     :doc doc}) ~e)
          ~(mk-enum-get-spec e)
          ~(mk-huh e huh-name)
          ~(mk-get-spec-class e))))

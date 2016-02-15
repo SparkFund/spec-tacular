@@ -269,9 +269,22 @@
   "A complicated thing that really needs documentation"
   [name :is-a :string])
 
+(defunion Complexity
+  "Complexity is complicated"
+  :Complicated)
+
+(defenum Complications
+  "Simple isn't easy"
+  Simple
+  Easy)
+
 (deftest test-docstrings
   (is (= "A complicated thing that really needs documentation"
-         (:doc (meta #'Complicated)))))
+         (:doc (meta #'Complicated))))
+  (is (= "Complexity is complicated"
+         (:doc (meta #'Complexity))))
+  (is (= "Simple isn't easy"
+         (:doc (meta #'Complications)))))
 
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -284,7 +297,7 @@
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testunion :ES :ESParent :UnionFoo :UnionForward :A :B
                       :Link :Human :TestSpec6 :TestSpec7 :IsEnum :HasEnum
-                      :TestSpec8 :Complicated})]
-    (is (= (count both) 20) "total number of specs")
+                      :TestSpec8 :Complicated :Complexity :Complications})]
+    (is (= (count both) 22) "total number of specs")
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))
