@@ -11,7 +11,7 @@ the following in return:
 * **Representation of Datomic entities as maps** that verify (upon
    creation and association) that entity attributes have the correct
    fields, and in turn, the correct types
-   
+
 * **Core Typed aliases for each spec**
 
 * **Specialized query language** with a map-like syntax that allows
@@ -57,7 +57,7 @@ the following in return:
 ;; a Mailbox. It may also link in any number of Occupants.
 (defspec House
   (:link [occupants :is-many :Occupant])
-  [mailbox :is-a :Mailbox]               
+  [mailbox :is-a :Mailbox]
   [color :is-a :Color :required])
 
 (defenum Color   ;; Houses can only be green or orange..
@@ -65,6 +65,12 @@ the following in return:
 
 (defspec Mailbox              ;; Hope you don't want to get your mail
   [has-mail? :is-a :boolean]) ;; cause mailboxes only know if they have mail
+
+;; Specs can have docstrings
+(defspec Chimney
+  "Chimneys are super complicated and require documentation"
+  (:link [house :is-a House]))
+(doc Chimney) ;; Such words
 
 ;; Houses can be occupied by either People or Pets.
 (defunion Occupant :Person :Pet)

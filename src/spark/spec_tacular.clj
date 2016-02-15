@@ -626,13 +626,14 @@
 
   ```
   (defspec Name
-    [field-name arity type option ...]
+    [field-name docstring? arity type option ...]
     ...)
   ```
 
   creates the spec `:Name`; where arity is either `:is-a` or
   `:is-many` and type is either another spec name or a primitive type
-  keyword.
+  keyword. The docstring is optional; if given, it will become the
+  :doc metadata on the spec var.
 
   spec-tacular supports base types `:keyword`, `:string`, `:boolean`,
   `:long`, `:bigint`, `:float`, `:double`, `:bigdec`, `:instant`,
