@@ -626,7 +626,8 @@
 
   ```
   (defspec Name
-    [field-name docstring? arity type option ...]
+    docstring?
+    [field-name arity type option ...]
     ...)
   ```
 
