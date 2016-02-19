@@ -42,7 +42,7 @@
 
 (defn- resolve-fn [o & rest]
   (cond
-    (:spec-tacular/spec o) (:spec-tacular/spec o) 
+    (:spec-tacular/spec o) (:spec-tacular/spec o)
     (or (instance? Spec o)
         (instance? EnumSpec o)
         (instance? UnionSpec o)) (:name o)
@@ -133,7 +133,7 @@
   "Coerces `val` into something that could be put in the `kw` field of
   `spec`.  Returns `nil` only if the value is coerced to `nil`; i.e.
   if `val` does not have a `coercion` the `val` is returned unharmed."
-  [spec kw val] 
+  [spec kw val]
   (let [{[cardinality typ] :type :as item} (get-item spec kw)]
     (if (and item (some? val)) ;; this is defined in the spec, and the item is non-nil
       (case cardinality
@@ -153,7 +153,7 @@
   "Returns a sequence containing every spec in the given namespace."
   [namespace]
   (->> (ns-publics namespace)
-       (map (fn [[sym v]] 
+       (map (fn [[sym v]]
               (some-> (meta v)
                       (#(or (:spec-tacular/spec %)
                             (:spec-tacular/union %)
@@ -184,7 +184,7 @@
       (let [;; This is a work-around for being able to define
             ;; recursive types
             spec-class (get-spec-class typ)
-            is-type? (fn [v] 
+            is-type? (fn [v]
                        (if (class? spec-class)
                          (instance? spec-class v)
                          (contains? (set (:elements (get-spec typ)))
@@ -301,7 +301,7 @@
                (clojure.lang.APersistentMap/mapHash this#))
            (equals [this# ~gs]
              (= this# ~gs)))
-         
+
          (defmethod print-method ~class-name [v# ^java.io.Writer w#]
            (.write w# (spec-instance->str ~spec v# '~(ns-name *ns*))))
          (defmethod pp/simple-dispatch ~class-name [v#]
@@ -375,7 +375,7 @@
         opts (cons [:db-ref `(t/Option t/Any)] opts)
         opts (cons [:spec-tacular/spec `(t/Option t/Keyword)] opts)]
     ;; TODO: aren't there required fields?
-    `(t/HMap :complete? true :optional ~(into {} opts)))) 
+    `(t/HMap :complete? true :optional ~(into {} opts))))
 
 (defn- spec->type [spec]
   (condp instance? spec
@@ -390,7 +390,7 @@
         nsd-alias (symbol (str *ns*) (str alias-name))
         type  (spec->type spec)]
     `(do (t/defalias ~alias ~type)
-         (defmethod get-type ~(:name spec) [_#] 
+         (defmethod get-type ~(:name spec) [_#]
            ~(condp instance? spec
               Spec      (map->SpecType {:name (:name spec) :type-symbol nsd-alias})
               UnionSpec (map->SpecType {:name (:name spec) :type-symbol nsd-alias})
@@ -479,13 +479,13 @@
 (defn- mk-union-get-map-ctor [spec]
   (let [fac-sym (symbol (str "map->i_" (name (:name spec)) "-fixed"))]
     `(do
-       ;; the "map ctor" for an union means it's arg needs to 
+       ;; the "map ctor" for an union means it's arg needs to
        ;; be a tagged map or a record type of one of the union's ctors.
        (defn ~fac-sym [o# h#]
          (let [subspec-name# (:name (get-spec o#))]
            (assert subspec-name#
                    (str "could not find spec for "o#))
-           (assert (contains? ~(:elements spec) subspec-name#) 
+           (assert (contains? ~(:elements spec) subspec-name#)
                    (str subspec-name#" is not an element of "~(:name spec)))
            ((get-map-ctor subspec-name#) o# h#)))
        (defmethod get-map-ctor ~(:name spec) [_#] ~fac-sym))))
@@ -623,16 +623,18 @@
 
 (defmacro defspec
   "Defines a spec-tacular spec type.
-  
+
   ```
   (defspec Name
+    docstring?
     [field-name arity type option ...]
     ...)
   ```
 
   creates the spec `:Name`; where arity is either `:is-a` or
   `:is-many` and type is either another spec name or a primitive type
-  keyword. 
+  keyword. The docstring is optional; if given, it will become the
+  :doc metadata on the spec var.
 
   spec-tacular supports base types `:keyword`, `:string`, `:boolean`,
   `:long`, `:bigint`, `:float`, `:double`, `:bigdec`, `:instant`,
@@ -656,9 +658,11 @@
   [& stx]
   (let [s (parse-spec stx)
         {:keys [ctor-name huh-name alias-name]} (spec-meta *ns* s (meta (first stx)))
-        spec-name (make-name s identity)]
+        spec-name (make-name s identity)
+        {:keys [doc]} s]
     `(do ~(mk-type-alias s alias-name)
-         (def ~(with-meta spec-name {:spec-tacular/spec (:name s)}) ~s)
+         (def ~(with-meta spec-name {:spec-tacular/spec (:name s)
+                                     :doc doc}) ~s)
          ~(mk-record s)
          ~(mk-get-map-ctor s)
          ~(mk-huh s huh-name)
@@ -670,16 +674,18 @@
   "Defines a spec-tacular union.
 
   ```
-  (defunion Name :SpecName ...)
+  (defunion Name docstring? :SpecName ...)
   ```
 
   where each SpecName is another spec to be added to the union."
   [& stx]
   (let [u (parse-union stx)
         {:keys [huh-name alias-name]} (spec-meta *ns* u (meta (first stx)))
-        spec-name (make-name u identity)]
+        spec-name (make-name u identity)
+        {:keys [doc]} u]
     `(do ~(mk-type-alias u alias-name)
-         (def ~(with-meta spec-name {:spec-tacular/union (:name u)}) ~u)
+         (def ~(with-meta spec-name {:spec-tacular/union (:name u)
+                                     :doc doc}) ~u)
          ~(mk-union-get-map-ctor u)
          ~(mk-union-get-spec u)
          ~(mk-huh u huh-name))))
@@ -688,7 +694,7 @@
   "Defines an enumeration of values under a parent name.
 
   ```
-  (defenum Name symbol ...)
+  (defenum Name docstring? symbol ...)
   ```
 
   The resulting enumeration recognizes `:Name/<symbol>` keywords,
@@ -698,9 +704,11 @@
   [& stx]
   (let [e (parse-enum stx)
         {:keys [huh-name alias-name]} (spec-meta *ns* e (meta (first stx)))
-        spec-name (make-name e identity)]
+        spec-name (make-name e identity)
+        {:keys [doc]} e]
     `(do ~(mk-type-alias e alias-name)
-         (def ~(with-meta spec-name {:spec-tacular/enum (:name e)}) ~e)
+         (def ~(with-meta spec-name {:spec-tacular/enum (:name e)
+                                     :doc doc}) ~e)
          ~(mk-enum-get-spec e)
          ~(mk-huh e huh-name)
          ~(mk-get-spec-class e))))
@@ -772,7 +780,7 @@
 (defn refless=
   "Given any walkable collection, returns `true` if the two
   collections would be `=` if no spec instances had `:db-ref`s.
-  
+
   Contains a fast path if both `x` and `y` have specs, otherwise
   expect bad asymptotics as each collection must be rebuilt without
   `:db-ref`s."

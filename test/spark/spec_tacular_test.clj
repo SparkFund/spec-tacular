@@ -24,7 +24,7 @@
     (is (some? (get-spec :TestSpec1 :TestSpec1)))
     (is (some? (get-spec {:spec-tacular/spec :TestSpec1})))
     (is (some? (get-spec (get-spec :TestSpec1))))
-    
+
     (let [good (testspec1 {:val1 3 :val2 "hi"})]
       (is (testspec1? good))
       (is (= (:val1 good) 3))
@@ -43,13 +43,13 @@
   (testing "invalid"
     (is (not (testspec1? {:val1 3 :val2 "hi"}))
         "not a record")
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"required" 
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"required"
                           (testspec1 {:val1 nil}))
         "missing required field")
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"required"
                           (testspec1 {:val2 1}))
         "missing required field")
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type" 
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid type"
                           (testspec1 {:val1 0 :val2 1}))
         "wrong type")
     (is (thrown? clojure.lang.ExceptionInfo (testspec1 {:val1 3 :extra-key true}))
@@ -114,7 +114,7 @@
          (get-spec :TestSpec2)))
   (is (= (:elements (get-spec :testunion))
          #{:TestSpec2 :TestSpec3}))
-  
+
   (is (testunion? (testspec2 {})))
   (is (instance? spark.spec_tacular.spec.UnionSpec (get-spec :testunion)))
   (is (check-component! (get-spec :ES) :foo (testspec2 {})))
@@ -188,7 +188,7 @@
   (let [l1 (link {:ts3 (assoc (testspec3) :db-ref 1)})]
     (is (= (refless l1)
            (link {:ts3 (testspec3)}))))
-  
+
   (let [l1 (link {:ts3 (testspec3 {:db-ref 1}) :db-ref 3})
         l2 (link {:ts3 (testspec3 {:db-ref 2}) :db-ref 4})]
     (is (refless= [[[l1]]] [[[l2]]]) "refless equality"))
@@ -263,6 +263,29 @@
                      :name "Mary",
                      :pets #{(cat {:name "Ringo"}) (dog {:name "George"})}}]))))
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;; docstrings
+(defspec Complicated
+  "A complicated thing that really needs documentation"
+  [name :is-a :string])
+
+(defunion Complexity
+  "Complexity is complicated"
+  :Complicated)
+
+(defenum Complications
+  "Simple isn't easy"
+  Simple
+  Easy)
+
+(deftest test-docstrings
+  (is (= "A complicated thing that really needs documentation"
+         (:doc (meta #'Complicated))))
+  (is (= "Complexity is complicated"
+         (:doc (meta #'Complexity))))
+  (is (= "Simple isn't easy"
+         (:doc (meta #'Complications)))))
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;; ns
@@ -274,7 +297,7 @@
                     #{:TestSpec1 :TestSpec2 :TestSpec3 :TestSpec4 :TestSpec5
                       :testunion :ES :ESParent :UnionFoo :UnionForward :A :B
                       :Link :Human :TestSpec6 :TestSpec7 :IsEnum :HasEnum
-                      :TestSpec8})]
-    (is (= (count both) 19) "total number of specs")
+                      :TestSpec8 :Complicated :Complexity :Complications})]
+    (is (= (count both) 22) "total number of specs")
     (is (nil? b) "no missing specs")
     (is (nil? a) "no extra specs")))

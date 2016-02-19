@@ -6,17 +6,25 @@
 (declare parse-spec parse-item parse-type parse-opts)
 
 ;; -----------------------------------------------------------------------------
-;; spec 
+;; spec
 
 (defn parse-spec [stx & [loc]]
   (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
-    (match stx
-      ([name & items] :seq)
-      ,(let [name  (keyword name)
-             items (mapcat #(parse-item % loc) items)]
-         (map->Spec {:name name :items items :syntax (cons 'defspec stx)}))
-      :else (throw (ex-info "expecting name followed by sequence of items" 
-                            (merge loc {:syntax stx}))))))
+    (letfn [(build [name docstring items]
+              (let [name  (keyword name)
+                    items (mapcat #(parse-item % loc) items)
+                    attrs (cond-> {:name name
+                                   :items items
+                                   :syntax (cons 'defspec stx)}
+                            docstring (assoc :doc docstring))]
+                (map->Spec attrs)))]
+      (match stx
+        ([name (docstring :guard string?) & items] :seq)
+        ,(build name docstring items)
+        ([name & items] :seq)
+        ,(build name nil items)
+        :else (throw (ex-info "expecting name followed by sequence of items"
+                              (merge loc {:syntax stx})))))))
 
 (defn parse-item [stx & [loc]]
   (match stx
@@ -35,7 +43,7 @@
          (throw (ex-info (str "expecting keyword type, got " (type t))
                          (merge loc {:syntax stx}))))
        [(map->Item (merge {:name item-name :type [cardinality t]} item-info))])
-    
+
     :else (throw (ex-info "expecting item [item-name cardinality type opts*] or (:link item*)"
                           (merge loc {:syntax stx})))))
 
@@ -58,31 +66,46 @@
 
 (defn parse-union [stx & [loc]]
   (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
-    (match stx
-      ([name & specs] :seq)
-      ,(let [name (keyword name)]
-         (map->UnionSpec {:name name :elements (into #{} specs)}))
-      :else (throw (ex-info "expecting name followed by sequence of specs" 
-                            (merge loc {:syntax stx}))))))
+    (letfn [(build [name docstring specs]
+              (let [attrs (cond-> {:name (keyword name)
+                                   :elements (into #{} specs)}
+                            docstring
+                            (assoc :doc docstring))]
+                (map->UnionSpec attrs)))]
+      (match stx
+        ([name (docstring :guard string?) & specs] :seq)
+        ,(build name docstring specs)
+        ([name & specs] :seq)
+        ,(build name nil specs)
+        :else (throw (ex-info "expecting name followed by sequence of specs"
+                              (merge loc {:syntax stx})))))))
 
 ;; -----------------------------------------------------------------------------
 ;; enum
 
 (defn parse-enum [stx & [loc]]
   (let [loc (or loc (merge {:namespace (str *ns*)} (meta stx)))]
-    (match stx
-      ([name & values] :seq)
-      ,(do (when-not (symbol? name)
-             (throw (ex-info (str "enumeration name must be a symbol, given " (type name))
-                             (merge loc {:syntax stx}))))
-           (when-not (every? symbol? values)
-             (throw (ex-info "some enumeration values are not symbols"
-                             (merge loc {:syntax stx :problems (filter (complement symbol?) values)}))))
-           (when (empty? values)
-             (throw (ex-info "enumeration can't be empty"
-                             (merge loc {:syntax stx}))))
-           (let [ename (keyword name)
-                 vals  (map #(keyword (str name) (str %)) values)]
-             (map->EnumSpec {:name ename :values (into #{} vals)})))
-      :else (throw (ex-info "expecting name followed by arbitrary number of symbols"
-                            (merge loc {:syntax stx}))))))
+    (letfn [(build [name docstring values]
+              (do (when-not (symbol? name)
+                    (throw (ex-info (str "enumeration name must be a symbol, given " (type name))
+                                    (merge loc {:syntax stx}))))
+                  (when-not (every? symbol? values)
+                    (throw (ex-info "some enumeration values are not symbols"
+                                    (merge loc {:syntax stx :problems (filter (complement symbol?) values)}))))
+                  (when (empty? values)
+                    (throw (ex-info "enumeration can't be empty"
+                                    (merge loc {:syntax stx}))))
+                  (let [ename (keyword name)
+                        vals  (map #(keyword (str name) (str %)) values)
+                        attrs (cond-> {:name ename
+                                       :values (into #{} vals)}
+                                docstring
+                                (assoc :doc docstring))]
+                    (map->EnumSpec attrs))))]
+      (match stx
+        ([name (docstring :guard string?) & values] :seq)
+        ,(build name docstring values)
+        ([name & values] :seq)
+        ,(build name nil values)
+        :else (throw (ex-info "expecting name followed by arbitrary number of symbols"
+                              (merge loc {:syntax stx})))))))
