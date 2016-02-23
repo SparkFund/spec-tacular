@@ -1,4 +1,4 @@
- (ns spark.spec-tacular.datomic-test
+(ns spark.spec-tacular.datomic-test
   (:refer-clojure :exclude [remove read-string read assoc!])
   (:use clojure.test
         spark.spec-tacular

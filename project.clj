@@ -7,7 +7,7 @@
                  [com.datomic/datomic-free "0.9.5130"
                   :exclusions [joda-time]]
                  [prismatic/schema "0.2.4"]
-                 [org.clojure/test.check "0.7.0"]
+                 [org.clojure/test.check "0.9.0"]
                  [org.clojure/tools.macro "0.1.2"]
                  [org.clojure/core.typed "0.3.0"
                   :exclusions [org.clojure/clojure]]

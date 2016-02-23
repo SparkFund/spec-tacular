@@ -16,51 +16,57 @@
 (def ^{:doc "map of generators for primitive specs, by keyword name."
        :private true}
   prim-gens
-  {:keyword (fn [_] gen/keyword)
-   :string  (fn [_] gen/string-ascii)
-   :boolean (fn [_] gen/boolean) 
-   :long    (fn [_] gen/int)
-   :bigint  (fn [_] (gen/fmap #(java.math.BigInteger. %) gen/int))
-   :float   (fn [_] (gen/fmap #(float (/ % 100.0)) gen/int))
-   :double  (fn [_] (gen/fmap #(float (/ % 100.0)) gen/int))
-   :bigdec  (fn [_] (gen/fmap #(/ (java.math.BigDecimal. %) 100.0M) gen/int))
-   :instant (fn [_] (gen/fmap #(java.util.Date. %) gen/int))
-   :uuid    (fn [_] (gen/fmap #(java.util.UUID/nameUUIDFromBytes %)
-                              (gen/resize 10 gen/bytes)))
-   :uri     (fn [_] (gen/fmap #(java.net.URI. %) gen/string-alpha-numeric))
-   :bytes   (fn [_] gen/bytes)
-   :ref     (fn [_] gen/simple-type-printable)
+  {:keyword gen/keyword
+   :string  gen/string-ascii
+   :boolean gen/boolean 
+   :long    gen/int
+   :bigint  (gen/fmap #(java.math.BigInteger. %) gen/int)
+   :float   (gen/fmap #(float (/ % 100.0)) gen/int)
+   :double  gen/double
+   :bigdec  (gen/fmap #(/ (java.math.BigDecimal. %) 100.0M) gen/int)
+   :instant (gen/fmap #(java.util.Date. %) gen/int)
+   :uuid    (gen/fmap #(java.util.UUID/nameUUIDFromBytes %)
+                      (gen/resize 10 gen/bytes))
+   :uri     (gen/fmap #(java.net.URI. %) gen/string-alpha-numeric)
+   :bytes   gen/bytes
+   :ref     gen/simple-type-printable
    :calendarday
-   (fn [& [_]] (gen/fmap (fn [date]
-                           (clojure.core/let [dt (timec/from-date date)]
-                             (time/date-time (time/year dt) (time/month dt) (time/day dt))))
-                         (gen/fmap #(java.util.Date. %) gen/int)))
+   (gen/fmap (fn [date]
+               (clojure.core/let [dt (timec/from-date date)]
+                 (time/date-time (time/year dt) (time/month dt) (time/day dt))))
+             (gen/fmap #(java.util.Date. %) gen/int))
    })
 
+(defmulti instance-generator
+  "Returns a generator for the given spec.  Optional second argument
+  can be used to override generators for the items in the spec, and
+  should be a map from field names to generators."
+  (fn [spec & rest] spec))
 
 (defn- item-gen
   [{iname :name [cardinality type-key] :type required :required? unique? :unique?}
-   spec-gen-env]
-  (let [generator ,((get spec-gen-env type-key) spec-gen-env)
-        maybe-optionize ,(if required identity #(gen/one-of [(gen/return nil) %]))
-        maybe-unique ,(if (and unique? (= type-key :string))
-                        #(gen/bind % (fn [s] (gen/return (str (gensym) s))))
-                        identity)]
-    (assert generator (str "missing definition of sub-generator: "
-                           type-key))
-    [iname (-> (case cardinality
-                 :one generator
-                 :many (gen/bind (gen/vector generator)
-                         ;; distinct works for primitives but
-                         ;; not for spec instances for some reason
-                         (fn [coll] (gen/return (distinct coll)))))
-               maybe-unique
-               maybe-optionize)]))
+   overrides]
+  (let [maybe-optionize (if required identity #(gen/one-of [(gen/return nil) %]))
+        maybe-unique (if (and unique? (= type-key :string))
+                       #(gen/bind % (fn [s] (gen/return (str (gensym) s))))
+                       identity)]
+    [iname (-> (or (get overrides iname) 
+                   (let [generator (instance-generator type-key)]
+                     (assert generator (str "missing definition of sub-generator: "
+                                            type-key))
+                     (-> (case cardinality
+                           :one generator
+                           :many (gen/bind (gen/vector generator)
+                                   ;; distinct works for primitives but
+                                   ;; not for spec instances for some reason
+                                   (fn [coll] (gen/return (distinct coll)))))
+                         maybe-unique
+                         maybe-optionize))))]))
 
-(defn- spec-gen [spec spec-gen-env & [pre]]
+(defn- spec-gen [spec overrides & [pre]]
   (cond
     (:elements spec)
-    ,(gen/one-of (map #((get spec-gen-env %) spec-gen-env) (:elements spec)))
+    ,(gen/one-of (map instance-generator (:elements spec)))
     (:items spec)
     ,(gen/bind (gen/frequency [[8 (gen/return true)] [2 (gen/return false)]])
        (fn [use-pre?]
@@ -71,8 +77,9 @@
                                     (or (not (= (get-spec (second (:type item))) spec))
                                         (not use-pre?)) ;; hijack use-pre? to stop infinite recursion
                                     ))
-                          (map #(item-gen % spec-gen-env)))
-                 mapgen (apply gen/hash-map (apply concat kvs))
+                          (map #(item-gen % overrides)))
+                 mapgen (gen/fmap #(->> % (filter second) (into {}))
+                                  (apply gen/hash-map (apply concat kvs)))
                  factory (get-ctor (:name spec))]
              (gen/bind (gen/fmap factory mapgen)
                (fn [sp]
@@ -81,6 +88,13 @@
                      (gen/return sp))))))))
     (:values spec)
     (gen/one-of (map #(gen/return %) (:values spec)))))
+
+(defmethod instance-generator :default
+  [spec-name & [overrides]]
+  (if (and (primitive? spec-name)
+           (not (:values (get-spec spec-name))))
+    (get prim-gens spec-name)
+    (spec-gen (get-spec spec-name) overrides)))
 
 (defn- spec-subset
   "generates a map from a generator but with just a subset of the keys.
@@ -146,19 +160,11 @@
       (spec-subset sp-gen))
     (throw (ex-info "Expecting spec object or name of spec" {:actual spec}))))
 
-(defn instance-generator
-  "Returns a generator for the given `spec`."
-  [spec]
-  (if-let [spec-key (:name (get-spec spec))]
-    (mk-spec-generator spec-key)
-    (throw (ex-info "Expecting spec object or name of spec" {:actual spec}))))
-
 (defn ^:no-doc graph-generator [spec]
   (let [pre (atom {})
         sp-gen (mk-spec-generator (:name spec) pre)]
     (gen/bind (gen/such-that #(> (count %) 3) (gen/not-empty (gen/vector sp-gen)) 50)
       #(gen/return {:expected %}))))
-
 
 (defn check-create! 
   "Checks that `original` can be created on the database."
