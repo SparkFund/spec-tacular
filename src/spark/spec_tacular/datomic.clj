@@ -1074,7 +1074,9 @@
                         sub-spec (get-spec type)
                         sub-spec (if (:elements sub-spec)
                                    (get-spec i) sub-spec)]
-                    (concat [[:db/add parent-eid datomic-key sub-eid]
+                    (concat (when (and (:component? item) (= cardinality :one) (some? old))
+                              [[:db.fn/retractEntity (get-in old [:db-ref :eid])]])
+                            [[:db/add parent-eid datomic-key sub-eid]
                              [:db/add sub-eid :spec-tacular/spec (:name sub-spec)]]
                             (transaction-data txn-fns sub-spec {:db-ref {:eid sub-eid}} i tmps))))))
             (retract [i] ;; removes i from field datomic-key in entity eid
@@ -1096,8 +1098,6 @@
       (cond
         (= cardinality :one)
         ,(cond
-           (and (some? new) (some? old) (:component? item))
-           ,(concat (retract old) (add new))
            (some? new) (add new)
            (some? old) (retract old)
            :else [])
