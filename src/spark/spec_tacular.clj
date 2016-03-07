@@ -803,7 +803,7 @@
           (loop [l (seq (clojure.set/difference x #{nil})),
                  s (clojure.set/difference y #{nil})]
             (if-some [v1 (when-first [v1 l] v1)]
-              (if-some [v2 (some #(when (= (refless= % v1)) [%]) s)] ;; wrap false-ish values
+              (if-some [v2 (some #(when (refless= % v1) [%]) s)] ;; wrap false-ish values
                 (recur (rest l) (clojure.set/difference s #{(first v2)}))
                 false)
               (empty? s))))
