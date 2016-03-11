@@ -1055,10 +1055,11 @@
     (letfn [(add [i] ;; adds i to field datomic-key in entity eid
               (when-not (some? i)
                 (throw (ex-info "cannot add nil" {:spec (:name parent-spec) :old old :new new})))
-              (if-let [sub-eid (and link? (or (get-in i [:db-ref :eid])
-                                              (and tmps (some (fn [[k v]]
-                                                                (and (identical? k i) v))
-                                                              @tmps))))]
+              (if-let [sub-eid (and (or link? (:component? item)) ; not by value
+                                    (or (get-in i [:db-ref :eid])
+                                        (and tmps (some (fn [[k v]]
+                                                          (and (identical? k i) v))
+                                                        @tmps))))]
                 ;; adding by reference
                 [[:db/add parent-eid datomic-key sub-eid]]
                 ;; adding by value

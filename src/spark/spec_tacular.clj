@@ -313,7 +313,7 @@
                    (pp-fn# obj#)))
                (pp/pprint-logical-block
                 :prefix (str "(" (resolved-ctor-name ~spec '~(ns-name *ns*)) " ") :suffix ")"
-                (pp/simple-dispatch (merge (.atmap v#) (deref (.cache v#)))))))))))
+                (pp/simple-dispatch (into {} (seq v#))))))))))
 
 (defn ^:no-doc resolved-ctor-name [spec ns]
   (let [ctor-name (make-name spec lower-case)]
