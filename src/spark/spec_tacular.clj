@@ -185,10 +185,12 @@
             ;; recursive types
             spec-class (get-spec-class typ)
             is-type? (fn [v]
-                       (if (class? spec-class)
-                         (instance? spec-class v)
-                         (contains? (set (:elements (get-spec typ)))
-                                    (:name (get-spec v)))))]
+                       (if-let [vals (:values (get-spec typ))]
+                         (contains? vals v)
+                         (if (class? spec-class)
+                           (instance? spec-class v)
+                           (contains? (set (:elements (get-spec typ)))
+                                      (:name (get-spec v))))))]
         (when-not (case cardinality
                     :many (every? is-type? v)
                     :one  (is-type? v))
