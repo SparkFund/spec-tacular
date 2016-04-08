@@ -1319,4 +1319,14 @@
                (set (:container/many pulled))))
         (is (refless= (set (:many (rebuild (db) pulled)))
                       (:many c))
-            "they aren't = anymore because they were pulled off the database at different times, but at least they're refless=")))))
+            "they aren't = anymore because they were pulled off the database at different times, but at least they're refless="))))
+  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Spotlight [:color])]
+    (is (= datomic-pattern 
+           [{:spotlight/color [:db/ident]}]))
+    (with-test-db simple-schema
+      (let [spotlight (create! {:conn *conn*} (spotlight {:color :LenseColor/red}))
+            pulled (db/pull (db) datomic-pattern (get-eid (db) spotlight))]
+        (is (= pulled
+               {:spotlight/color {:db/ident :LenseColor/red}}))
+        (is (= (rebuild (db) pulled)
+               {:color :LenseColor/red}))))))

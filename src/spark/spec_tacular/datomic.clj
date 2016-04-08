@@ -1320,20 +1320,27 @@
        :rebuild (fn [db m] (apply merge (map #(% db m) (map :rebuild rec))))})
     (keyword? pattern)
     (when-let [{[arity sub-spec-name] :type :as item} (get-item spec pattern)]
-      (let [kw (db-keyword spec pattern)]
-        {:datomic-pattern [kw]
-         :rebuild (fn [db m]
-                    (when-let [v (get m kw)]
-                      (let [f #(recursive-ctor (get-spec sub-spec-name)
-                                               (if (:component? item)
-                                                 (coerce-datomic-entity %)
-                                                 (db/entity db (:db/id %))))]
-                        [pattern
-                         (if (primitive? sub-spec-name)
-                           v
-                           (if (= :many arity)
-                             (mapv f v)
-                             (f v)))])))}))
+      (let [kw (db-keyword spec pattern)
+            sub-spec (get-spec sub-spec-name)]
+        (if (and (primitive? sub-spec-name)
+                 (instance? spark.spec_tacular.spec.EnumSpec sub-spec))
+          {:datomic-pattern [{kw [:db/ident]}]
+           :rebuild (fn [db m]
+                      (when-let [v (get m kw)]
+                        [pattern (:db/ident v)]))}
+          {:datomic-pattern [kw]
+           :rebuild (fn [db m]
+                      (when-let [v (get m kw)]
+                        (let [f #(recursive-ctor (get-spec sub-spec-name)
+                                                 (if (:component? item)
+                                                   (coerce-datomic-entity %)
+                                                   (db/entity db (:db/id %))))]
+                          [pattern
+                           (if (primitive? sub-spec-name)
+                             v
+                             (if (= :many arity)
+                               (mapv f v)
+                               (f v)))])))})))
     (instance? spark.spec_tacular.spec.Item pattern)
     (let [spec (:spec-tacular/spec (meta pattern))
           kw (db-keyword spec (keyword (str "_" (name (:name pattern)))))]
