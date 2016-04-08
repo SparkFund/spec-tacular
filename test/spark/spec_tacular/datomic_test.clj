@@ -499,6 +499,31 @@
                    (db) 5678 e2)
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
+(deftest test-parse-query
+  (testing "scalar"
+    (is (= (parse-query '(:find :Ex . :in db :where [1 2 3]))
+           '{:f [:Ex] :type :scalar :db db :wc ([1 2 3])}))
+    (is (thrown? Exception (parse-query '(:find 56 . :in db :where [1 2 3])))))
+  (testing "relation"
+    (is (= (parse-query '(:find :Ex :Ey :in db :where [1 2 3]))
+           '{:f (:Ex :Ey) :type :relation :db db :wc ([1 2 3])})))
+  (testing "collection"
+    (is (= (parse-query '(:find [:Ex ...] :in db :where [1 2 3]))
+           '{:f [:Ex] :type :coll :db db :wc ([1 2 3])})))
+  (testing "tuple"
+    (is (= (parse-query '(:find [:Ex :Ey] :in db :where [1 2 3]))
+           '{:f [:Ex :Ey] :type :tuple :db db :wc ([1 2 3])})))
+  (testing "pull"
+    (is (= (parse-query '(:find [(pull :Ex [:pattern]) :Ey] :in db :where [1 2 3]))
+           '{:f [(pull :Ex [:pattern]) :Ey] :type :tuple :db db :wc ([1 2 3])}))
+    (is (= (parse-query '(:find
+                          (pull :Spotlight [:color])
+                          :in (db) :where [% {:color :LenseColor/red}]))
+           '{:f ((pull :Spotlight [:color]))
+             :type :relation
+             :db (db)
+             :wc ([% {:color :LenseColor/red}])}))))
+
 (deftest query-tests
   (testing "primitive data"
     (with-test-db simple-schema
@@ -518,6 +543,14 @@
              (q :find ?a ?b :in (db) :where
                 [:ScmParent {:scm {:val1 ?b :val2 ?a}}]))
           "multiple attribute returns")
+      (is (contains? #{[1 "a"] [2 "b"]}
+                     (q :find [?a ?b] :in (db) :where
+                        [:ScmParent {:scm {:val1 ?b :val2 ?a}}]))
+          "tuple")
+      (is (contains? #{1 2}
+                     (q :find ?a . :in (db) :where
+                        [:ScmParent {:scm {:val2 ?a}}]))
+          "scalar")
       (is (= #{[1]}
              (q :find ?a :in (db) :where
                 [:ScmParent {:scm {:val1 "a" :val2 ?a}}]))
@@ -1133,9 +1166,8 @@
                   [:Spotlight {:color %}]
                   [:Spotlight {:shaders %}])
                #{:LenseColor/red :LenseColor/green}))
-        (is (= (let [color :LenseColor/green]
-                 (q :find :Spotlight :in (db) :where
-                    [% {:color color}]))
+        (is (= (q :find :Spotlight :in (db) :where
+                  [% {:color :LenseColor/green}])
                #{[sl2-a]}))
 
         (is (refless= (assoc! conn-ctx sl2-a :color nil)
@@ -1330,3 +1362,30 @@
                {:spotlight/color {:db/ident :LenseColor/red}}))
         (is (= (rebuild (db) pulled)
                {:color :LenseColor/red}))))))
+
+(deftest test-pull-query
+  (with-test-db simple-schema
+    (let [spotlight (create! {:conn *conn*} (spotlight {:color :LenseColor/red}))]
+      (is (= (db/pull (db) '({:spotlight/color [:db/ident]}) (get-eid (db) spotlight))
+             {:spotlight/color {:db/ident :LenseColor/red}}))
+      (is (= (sd/q :find (pull :Spotlight [:color]) .
+                   :in (db)
+                   :where
+                   [% {:color :LenseColor/red}])
+             {:color :LenseColor/red}))
+      (is (= (sd/q :find (pull :Spotlight [:color])
+                   :in (db)
+                   :where
+                   [% {:color :LenseColor/red}])
+             #{[{:color :LenseColor/red}]}))
+      (is (= (sd/q :find [(pull :Spotlight [:color]) ...]
+                   :in (db)
+                   :where
+                   [% {:color :LenseColor/red}])
+             #{{:color :LenseColor/red}}))
+      (is (= (sd/q :find [(pull :Spotlight [:color]) :LenseColor]
+                   :in (db)
+                   :where
+                   [%1 {:color %2}])
+             [{:color :LenseColor/red} :LenseColor/red]))
+      )))

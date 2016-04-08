@@ -690,7 +690,7 @@
          (throw (ex-info (str "could not infer type for " ident)
                          {:syntax ident :tenv @tenv})))
        (expand-ident [ident spec-name] uenv tenv))
-    (vector? ident)
+    (vector? ident) 
     ,(let [[var spec-name] ident
            spec (get-spec spec-name)]
        (when-not spec
@@ -714,9 +714,11 @@
                         [(mk-where-clause `'~rhs)])))
       (and (keyword? rhs)
            (get-spec rhs))
-      ,(t/let [y (gensym "?tmp")]
-         [(mk-where-clause `'~y)
-          [`'~y :spec-tacular/spec rhs]])
+      ,(let [y (gensym "?tmp")]
+         (if (instance? spark.spec_tacular.spec.EnumSpec (get-spec rhs))
+           [(mk-where-clause `'~rhs)]
+           [(mk-where-clause `'~y)
+            [`'~y :spec-tacular/spec rhs]]))
       (map? rhs)
       ,(t/let [y (gensym "?tmp")
                sub-atmap :- QueryMap rhs]
@@ -882,13 +884,17 @@
           swap-symbol! :- [t/Sym -> t/Sym]
           ,(fn [old] 
              (let [new (mk-new old)]
-               (swap! uenv assoc old new) new))
-          swap-retvar! :- [(t/U t/Keyword t/Sym) -> t/Sym]
-          ,(fn [r]
-             (cond 
-               (keyword? r) (swap-keyword! r)
-               (symbol? r)  (swap-symbol! r)))]
-    (doall (map swap-retvar! rets))))
+               (swap! uenv assoc old new) new))]
+    (letfn [(swap-retvar! [r]
+              (cond 
+                (keyword? r) (swap-keyword! r)
+                (symbol? r)  (swap-symbol! r)
+                (and (seq? r)
+                     (= (first r) 'pull))
+                (let [[pull ident pattern] r
+                      r' (swap-retvar! ident)]
+                  (list pull r' pattern))))]
+      (doall (map swap-retvar! rets)))))
 
 (t/ann annotate-patvars! [(t/List QueryClause) QueryUEnv QueryTEnv -> t/Any])
 (defn- annotate-patvars! [clauses uenv tenv]
@@ -939,28 +945,35 @@
 ;; clause    = [ident map]
 ;; map       = % | %n | spec-name
 ;;           | {:kw (clause | map | ident | value),+}
-(t/tc-ignore ;; only called from inside a macro; TODO type
- (defn- parse-query [stx]
-   (let [keywords [:find :in :where]
-         partitions (partition-by (fn [stx] (some #(= stx %) keywords)) stx)]
-     (match partitions ;; ((:find) (1 2 ....) (:in) (3) (:where) (4 5 ....))
-       ([([:find] :seq) f ([:in] :seq) db ([:where] :seq) wc] :seq)
-       (do (when-not (or (every? #(or (symbol? %) (keyword? %)) f)
-                         (match (first f) ([v '...] :seq) true :else false))
-             (throw (ex-info "expecting sequence of symbols and keywords, or collection syntax"
-                             {:syntax f})))
-           (when-not (= (count db) 1)
-             (throw (ex-info "expecting exactly one database expression" {:syntax db})))
-           (when-not (every? #(or (vector? %) (list? %)) wc)
-             (throw (ex-info "expecting sequence of vectors or lists" {:syntax wc})))
-           ;; TODO -- can do more syntax checking here
-           {:f (match (first f) ([v '...] :seq) [v] :else f)
-            :coll? (match (first f) ([v '...] :seq) true :else false)
-            :db (first db)
-            :wc wc})
-       :else
-       (throw (ex-info "expecting keywords :find, :in, and :where followed by arguments"
-                       {:syntax partitions}))))))
+(defn ^{:no-doc true} parse-query [stx]
+  (let [keywords [:find :in :where]
+        partitions (partition-by (fn [stx] (some #(= stx %) keywords)) stx)]
+    ;; (find-rel | find-coll | find-tuple | find-scalar)
+    (match partitions ;; ((:find) (1 2 ....) (:in) (3) (:where) (4 5 ....))
+      ([([:find] :seq) f ([:in] :seq) db ([:where] :seq) wc] :seq)
+      (let [parsed-f (match f
+                       ([elem '.] :seq)
+                       {:f [elem] :type :scalar}
+                       ([([elem '...] :seq)] :seq)
+                       {:f [elem] :type :coll}
+                       ([([& (elems :guard #(not (= 'pull (first %))))] :seq)] :seq)
+                       {:f elems :type :tuple}
+                       ([& elems] :seq)
+                       {:f elems :type :relation}
+                       :else (throw (ex-info "expecting find specification for relation, coll, tuple, or scalar"
+                                             {:syntax f})))]
+        (do (when-not (= (count db) 1)
+              (throw (ex-info "expecting exactly one database expression" {:syntax db})))
+            (when-not (every? #(or (vector? %) (list? %)) wc)
+              (throw (ex-info "expecting sequence of vectors or lists" {:syntax wc})))
+            (let [bad-elems (filter #(not (or (symbol? %) (keyword? %) (and (seq? %) (= (first %) 'pull))))
+                                    (:f parsed-f))]
+              (when-not (empty? bad-elems)
+                (throw (ex-info "invalid find element" {:bad-elements bad-elems}))))
+            (merge parsed-f {:db (first db) :wc wc})))
+      :else
+      (throw (ex-info "expecting keywords :find, :in, and :where followed by arguments"
+                      {:syntax partitions})))))
 
 (defmacro q
   "Returns a set of results from the Datomic query.  See [the
@@ -971,6 +984,9 @@
   (q :find FIND-EXPR+ :in expr :where CLAUSE+)
 
   FIND-EXPR = IDENT 
+            | IDENT .
+            | (pull IDENT pattern)
+            | [IDENT+ ]
             | [IDENT ...]
   IDENT     = SpecName
             | ?variable
@@ -1002,11 +1018,13 @@
   get the spec of an entity use the special keyword
   `:spec-tacular/spec` as an entry in any `MAP`."
   [& stx]
-  (let [{:keys [f db wc coll?]} (parse-query stx)
-        {:keys [args env clauses]} (expand-query f wc)
+  (let [{:keys [f wc type] find-type :type db-expr :db} (parse-query stx)
+        {:keys [env clauses] args-with-pulls :args} (expand-query f wc)
+        args (map (fn [arg] (if (seq? arg) (second arg) arg)) args-with-pulls)
         type-kws  (map #(get env %) args)
         type-maps (map get-type type-kws)
         type-syms (map :type-symbol type-maps)
+        db (gensym 'db)
         err (fn [result t-s]
               `(throw (ex-info "possible spec mismatch"
                                {:actual-type   (type '~result)
@@ -1027,21 +1045,75 @@
                     (let [e# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
                               (db/entity ~db ~result) ~t-s)]
                       (recursive-ctor ~t-kw e#))
-                    ~(err result t-s))))]
-    `(t/let [check# :- [~(if coll? `t/Any `(t/Vec t/Any)) ~'->
-                        ~(if coll? (first type-syms) `(t/HVec ~(vec type-syms)))]
-             ~(if coll?
+                    ~(err result t-s))))
+        pull-gs (gensym 'pulls)
+        pulls (->> args-with-pulls
+                   (keep (fn [arg]
+                           (when (seq? arg)
+                             [(second arg)
+                              [`'~(second arg)
+                               `(datomify-spec-pattern
+                                 ~(get-spec (get env (second arg)))
+                                 ~(last arg))]])))
+                   (into {}))
+        find-elems (mapv (fn [arg-with-pull]
+                           (if (seq? arg-with-pull)
+                             (list 'list
+                                   ''pull
+                                   `'~(second arg-with-pull)
+                                   `(:datomic-pattern (get ~pull-gs '~(second arg-with-pull))))
+                             `'~arg-with-pull))
+                         args-with-pulls)
+        query `(clojure.core.typed.unsafe/ignore-with-unchecked-cast
+                (db/q {:find ~(case find-type
+                                :coll `[[~(first find-elems) '...]]
+                                :relation `(list ~@find-elems)
+                                :scalar (list 'list
+                                              (first find-elems)
+                                              `'.)
+                                :tuple `[~find-elems])
+                       :in '~['$]
+                       :where (distinct ~clauses)}
+                      ~db)
+                ~(case find-type
+                   :scalar `t/Any
+                   (:tuple :coll) `(t/Seqable t/Any)
+                   :relation `(t/Seqable (t/Vec t/Any))))
+        check (case find-type
+                (:coll :scalar)
                 `(fn [~(first args)]
-                   ~(wrap (first args) (first type-kws) (first type-maps) (first type-syms)))
+                   ~(if (get pulls (first args))
+                      `((:rebuild (get ~pull-gs '~(first args))) ~db ~(first args))
+                      (wrap (first args) (first type-kws) (first type-maps) (first type-syms))))
+                (:relation :tuple)
                 `(fn [~(vec args)]
-                   [~@(map wrap args type-kws type-maps type-syms)]))]
-       (->> (clojure.core.typed.unsafe/ignore-with-unchecked-cast
-             (db/q {:find ~(if coll? `'([~(first args) ...]) `'~args)
-                    :in '~['$]
-                    :where (distinct ~clauses)}
-                   ~db)
-             (t/Seqable ~(if coll? `t/Any `(t/Vec t/Any))))
-            (map check#) (set)))))
+                   [~@(mapv (fn [arg & rest]
+                              (if (get pulls arg)
+                                `((:rebuild (get ~pull-gs '~arg)) ~db ~arg)
+                                (apply wrap arg rest)))
+                            args type-kws type-maps type-syms)]))
+        check-arg-type (case find-type
+                         (:coll :scalar) `t/Any
+                         (:relation :tuple) `(t/Vec t/Any))
+        check-ret-type (case find-type
+                         (:coll :scalar)
+                         (if (and (seq? (first args)) (= (ffirst args) 'pull))
+                           `(t/Map t/Any t/Any)
+                           (first type-syms))
+                         (:relation :tuple) `(t/HVec ~(vec type-syms)))
+        check-type `[~check-arg-type ~'-> ~check-ret-type]
+        check-gs (gensym 'check)
+        query-gs (gensym 'query)]
+    `(t/let [~db :- Database ~db-expr
+             ~pull-gs :- (t/Map t/Symbol '{:datomic-pattern t/Any :rebuild t/Any})
+             ~(into {} (vals pulls))
+             ~check-gs :- ~check-type ~check
+             ~query-gs ~query]
+       ~(case find-type
+          (:coll :relation)
+          `(->> ~query-gs (map ~check-gs) (set))
+          (:scalar :tuple)
+          `(~check-gs ~query-gs)))))
 
 ;; =============================================================================
 ;; database interfaces

@@ -57,6 +57,6 @@
 
 (t/ann test-color-enum [sd/Database -> (t/Set ts/LenseColor)])
 (defn test-color-enum [db]
-  (sd/q :find [:LenseColor ...] :in (db) :where
+  (sd/q :find [:LenseColor ...] :in db :where
         [:Spotlight {:color %}]
         [:Spotlight {:shaders %}]))
