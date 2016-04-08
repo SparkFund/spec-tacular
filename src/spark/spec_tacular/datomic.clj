@@ -6,7 +6,8 @@
         spark.spec-tacular)
   (:import clojure.lang.MapEntry
            spark.spec_tacular.spec.Spec
-           spark.spec_tacular.spec.EnumSpec)
+           spark.spec_tacular.spec.EnumSpec
+           (spark.spec_tacular.spec UnionSpec))
   (:require [clj-time.coerce :as timec]
             [clojure.core.typed :as t :refer [for]]
             [clojure.string :refer [lower-case]]
@@ -85,29 +86,32 @@
       ,(make-keyword (name (:name a)))
       :else (throw (ex-info "cannot make db-keyword" {:spec spec :attr a})))))
 
+(defn coerce-datomic-entity [em]
+  (if-let [spec (get-spec em)] ;; Spec
+    (do (when-not (every? (fn [kw] (some #(= (db-keyword spec (:name %)) kw) (:items spec)))
+                          (filter #(case % (:spec-tacular/spec :db/id :db/txInstant) false true)
+                                  (keys em)))
+          (throw (ex-info "bad entity in database" {:entity em})))
+        (->> (for [{iname :name :as item} (:items spec)]
+               [iname (get em (db-keyword spec iname))])
+             (cons [:db-ref {:eid (:db/id em)}])
+             (cons [:spec-tacular/spec (:name spec)])
+             (filter (comp some? second))
+             (into {})))
+    (if-let [kw (:db/ident em)] ;; EnumSpec
+      (do (when-not (keyword? kw)
+            (throw (ex-info "bad enum in database" {:entity em})))
+          (if-let [spec (get-spec kw)]
+            (if (instance? EnumSpec spec) kw
+                (throw (ex-info "bad enum in database" {:entity em})))))
+      (throw (ex-info "bad entity in database" {:entity em})))))
+
 (t/ann ^:no-check database-coercion [datomic.query.EntityMap -> (t/Map t/Keyword t/Any)])
 (t/tc-ignore
  ;; the returned map may be missing valid keys, but it will definitely
  ;; be of the correct spec and won't have completely invalid kws
  (defmethod database-coercion datomic.query.EntityMap [em]
-   (if-let [spec (get-spec em)] ;; Spec
-     (do (when-not (every? (fn [kw] (some #(= (db-keyword spec (:name %)) kw) (:items spec)))
-                           (filter #(case % (:spec-tacular/spec :db-ref :db/txInstant) false true)
-                                   (keys em)))
-           (throw (ex-info "bad entity in database" {:entity em})))
-         (->> (for [{iname :name :as item} (:items spec)]
-                [iname (get em (db-keyword spec iname))])
-              (cons [:db-ref {:eid (:db/id em)}])
-              (cons [:spec-tacular/spec (:name spec)])
-              (filter (comp some? second))
-              (into {})))
-     (if-let [kw (:db/ident em)] ;; EnumSpec
-       (do (when-not (keyword? kw)
-             (throw (ex-info "bad enum in database" {:entity em})))
-           (if-let [spec (get-spec kw)]
-             (if (instance? EnumSpec spec) kw
-                 (throw (ex-info "bad enum in database" {:entity em})))))
-       (throw (ex-info "bad entity in database" {:entity em}))))))
+   (coerce-datomic-entity em)))
 
 (t/ann ^:no-check get-all-eids [datomic.db.Db SpecT -> (t/ASeq Long)])
 (defn ^:no-doc get-all-eids
@@ -1302,3 +1306,82 @@
                           (concat data)))
                    data)]
         (do (commit-sp-transactions! conn-ctx data) nil)))))
+
+(defn backwards [spec-name kw]
+  (let [spec (get-spec spec-name)
+        item (get-item spec kw)]
+    (with-meta item {:spec-tacular/spec spec})))
+
+(defn datomify-spec-pattern [spec pattern]
+  (cond
+    (instance? UnionSpec spec)
+    (let [rec (map #(datomify-spec-pattern (get-spec %) pattern) (:elements spec))]
+      {:datomic-pattern (mapcat :datomic-pattern rec)
+       :rebuild (fn [db m] (apply merge (map #(% db m) (map :rebuild rec))))})
+    (keyword? pattern)
+    (when-let [{[arity sub-spec-name] :type :as item} (get-item spec pattern)]
+      (let [kw (db-keyword spec pattern)]
+        {:datomic-pattern [kw]
+         :rebuild (fn [db m]
+                    (when-let [v (get m kw)]
+                      (let [f #(recursive-ctor (get-spec sub-spec-name)
+                                               (if (:component? item)
+                                                 (coerce-datomic-entity %)
+                                                 (db/entity db (:db/id %))))]
+                        [pattern
+                         (if (primitive? sub-spec-name)
+                           v
+                           (if (= :many arity)
+                             (mapv f v)
+                             (f v)))])))}))
+    (instance? spark.spec_tacular.spec.Item pattern)
+    (let [spec (:spec-tacular/spec (meta pattern))
+          kw (db-keyword spec (keyword (str "_" (name (:name pattern)))))]
+      {:datomic-pattern [kw]
+       :rebuild (fn [db m]
+                  (when-let [v (get m kw)]
+                    (let [f #(recursive-ctor spec (db/entity db (:db/id %)))]
+                      [pattern
+                       (if (:component? pattern)
+                         (f v)
+                         (map f v))])))})
+    (vector? pattern)
+    (let [rec (keep (partial datomify-spec-pattern spec) pattern)
+          datomic-pattern (mapcat :datomic-pattern rec)]
+      {:datomic-pattern datomic-pattern
+       :rebuild (fn [db m] (into {} (map #(% db m) (map :rebuild rec))))})
+    (map? pattern)
+    (let [rec (for [[kw-or-item sub-pattern] pattern
+                    :let [{[arity sub-spec-name] :type component? :component? :as item}
+                          (if (keyword? kw-or-item)
+                            (get-item spec kw-or-item)
+                            kw-or-item)
+                          sub-spec-name
+                          (if (keyword? kw-or-item)
+                            sub-spec-name
+                            (:spec-tacular/spec (meta kw-or-item)))
+                          {[db-kw] :datomic-pattern}
+                          (datomify-spec-pattern spec kw-or-item)
+                          {:keys [datomic-pattern rebuild]}
+                          (datomify-spec-pattern (get-spec sub-spec-name) sub-pattern)]]
+                {:datomic-pattern [db-kw datomic-pattern]
+                 :rebuild (fn [db m]
+                            (when-let [v (get m db-kw)]
+                              [kw-or-item (if (or (= arity :many)
+                                                  (and (instance? spark.spec_tacular.spec.Item kw-or-item)
+                                                       (not component?)))
+                                            (map #(rebuild db %) v)
+                                            (rebuild db v))]))})]
+      {:datomic-pattern [(into {} (map :datomic-pattern rec))]
+       :rebuild (fn [db m] (into {} (map #(% db m) (map :rebuild rec))))})))
+
+(defn pull
+  "Executes a Datomic pull after datomifying the given pattern with
+  respect to the given instance."
+  [db pattern instance]
+  (let [eid (get-eid db instance)
+        spec (get-spec instance)]
+    (assert (vector? pattern))
+    (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern spec pattern)]
+      (->> (db/pull db datomic-pattern eid)
+           (rebuild db)))))
