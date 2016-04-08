@@ -1409,7 +1409,9 @@
                                                    (db/entity db (:db/id %))))]
                           [pattern
                            (if (primitive? sub-spec-name)
-                             v
+                             (if (= sub-spec-name :calendarday)
+                               (timec/to-date-time v)
+                               v)
                              (if (= :many arity)
                                (mapv f v)
                                (f v)))])))})))

@@ -1352,16 +1352,28 @@
         (is (refless= (set (:many (rebuild (db) pulled)))
                       (:many c))
             "they aren't = anymore because they were pulled off the database at different times, but at least they're refless="))))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Spotlight [:color])]
-    (is (= datomic-pattern 
-           [{:spotlight/color [:db/ident]}]))
-    (with-test-db simple-schema
-      (let [spotlight (create! {:conn *conn*} (spotlight {:color :LenseColor/red}))
-            pulled (db/pull (db) datomic-pattern (get-eid (db) spotlight))]
-        (is (= pulled
-               {:spotlight/color {:db/ident :LenseColor/red}}))
-        (is (= (rebuild (db) pulled)
-               {:color :LenseColor/red}))))))
+  (testing "enumeration"
+    (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Spotlight [:color])]
+      (is (= datomic-pattern 
+             [{:spotlight/color [:db/ident]}]))
+      (with-test-db simple-schema
+        (let [spotlight (create! {:conn *conn*} (spotlight {:color :LenseColor/red}))
+              pulled (db/pull (db) datomic-pattern (get-eid (db) spotlight))]
+          (is (= pulled
+                 {:spotlight/color {:db/ident :LenseColor/red}}))
+          (is (= (rebuild (db) pulled)
+                 {:color :LenseColor/red}))))))
+  (testing "calendarday"
+    (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Birthday [:date])]
+      (is (= datomic-pattern 
+             [:birthday/date]))
+      (with-test-db simple-schema
+        (let [b (create! {:conn *conn*} (birthday {:date (time/date-time 2015)}))
+              pulled (db/pull (db) datomic-pattern (get-eid (db) b))]
+          (is (= pulled
+                 {:birthday/date #inst "2015-01-01"}))
+          (is (= (rebuild (db) pulled)
+                 {:date (time/date-time 2015 1)})))))))
 
 (deftest test-pull-query
   (with-test-db simple-schema
