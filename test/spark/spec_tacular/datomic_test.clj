@@ -9,6 +9,7 @@
         spark.spec-tacular.test-specs)
   (:require [datomic.api :as db]
             [spark.spec-tacular.datomic :as sd]
+            [spark.spec-tacular.datomic.deprecated :refer :all]
             [spark.spec-tacular.schema :as schema]
             [spark.spec-tacular.generators :as sgen]
             [clj-time.core :as time]
@@ -463,8 +464,14 @@
 
 (deftest transaction-log-test
   (with-test-db simple-schema
-    (let [_ (create-sp! {:conn *conn* :transaction-log (scm {:val1 "log1"})}
-                        (scm2 {:val1 1234}))
+    (let [log-data (transaction-log-data
+                    {:conn *conn*
+                     :transaction-log (scm {:val1 "log1"})})
+          _ (is (= (:part (second (first log-data)))
+                   :db.part/tx))
+          _ (create! {:conn *conn*
+                      :transaction-log (scm {:val1 "log1"})}
+                     (scm2 {:val1 1234}))
           r (db/q '[:find ?e ?v
                     :where
                     [?e :scm/val1 ?v]]
@@ -477,16 +484,20 @@
                      :where
                      [?e :db/txInstant ?v]]
                    (db) e)
-          _ (is (instance? java.util.Date (ffirst r2)) "we annotated a transaction object with a txnInstant")
+          _ (is (instance? java.util.Date (ffirst r2))
+                "we annotated a transaction object with a txnInstant")
           r3 (db/q '[:find ?v
                      :in $ ?e
                      :where
                      [?scm2 :scm2/val1 ?v ?e]]
                    (db) e)
-          _ (is (= #{[1234]} r3) "we annotated the transaction that created the thing with val1 1234")
-          _ (create-sp! {:conn *conn* :transaction-log (scm {:val1 "log2"})}
-                        (scm2 {:val1 5678}))
-          _ (is (= 2 (count (get-all-by-spec (db) :Scm))) "now have 2 logs")
+          _ (is (= #{[1234]} r3)
+                "we annotated the transaction that created the thing with val1 1234")
+          _ (create! {:conn *conn* :transaction-log (scm {:val1 "log2"})}
+                     (scm2 {:val1 5678}))
+          _ (is (= (count-all-by-spec (db) :Scm)
+                   2)
+                "now have 2 logs")
           [e2] (first (db/q '[:find ?e
                               :in $ ?v
                               :where
@@ -499,30 +510,47 @@
                    (db) 5678 e2)
           _ (is (= 1 (count r4)) "we've annotated the other one like we expect.")])))
 
-(deftest test-parse-query
-  (testing "scalar"
-    (is (= (parse-query '(:find :Ex . :in db :where [1 2 3]))
-           '{:f [:Ex] :type :scalar :db db :wc ([1 2 3])}))
-    (is (thrown? Exception (parse-query '(:find 56 . :in db :where [1 2 3])))))
-  (testing "relation"
-    (is (= (parse-query '(:find :Ex :Ey :in db :where [1 2 3]))
-           '{:f (:Ex :Ey) :type :relation :db db :wc ([1 2 3])})))
-  (testing "collection"
-    (is (= (parse-query '(:find [:Ex ...] :in db :where [1 2 3]))
-           '{:f [:Ex] :type :coll :db db :wc ([1 2 3])})))
-  (testing "tuple"
-    (is (= (parse-query '(:find [:Ex :Ey] :in db :where [1 2 3]))
-           '{:f [:Ex :Ey] :type :tuple :db db :wc ([1 2 3])})))
-  (testing "pull"
-    (is (= (parse-query '(:find [(pull :Ex [:pattern]) :Ey] :in db :where [1 2 3]))
-           '{:f [(pull :Ex [:pattern]) :Ey] :type :tuple :db db :wc ([1 2 3])}))
-    (is (= (parse-query '(:find
-                          (pull :Spotlight [:color])
-                          :in (db) :where [% {:color :LenseColor/red}]))
-           '{:f ((pull :Spotlight [:color]))
-             :type :relation
-             :db (db)
-             :wc ([% {:color :LenseColor/red}])}))))
+(deftest test-query-pull
+  (with-test-db simple-schema
+    (let [ex (create! {:conn *conn*} (scm {:val1 "123" :val2 123}))]
+      (is (= (sd/query {:find '((spec-pull ?scm :Scm [:val1]) .)
+                        :in '($)
+                        :where '([?scm {:spec-tacular/spec :Scm
+                                        :val2 ?val2}]
+                                 [(- ?val2 5) ?long])}
+                       (db))
+             {:val1 "123"}))
+      (is (= (sd/query {:find '((pull ?scm [:scm/val1]) .)
+                        :in '($)
+                        :where '([?scm {:spec-tacular/spec :Scm
+                                        :val2 ?val2}]
+                                 [(- ?val2 5) ?long])}
+                       (db))
+             {:scm/val1 "123"})))))
+
+(defn- ex-aggregate [x] 5)
+
+(deftest test-query-aggregation
+  (with-test-db simple-schema
+    (let [ex (create! {:conn *conn*} (scm {:val1 "123" :val2 123}))
+          ey (create! {:conn *conn*} (scm {:val1 "456" :val2 456}))]
+      (is (= (sd/query {:find '((min ?long))
+                        :in '($)
+                        :where '([?scm {:spec-tacular/spec :Scm
+                                        :val2 ?val2}]
+                                 [(- ?val2 5) ?long])}
+                       (db))
+             #{[118]}))))
+  (with-test-db simple-schema
+    (let [ex (create! {:conn *conn*} (scm {:val1 "123" :val2 123}))
+          ey (create! {:conn *conn*} (scm {:val1 "456" :val2 456}))]
+      (is (= (sd/query {:find '((spark.spec-tacular.datomic-test/ex-aggregate ?long) .)
+                        :in '($)
+                        :where '([?scm {:spec-tacular/spec :Scm
+                                        :val2 ?val2}]
+                                 [(- ?val2 5) ?long])}
+                       (db))
+             5)))))
 
 (deftest query-tests
   (testing "primitive data"
@@ -1224,156 +1252,8 @@
      (macroexpand
       '(q :find [:ScmOwnsEnum ...] :in db :where [% {:enum se}]))))
 
-
-
 ;; ===================================================================================================
 ;; pull
-
-(deftest test-datomify-spec-pattern
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Scm2 [:val1])]
-    (is (= datomic-pattern
-           [:scm2/val1]))
-    (is (= (rebuild nil {:scm2/val1 12345})
-           {:val1 12345}))
-    (is (= (rebuild nil {})
-           {})))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Scm [{:scm2 [:val1]}])]
-    (is (= datomic-pattern
-           [{:scm/scm2 [:scm2/val1]}]))
-    (is (= (rebuild nil {:scm/scm2 {:scm2/val1 12345}})
-           {:scm2 {:val1 12345}})))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Scm [:val1])]
-    (is (= datomic-pattern
-           [:scm/val1]))
-    (is (= (rebuild nil {:scm/val1 "12345"})
-           {:val1 "12345"})))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Scm [:val1 {:scm2 [:val1]}])]
-    (is (= datomic-pattern
-           [:scm/val1 {:scm/scm2 [:scm2/val1]}]))
-    (is (= (rebuild nil {:scm/scm2 {:scm2/val1 12345}})
-           {:scm2 {:val1 12345}}))
-    (is (= (rebuild nil {:scm/val1 "12345" :scm/scm2 {:scm2/val1 12345}})
-           {:val1 "12345" :scm2 {:val1 12345}})))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Scm2 [(backwards :Scm :scm2)])]
-    (is (= datomic-pattern 
-           [:scm/_scm2]))
-    (with-test-db simple-schema
-      (let [scm (create! {:conn *conn*} (scm {:scm2 {:val1 12345}}))
-            pulled (db/pull (db) [:scm/_scm2] (get-eid (db) (:scm2 scm)))]
-        (is (= pulled
-               {:scm/_scm2 [{:db/id (get-eid (db) scm)}]}))
-        (is (= (rebuild (db) pulled)
-               {(backwards :Scm :scm2) [scm]}))
-        (is (= (get (rebuild (db) pulled)
-                    (backwards :Scm :scm2))
-               [scm])))))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Scm2 [{(backwards :Scm :scm2) [:val1]}])]
-    (is (= datomic-pattern
-           [{:scm/_scm2 [:scm/val1]}]))
-    (with-test-db simple-schema
-      (let [scm (create! {:conn *conn*} (scm {:val1 "12345" :scm2 {:val1 12345}}))
-            pulled (db/pull (db) [{:scm/_scm2 [:scm/val1]}] (get-eid (db) (:scm2 scm)))]
-        (is (= pulled
-               {:scm/_scm2 [{:scm/val1 "12345"}]}))
-        (is (= (rebuild (db) pulled)
-               {(backwards :Scm :scm2) [{:val1 "12345"}]})))))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Scm3 [:val1])]
-    (is (= datomic-pattern
-           []))
-    (is (= (rebuild nil nil)
-           {}))
-    (is (= (rebuild nil {})
-           {})))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern ScmEnum [:val1])]
-    (is (= datomic-pattern 
-           [:scm2/val1 :scm/val1]))
-    (is (= (rebuild nil {:scm2/val1 12345})
-           {:val1 12345}))
-    (is (= (rebuild nil {:scm/val1 "12345"})
-           {:val1 "12345"})))
-  (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern ScmOwnsEnum [:enum {:enums [:val1]}])]
-    (is (= datomic-pattern 
-           [:scmownsenum/enum
-            {:scmownsenum/enums [:scm2/val1
-                                 :scm/val1]}]))
-    (with-test-db simple-schema
-      (let [soe (->> (scmownsenum {:enum (scm {:val2 123})
-                                   :enums [(scm {:val1 "123"})
-                                           (scm2 {:val1 123})
-                                           (scm3)]})
-                     (create! {:conn *conn*}))
-            pulled (db/pull (db) datomic-pattern (get-eid (db) soe))]
-        (is (= pulled
-               {:scmownsenum/enum {:db/id (get-eid (db) (:enum soe))}
-                :scmownsenum/enums [{:scm/val1 "123"} {:scm2/val1 123}]}))
-        (is (= (rebuild (db) {:scmownsenum/enums [{:scm/val1 "123"} {:scm2/val1 123}]})
-               {:enums [{:val1 "123"} {:val1 123}]}))
-        (is (= (rebuild (db) pulled)
-               {:enum (:enum soe)
-                :enums [{:val1 "123"} {:val1 123}]})))))
-  (with-test-db simple-schema
-    (let [c (->> (container {:number 1
-                             :one (container {:number 2})
-                             :many [(container {:number 3})
-                                    (container {:number 4})]})
-                 (create! {:conn *conn*}))]
-      (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Container [{(backwards :Container :one)
-                                                                                 [:number]}])
-            pulled {:container/_one {:container/number 1}}]
-        (is (= datomic-pattern 
-               [{:container/_one [:container/number]}]))
-        (is (= (db/pull (db) datomic-pattern (get-eid (db) (:one c)))
-               pulled))
-        (is (= (rebuild (db) pulled)
-               {(backwards :Container :one)
-                {:number 1}}))
-        (is (= (pull (db) [{(backwards :Container :one) [:number]}] (:one c))
-               {(backwards :Container :one) {:number 1}})))
-      (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Container [(backwards :Container :one)])
-            pulled {:container/_one {:db/id (get-eid (db) c)}}]
-        (is (= datomic-pattern
-               [:container/_one]))
-        (is (= (db/pull (db) datomic-pattern (get-eid (db) (:one c)))
-               pulled))
-        (is (= (rebuild (db) pulled)
-               {(backwards :Container :one) c})))
-      (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Container [:many])
-            cs (sort-by :number (:many c))
-            pulled {:container/many [{:db/id (get-eid (db) (first cs))
-                                      :spec-tacular/spec :Container
-                                      :container/number 3}
-                                     {:db/id (get-eid (db) (second cs))
-                                      :spec-tacular/spec :Container
-                                      :container/number 4}]}]
-        (is (= datomic-pattern
-               [:container/many]))
-        (is (= (set (:container/many (db/pull (db) datomic-pattern (get-eid (db) c))))
-               (set (:container/many pulled))))
-        (is (refless= (set (:many (rebuild (db) pulled)))
-                      (:many c))
-            "they aren't = anymore because they were pulled off the database at different times, but at least they're refless="))))
-  (testing "enumeration"
-    (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Spotlight [:color])]
-      (is (= datomic-pattern 
-             [{:spotlight/color [:db/ident]}]))
-      (with-test-db simple-schema
-        (let [spotlight (create! {:conn *conn*} (spotlight {:color :LenseColor/red}))
-              pulled (db/pull (db) datomic-pattern (get-eid (db) spotlight))]
-          (is (= pulled
-                 {:spotlight/color {:db/ident :LenseColor/red}}))
-          (is (= (rebuild (db) pulled)
-                 {:color :LenseColor/red}))))))
-  (testing "calendarday"
-    (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Birthday [:date])]
-      (is (= datomic-pattern 
-             [:birthday/date]))
-      (with-test-db simple-schema
-        (let [b (create! {:conn *conn*} (birthday {:date (time/date-time 2015)}))
-              pulled (db/pull (db) datomic-pattern (get-eid (db) b))]
-          (is (= pulled
-                 {:birthday/date #inst "2015-01-01"}))
-          (is (= (rebuild (db) pulled)
-                 {:date (time/date-time 2015 1)})))))))
 
 (deftest test-pull-query
   (with-test-db simple-schema

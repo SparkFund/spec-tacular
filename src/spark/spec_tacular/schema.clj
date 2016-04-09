@@ -8,6 +8,7 @@
   (:require [clojure.core.typed :as t]
             [clojure.edn :as edn]
             [spark.spec-tacular.datomic :as sd]
+            [spark.spec-tacular.datomic.util :refer :all]
             [clojure.java.io :as io])
   (:import spark.spec_tacular.spec.Spec
            spark.spec_tacular.spec.EnumSpec))
