@@ -1,8 +1,9 @@
 (ns spark.spec-tacular.datomic.query-helpers-test
+  "tests helpers for sd/q and sd/query"
   (:refer-clojure :exclude [assoc!])
   (:require [clojure.test :refer :all]
             [datomic.api :as d]
-            [spark.spec-tacular.datomic :refer :all :exclude [db]]
+            [spark.spec-tacular.datomic :refer [create!]]
             [spark.spec-tacular.datomic.query-helpers :refer :all]
             [spark.spec-tacular.schema :as schema]
             [spark.spec-tacular.test-specs :refer :all]
