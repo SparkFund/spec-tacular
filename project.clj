@@ -1,4 +1,4 @@
-(defproject spec-tacular "0.6.0"
+(defproject spec-tacular "0.6.1-SNAPSHOT"
   :description "First-class data specifications for Clojure and Datomic."
   :url "https://github.com/SparkFund/spec-tacular"
   :license {:name "Apache License, Version 2.0"
