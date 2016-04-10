@@ -518,7 +518,9 @@
           _ (is (= (keys (meta data)) [:tmpid :spec]))
           _ (is (= (:spec (meta data)) (get-spec :ScmOwnsEnum)))
           a-soe (create! {:conn *conn*} e-soe)]
-      (is (not (empty? (:enums a-soe))))))
+      (is (not (empty? (:enums a-soe))))
+      (is (= (get-all-by-spec (db) :ScmOwnsEnum)
+             [a-soe]))))
   (with-test-db simple-schema
     (let [soe (create! {:conn *conn*}
                        (assoc (scmownsenum {:enum (scm3)})
@@ -560,6 +562,8 @@
             e-soe (scmownsenum {:enums [se5 se6]})
             a-soe (create! {:conn *conn*} e-soe)
             _ (is (refless= a-soe e-soe))
+            _ (is (= (count (get-all-by-spec (db) :Scm2))
+                     4))
 
             ;; lazy seq
             e-soe (-> (scmownsenum {})

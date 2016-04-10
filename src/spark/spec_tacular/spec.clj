@@ -8,7 +8,7 @@
 ;; records
 
 (defrecord Spec [name opts items syntax])
-(defrecord Item [name type precondition required? unique? optional? identity? default-value])
+(defrecord Item [name type precondition required? unique? optional? identity? default-value parent-name])
 (defrecord UnionSpec [name elements])
 (defrecord SpecType [name type type-symbol coercion])
 (defrecord EnumSpec [name values])

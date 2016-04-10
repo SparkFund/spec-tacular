@@ -46,7 +46,17 @@
                                      :val2 ?val2}]
                               [(- ?val2 5) ?long])}
                     (db))
-             {:scm/val1 "123"})))))
+             {:scm/val1 "123"}))
+      (let [soe (->> (scmownsenum {:enum (scm {:val2 123})
+                                   :enums [(scm {:val1 "123"})
+                                           (scm2 {:val1 123})
+                                           (scm3)]})
+                     (create! {:conn *conn*}))]
+        (is (= (query {:find '([(spec-pull ?soe :ScmOwnsEnum [:enum {:enums [:val1]}]) ...])
+                       :in '($)
+                       :where '([?soe :spec-tacular/spec :ScmOwnsEnum])}
+                      (db))
+               #{{:enum (:enum soe) :enums [{:val1 "123"} {:val1 123}]}}))))))
 
 (defn- ex-aggregate [x] 5)
 

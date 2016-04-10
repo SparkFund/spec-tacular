@@ -528,7 +528,7 @@
 (defn backwards [spec-name kw]
   (let [spec (get-spec spec-name)
         item (get-item spec kw)]
-    (with-meta item {:spec-tacular/spec spec})))
+    (assoc item :parent-name spec-name)))
 
 (defn pull
   "Executes a Datomic pull after datomifying the given pattern with

@@ -19,7 +19,7 @@
       (let [kw (db-keyword spec pattern)
             sub-spec (get-spec sub-spec-name)]
         (if (and (primitive? sub-spec-name)
-                 (instance? spark.spec_tacular.spec.EnumSpec sub-spec))
+                 (instance? EnumSpec sub-spec))
           {:datomic-pattern [{kw [:db/ident]}]
            :rebuild (fn [db m]
                       (when-let [v (get m kw)]
@@ -39,8 +39,8 @@
                              (if (= :many arity)
                                (mapv f v)
                                (f v)))])))})))
-    (instance? spark.spec_tacular.spec.Item pattern)
-    (let [spec (:spec-tacular/spec (meta pattern))
+    (instance? Item pattern)
+    (let [spec (get-spec (:parent-name pattern))
           kw (db-keyword spec (keyword (str "_" (name (:name pattern)))))]
       {:datomic-pattern [kw]
        :rebuild (fn [db m]
@@ -64,7 +64,7 @@
                           sub-spec-name
                           (if (keyword? kw-or-item)
                             sub-spec-name
-                            (:spec-tacular/spec (meta kw-or-item)))
+                            (:parent-name kw-or-item))
                           {[db-kw] :datomic-pattern}
                           (datomify-spec-pattern spec kw-or-item)
                           {:keys [datomic-pattern rebuild]}
@@ -73,10 +73,10 @@
                  :rebuild (fn [db m]
                             (when-let [v (get m db-kw)]
                               [kw-or-item (if (or (= arity :many)
-                                                  (and (instance? spark.spec_tacular.spec.Item kw-or-item)
+                                                  (and (instance? Item kw-or-item)
                                                        (not component?)))
                                             (map #(rebuild db %) v)
                                             (rebuild db v))]))})]
-      {:datomic-pattern [(into {} (map :datomic-pattern rec))]
+      {:datomic-pattern [(dissoc (into {} (map :datomic-pattern rec)) nil)]
        :rebuild (fn [db m] (into {} (map #(% db m) (map :rebuild rec))))})))
 
