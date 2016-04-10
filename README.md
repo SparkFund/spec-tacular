@@ -31,15 +31,14 @@ the following in return:
 ## Quick Start
 
 ```clojure
-[spec-tacular "0.6.0-SNAPSHOT"] ;; unstable
-[spec-tacular "0.5.0"]          ;; also unstable
+[spec-tacular "0.6.0"]
 ```
 
 ```xml
 <dependency>
   <groupId>spec-tacular</groupId>
   <artifactId>spec-tacular</artifactId>
-  <version>0.5.0</version>
+  <version>0.6.0</version>
 </dependency>
 ```
 
@@ -239,6 +238,8 @@ restricted to things of type `<spec>`.
 * `spark.spec-tacular.restify` was removed, it may come back
   eventually but in the meantime, if you need web serialization we
   accept pull requests
+* some queries that dynamically pull out `:spec-tacular/spec`s are no
+  longer supported, use pull or `sd/query` instead of `sd/q`
 
 ## Short Term Roadmap
 
