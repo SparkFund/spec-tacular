@@ -890,7 +890,7 @@
     (testing "create calendarday"
       (let [bday (create! {:conn *conn*} (birthday {:date (time/date-time 2015 7 24)}))]
         (is (= (:date bday) (time/date-time 2015 7 24)))
-        (is (= (q :find ?date :in (db) :where
+        (is (= (q :find (instance :calendarday ?date) :in (db) :where
                   [:Birthday {:date ?date}])
                #{[(time/date-time 2015 7 24)]}))))
     (testing "retract calendarday"
@@ -977,38 +977,3 @@
 (ct/defspec graph-ScmOwnsEnum 10 (prop-create-graph :ScmOwnsEnum))
 (ct/defspec graph-ScmM 10 (prop-create-graph :ScmM))
 (ct/defspec graph-ScmMWrap 20 (prop-create-graph :ScmMWrap))
-
-#_(let [se (scm {:val1 "abc"})] ;; TODO test
-    (clojure.pprint/pprint
-     (macroexpand
-      '(q :find [:ScmOwnsEnum ...] :in db :where [% {:enum se}]))))
-
-;; ===================================================================================================
-;; pull
-
-(deftest test-pull
-  (with-test-db simple-schema
-    (let [spotlight (create! {:conn *conn*} (spotlight {:color :LenseColor/red}))]
-      (is (= (db/pull (db) '({:spotlight/color [:db/ident]}) (get-eid (db) spotlight))
-             {:spotlight/color {:db/ident :LenseColor/red}}))
-      (is (= (sd/q :find (pull :Spotlight [:color]) .
-                   :in (db)
-                   :where
-                   [% {:color :LenseColor/red}])
-             {:color :LenseColor/red}))
-      (is (= (sd/q :find (pull :Spotlight [:color])
-                   :in (db)
-                   :where
-                   [% {:color :LenseColor/red}])
-             #{[{:color :LenseColor/red}]}))
-      (is (= (sd/q :find [(pull :Spotlight [:color]) ...]
-                   :in (db)
-                   :where
-                   [% {:color :LenseColor/red}])
-             #{{:color :LenseColor/red}}))
-      (is (= (sd/q :find [(pull :Spotlight [:color]) :LenseColor]
-                   :in (db)
-                   :where
-                   [%1 {:color %2}])
-             [{:color :LenseColor/red} :LenseColor/red]))
-      )))

@@ -31,7 +31,7 @@
 (t/ann test-coll-spec [sd/Database -> (t/Option ts/ScmEnum)])
 (defn test-coll-spec [db]
   (-> (sd/q :find [:ScmOwnsEnum ...] :in db :where
-            [% {:enum {:spec-tacular/spec :Scm}}])
+            [% {:enum :Scm}])
       first :enum))
 
 (t/ann test-get-all-by-spec-scmenum [sd/Database -> (t/ASeq ts/ScmEnum)])

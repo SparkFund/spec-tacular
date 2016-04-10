@@ -164,10 +164,10 @@
             | [IDENT+ ]
             | [IDENT ...]
   IDENT     = SpecName
-            | ?variable
-            | [SpecName ?variable]
+  VAR       = ?variable
+            | IDENT
   CLAUSE    = [IDENT MAP]
-            | [(symbol (SpecName | ?variable)+)]
+            | [(symbol VAR+)]
   MAP       = % | %n | SpecName
             | {keyword (CLAUSE | MAP | IDENT | expr),+}
   ```
@@ -193,131 +193,28 @@
   get the spec of an entity use the special keyword
   `:spec-tacular/spec` as an entry in any `MAP`."
   [& stx]
-  (let [{:keys [f wc type] find-type :type db-expr :db} (parse-query stx)
-        {:keys [env clauses] args-with-pulls :args} (expand-query f wc)
-        args (map (fn [arg] (if (seq? arg) (second arg) arg)) args-with-pulls)
-        type-kws  (map #(get env %) args)
-        type-maps (map get-type type-kws)
-        type-syms (map :type-symbol type-maps)
-        db (gensym 'db)
-        err (fn [result t-s]
-              `(throw (ex-info "possible spec mismatch"
-                               {:actual-type   (type '~result)
-                                :expected-type '~t-s
-                                :query-result  ~result})))
-        wrap (fn [result t-kw t-m t-s]
-               (when-not (and t-kw t-m t-s)
-                 (throw (ex-info (str "missing information about " result)
-                                 {:type t-kw :type-sym t-s :syntax stx})))
-               (if (and (primitive? t-kw)
-                        (not (instance? EnumSpec (get-spec t-kw))))
-                 (if (= t-kw :calendarday)
-                   `(if (instance? java.util.Date ~result) (timec/to-date-time ~result)
-                        ~(err result t-s))
-                   `(if (instance? ~t-s ~result) ~result
-                        ~(err result t-s)))
-                 `(if (instance? java.lang.Long ~result)
-                    (let [e# (clojure.core.typed.unsafe/ignore-with-unchecked-cast
-                              (db/entity ~db ~result) ~t-s)]
-                      (recursive-ctor ~t-kw e#))
-                    ~(err result t-s))))
-        pull-gs (gensym 'pulls)
-        pulls (->> args-with-pulls
-                   (keep (fn [arg]
-                           (when (seq? arg)
-                             [(second arg)
-                              [`'~(second arg)
-                               `(datomify-spec-pattern
-                                 ~(get-spec (get env (second arg)))
-                                 ~(last arg))]])))
-                   (into {}))
-        find-elems (mapv (fn [arg-with-pull]
-                           (if (seq? arg-with-pull)
-                             (list 'list
-                                   ''pull
-                                   `'~(second arg-with-pull)
-                                   `(:datomic-pattern (get ~pull-gs '~(second arg-with-pull))))
-                             `'~arg-with-pull))
-                         args-with-pulls)
-        query `(clojure.core.typed.unsafe/ignore-with-unchecked-cast
-                (db/q {:find ~(case find-type
-                                :coll `[[~(first find-elems) '...]]
-                                :relation `(list ~@find-elems)
-                                :scalar (list 'list
-                                              (first find-elems)
-                                              `'.)
-                                :tuple `[~find-elems])
-                       :in '~['$]
-                       :where (distinct ~clauses)}
-                      ~db)
-                ~(case find-type
-                   :scalar `t/Any
-                   (:tuple :coll) `(t/Seqable t/Any)
-                   :relation `(t/Seqable (t/Vec t/Any))))
-        check (case find-type
-                (:coll :scalar)
-                `(fn [~(first args)]
-                   ~(if (get pulls (first args))
-                      `((:rebuild (get ~pull-gs '~(first args))) ~db ~(first args))
-                      (wrap (first args) (first type-kws) (first type-maps) (first type-syms))))
-                (:relation :tuple)
-                `(fn [~(vec args)]
-                   [~@(mapv (fn [arg & rest]
-                              (if (get pulls arg)
-                                `((:rebuild (get ~pull-gs '~arg)) ~db ~arg)
-                                (apply wrap arg rest)))
-                            args type-kws type-maps type-syms)]))
-        check-arg-type (case find-type
-                         (:coll :scalar) `t/Any
-                         (:relation :tuple) `(t/Vec t/Any))
-        check-ret-type (case find-type
-                         (:coll :scalar)
-                         (if (and (seq? (first args)) (= (ffirst args) 'pull))
-                           `(t/Map t/Any t/Any)
-                           (first type-syms))
-                         (:relation :tuple) `(t/HVec ~(vec type-syms)))
-        check-type `[~check-arg-type ~'-> ~check-ret-type]
-        check-gs (gensym 'check)
-        query-gs (gensym 'query)]
-    `(t/let [~db :- Database ~db-expr
-             ~pull-gs :- (t/Map t/Symbol '{:datomic-pattern t/Any :rebuild t/Any})
-             ~(into {} (vals pulls))
-             ~check-gs :- ~check-type ~check
-             ~query-gs ~query]
-       ~(case find-type
-          (:coll :relation)
-          `(->> ~query-gs (map ~check-gs) (set))
-          (:scalar :tuple)
-          `(~check-gs ~query-gs)))))
+  (let [{:keys [find-expr db-expr in-expr where-expr query-ret-type]} (parse-query stx)
+        db (gensym 'db)]
+    `(t/let [~db :- Database ~db-expr]
+       (clojure.core.typed.unsafe/ignore-with-unchecked-cast
+        (query {:find ~find-expr
+                :in (cons ~''$ ~in-expr)
+                :where ~where-expr}
+               ~db)
+        ~query-ret-type))))
 
 ;; ---------------------------------------------------------------------------------------------------
 ;; query runtime
-
-;; From http://docs.datomic.com/query.html
-;; where-clauses     = ':where' clause+
-;; clause            = (not-clause | not-join-clause | or-clause | or-join-clause | expression-clause)
-;; not-clause        = [ src-var? 'not' clause+ ]
-;; not-join-clause   = [ src-var? 'not-join' [variable+] clause+ ]
-;; or-clause         = [ src-var? 'or' (clause | and-clause)+]
-;; or-join-clause    = [ src-var? 'or-join' rule-vars (clause | and-clause)+ ]
-;; and-clause        = [ 'and' clause+ ]
-;; expression-clause = (data-pattern | pred-expr | fn-expr | rule-expr)
-;; data-pattern      = [ src-var? (variable | constant | '_')+ ]
-;; pred-expr         = [ [pred fn-arg+] ]
-;; fn-expr           = [ [fn fn-arg+] binding ]
-;; binding           = (bind-scalar | bind-tuple | bind-coll | bind-rel)
-;; bind-scalar       = variable
-;; bind-tuple        = [ (variable | '_')+]
-;; bind-coll         = [variable '...']
-;; bind-rel          = [ [(variable | '_')+] ]
 
 (defn query [{find-elems :find clauses :where :as m} & args]
   (let [{:keys [datomic-find rebuild]} (datomify-find-elems find-elems)
         clauses (combine-where-clauses (map datomify-where-clause clauses))
         [db & _] args
-        query (assoc m :find datomic-find :where (rest clauses))]
+        query (assoc m :find datomic-find :where (case (first clauses)
+                                                   (and) (rest clauses)
+                                                   [clauses]))]
     (try (rebuild db (apply db/q query args))
-         (catch com.google.common.util.concurrent.UncheckedExecutionException e
+         (catch Exception e
            (throw (doto (ex-info "Encountered an error running Datomic query"
                                  {:query query :args args})
                     (.initCause e)))))))
