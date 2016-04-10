@@ -153,45 +153,58 @@
 (defmacro q
   "Returns a set of results from the Datomic query.  See [the
   README](https://github.com/SparkFund/spec-tacular/tree/v0.5.0#querying-databases)
-  for examples.
+  for examples.  Also see [Datomic's
+  documentation](http://docs.datomic.com/query.html) for query, which
+  we both restrict and expand upon.
 
   ```
-  (q :find FIND-EXPR+ :in expr :where CLAUSE+)
+  (q :find FIND-EXPR+ :in DB-EXPR :where CLAUSE+)
 
-  FIND-EXPR = IDENT 
-            | IDENT .
-            | (pull IDENT pattern)
-            | [IDENT+ ]
-            | [IDENT ...]
-  IDENT     = SpecName
-  VAR       = ?variable
-            | IDENT
-  CLAUSE    = [IDENT MAP]
-            | [(symbol VAR+)]
-  MAP       = % | %n | SpecName
-            | {keyword (CLAUSE | MAP | IDENT | expr),+}
+  FIND-EXPR   = VAR
+              | VAR .
+              | (pull VAR pattern)
+              | (instance SpecName ?variable)
+              | (aggregate expr* VAR)
+              | [VAR+ ]
+              | [VAR ...]
+  DB-EXPR     | expr
+  VAR         = ?variable
+              | SpecName
+  CLAUSE      = SPEC-CLAUSE
+              | any otherwise valid Datomic clause
+  SPEC-CLAUSE = [SpecName SPEC-RHS]
+              | [?variable [SpecName SPEC-RHS]]
+  SPEC-RHS    = % | %n | SpecName
+              | {keyword (SPEC-CLAUSE | expr),+}
   ```
+
+  Every `SpecName` must be a keyword at compile-time.  Every
+  `?variable` is quoted, so you do not have to quote them yourself.
+  Anything `expr` that is not a `?variable` or a `SpecName` is left
+  unchanged (so you can perform operations inside of queries as long
+  as it does not confuse the query syntax).
 
   The `FIND-EXPR` are used as the `:find` arguments to the Datomic
-  query.
+  query.  The syntax is the same, except we include `(instance
+  SpecName ?variable)` for casting any database type to `SpecName` on
+  its way off the database.  This is done automatically for
+  `FIND-EXPRS` that terminate with `SpecName`s rather than
+  `?variable`s.  The `aggregate` function must adhere to Datomic's
+  requirements: either one of the build-in aggregators or a fully
+  qualified function already imported into the namespace, where the
+  aggregated variable is the final argument.
 
   The value of `:in` is used as the database; no other arguments to
   `:in` are allowed at the moment.
 
   Each `:where` clause is expanded to one or more Datomic clauses.
-  The `[IDENT MAP]` form finds `IDENT`s with the fields given in
-  `MAP`.  The other clause syntax provides very experimental support
-  for a subset of Datomic [\"Function
-  Expressions\"](http://docs.datomic.com/query.html) -- more coming
-  soon.
+  All Datomic where clause syntax is (intended to be) supported.  The
+  `SPEC-CLAUSE` form finds spec-tacular instances on the database with
+  the fields given in `SPEC-RHS`.
 
   Using `%` and `%n` is analogous to `#` and `%` in Clojure: `%`
   inserts the first `SpecName` in the `FIND-EXPR` if there is only
-  one, or `%1` references the first, and `%2` the second, etc.
-
-  Every `SpecName` must be a keyword at compile-time; to dynamically
-  get the spec of an entity use the special keyword
-  `:spec-tacular/spec` as an entry in any `MAP`."
+  one, or `%1` references the first, and `%2` the second, etc."
   [& stx]
   (let [{:keys [find-expr db-expr in-expr where-expr query-ret-type]} (parse-query stx)
         db (gensym 'db)]
@@ -206,7 +219,44 @@
 ;; ---------------------------------------------------------------------------------------------------
 ;; query runtime
 
-(defn query [{find-elems :find clauses :where :as m} & args]
+(defn query
+  "Runtime support for spec-tacular queries.  Akin to the map syntax
+  for `datomic.api/q`, this form expects data (rather than syntax),
+  and attempts to unroll spec-tacular maps into valid Datomic
+  `:where` clauses.
+
+  ```
+  (query {:find FIND-EXPR :in IN-EXPR :where (WHERE-CLAUSE+)} expr+)
+
+  FIND-EXPR   = VAR
+              | VAR .
+              | (spec-pull VAR SpecName spec-tacular-pattern)
+              | (pull VAR datomic-pattern)
+              | (instance SpecName ?variable)
+              | [VAR+ ]
+              | [VAR ...]
+  DB-EXPR     | expr
+  VAR         = ?variable
+              | SpecName
+  CLAUSE      = SPEC-CLAUSE
+              | any otherwise valid Datomic clause
+  SPEC-CLAUSE = [?variable SPEC-RHS]
+  SPEC-RHS    | {:spec-tacular/spec SpecName,
+                 keyword (?variable | constant | spec-instance),+}
+  ```
+
+  Note that `SPEC-RHS` is no longer recursive via `SPEC-CLAUSE`.  If
+  `SpecName` names a UnionSpec, we create an `or` that tries every
+  branch.
+
+  If any `Exception`s occur enroute, a `clojure.lang.ExceptionInfo` is
+  thrown with additional information about the query that was
+  executed.
+
+  This function uses `spark.spec-tacular.datomic.query-helpers` in
+  order to datomify the `FIND-EXPR` and each `WHERE-CLAUSE`.
+  "
+  [{find-elems :find clauses :where :as m} & args]
   (let [{:keys [datomic-find rebuild]} (datomify-find-elems find-elems)
         clauses (combine-where-clauses (map datomify-where-clause clauses))
         [db & _] args
