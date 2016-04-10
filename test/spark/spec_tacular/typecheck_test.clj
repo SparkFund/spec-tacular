@@ -5,7 +5,8 @@
             [spark.spec-tacular.test-specs :as ts]
             [clojure.core.typed :as t]))
 
-(t/typed-deps spark.spec-tacular.datomic
+(t/typed-deps spark.spec-tacular
+              spark.spec-tacular.datomic
               spark.spec-tacular.test-specs)
 
 (t/ann test-query-typecheck [sd/Database -> (t/Set (t/HVec [Long]))])
