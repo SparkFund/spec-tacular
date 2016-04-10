@@ -256,6 +256,7 @@
   This function uses `spark.spec-tacular.datomic.query-helpers` in
   order to datomify the `FIND-EXPR` and each `WHERE-CLAUSE`.
   "
+  {:added "0.6.0"}
   [{find-elems :find clauses :where :as m} & args]
   (let [{:keys [datomic-find rebuild]} (datomify-find-elems find-elems)
         clauses (combine-where-clauses (map datomify-where-clause clauses))

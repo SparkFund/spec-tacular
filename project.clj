@@ -24,12 +24,12 @@
                    :all (constantly true)}
   :core.typed {:check [spark.spec-tacular.schema
                        spark.spec-tacular.typecheck-test]}
-  :codox {:defaults {:doc/format :markdown}
-          :sources ["src" "test"]
-          :include [spark.spec-tacular
-                    spark.spec-tacular.datomic
-                    spark.spec-tacular.schema
-                    spark.spec-tacular.generators]
-          :src-dir-uri "https://github.com/SparkFund/spec-tacular/tree/develop/"
-          :src-linenum-anchor-prefix "L"}
-  :pedantic? :abort)
+  :codox {:metadata {:doc/format :markdown}
+          :source-paths ["src" "test"]
+          :namespaces [spark.spec-tacular
+                       spark.spec-tacular.datomic
+                       spark.spec-tacular.schema
+                       spark.spec-tacular.generators]
+          :source-uri "https://github.com/SparkFund/spec-tacular/blob/develop/{filepath}#L{line}"}
+  :pedantic? :abort
+  )
