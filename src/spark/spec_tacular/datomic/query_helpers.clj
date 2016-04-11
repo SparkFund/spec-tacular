@@ -121,8 +121,6 @@
         :clause rec'})
     (vector? v)
     ,(expand-item tenv (first v) k (second v))
-    (vector? v)
-    ,(expand-item tenv (first v) k (second v))
     (and (symbol? v) (= \? (first (str v))))
     ,(do (set-type! tenv v sub-spec-name)
          (let [t (get @tenv v)]
@@ -130,6 +128,12 @@
              {:map-entry [[k `'~v]]}
              {:map-entry [[k `'~v]]
               :clause [[`'~v :spec-tacular/spec t]]})))
+    (and (keyword? v)
+         (not (instance? EnumSpec (get-spec sub-spec-name)))
+         (not (= :keyword sub-spec-name)))
+    (let [v' (gensym (str "?" (lower-case (name v))))]
+      {:map-entry [[k `'~v']]
+       :clause [[`'~v' :spec-tacular/spec v]]})
     :else
     {:map-entry [[k v]]}))
 
@@ -155,7 +159,7 @@
     (instance? UnionSpec spec)
     (let [rec (->> (:elements spec)
                    (mapv (fn [spec-name]
-                           (try {:syntax {spec-name (expand-map tenv (get-spec spec-name) rhs)}}
+                           (try {:syntax {spec-name (expand-spec-map-clause tenv (get-spec spec-name) lhs rhs)}}
                                 (catch clojure.lang.ExceptionInfo e {:error {spec-name e}}))))
                    (apply merge-with merge))]
       (when (empty? (:syntax rec))
@@ -163,7 +167,7 @@
                         {:syntax rhs :errors (:errors rec)})))
       (doseq [[spec-name e] (:error rec)]
         (case (.getMessage e) "var has two incompatible return types" (throw e) nil))
-      [[`'~lhs (merge {:spec-tacular/spec (:name spec)} rhs)]])))
+      [(cons 'list (cons ''or (map #(cons 'list (cons ''and %)) (vals (:syntax rec)))))])))
 
 (defn expand-spec-where-clause
   "Expands a spec where clause, where `lhs` can still be either a
@@ -206,8 +210,10 @@
       [(cons 'list (cons (case rator datomic-or ''or datomic-and ''and `'~rator) clauses'))])
     ([(rator :guard #(case % (not-join or-join) true false)) ([& syms] :seq) & clauses] :seq) ; not-join / or-join
     [(cons rator (cons syms (map expand-where-clause clauses)))]
-    ([([rator & args] :seq) rhs] :seq)
+    ([([rator & args] :seq) rhs] :seq) ; fn-expr
     [[(apply list 'list `'~rator (mapv wrap-variable args)) (wrap-variable rhs)]]
+    ([([rator & args] :seq)] :seq) ; pred-expr
+    [[(apply list 'list `'~rator (mapv wrap-variable args))]]
     ([(rator :guard symbol?) & (args :guard #(every? (complement seq?) %))] :seq) ; data pattern
     [(mapv wrap-variable args)]
     :else (throw (ex-info "invalid where clause" {:syntax clause}))))

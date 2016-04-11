@@ -19,35 +19,46 @@
 ;; ---------------------------------------------------------------------------------------------------
 ;; static
 
-(deftest test-keyword-as-find-variable
-  #_(q :find :ScmKw :in (db) :where
-       [% {:item :test}])
-  (let [tenv (atom {}), uenv (atom {})]
-    (expand-find-elems tenv uenv '(:ScmKw))
-    (is (contains? @uenv '%1))
-    (is (contains? (map-invert @tenv) :ScmKw))))
+(deftest test-expand-helpers
+  (testing "keyword as find variable"
+    #_(q :find :ScmKw :in (db) :where
+         [% {:item :test}])
+    (let [tenv (atom {}), uenv (atom {})]
+      (expand-find-elems tenv uenv '(:ScmKw))
+      (is (contains? @uenv '%1))
+      (is (contains? (map-invert @tenv) :ScmKw))))
 
-(deftest test-spec-cast
-  #_(q :find :keyword :in (db) :where
-       [:ScmKw {:item [:keyword %]}])
-  (let [tenv (atom {})]
-    (is (= (expand-item tenv :ScmKw :item '[:keyword ?x])
-           {:map-entry [[:item `'~'?x]]}))
-    (is (= (get @tenv '?x)
-           :keyword))))
+  (testing "spec cast"
+    #_(q :find :keyword :in (db) :where
+         [:ScmKw {:item [:keyword %]}])
+    (let [tenv (atom {})]
+      (is (= (expand-item tenv :ScmKw :item '[:keyword ?x])
+             {:map-entry [[:item `'~'?x]]}))
+      (is (= (get @tenv '?x)
+             :keyword))))
 
-(deftest test-find-var-spec-cast
-  #_(q :find [:Scm ...] :in (db) :where
-       [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
-  (is (= (count (expand-spec-where-clause (atom {'?scm :Scm})
-                                          '[:ScmMWrap {:val [:ScmM {:val [?scm {:val1 "foobar"}]}]}]))
-         3)))
+  (testing "find var spec cast"
+    #_(q :find [:Scm ...] :in (db) :where
+         [:ScmMWrap {:val [:ScmM {:val [% {:val1 "foobar"}]}]}])
+    (is (= (count (expand-spec-where-clause (atom {'?scm :Scm})
+                                            '[:ScmMWrap {:val [:ScmM {:val [?scm {:val1 "foobar"}]}]}]))
+           3)))
 
-(deftest test-union-spec
-  #_(q :find :Animal :in (db) :where [% {:name "zuzu"}])
-  (is (= (count (expand-spec-where-clause (atom {'?animal :Animal})
-                                          '[?animal {:name "zuzu"}]))
-         1)))
+  (testing "test union spec"
+    #_(q :find :Animal :in (db) :where [% {:name "zuzu"}])
+    (is (expand-spec-where-clause (atom {'?animal :Animal})
+                                  '[?animal {:name "zuzu"}])))
+
+  (testing "keyword as map rhs"
+    (is (= (count (expand-spec-where-clause (atom {'?soe :ScmOwnsEnum})
+                                            '[?soe {:enum :Scm2}]))
+           2)))
+
+  (testing "cast as rhs"
+    (is (expand-spec-map-clause (atom {'?se :Animal})
+                                Animal
+                                '?se
+                                '{:name ?name}))))
 
 (deftest test-parse-query
   (is (parse-query '(:find :Animal :in (db) :where [% {:name "zuzu"}])))
@@ -62,6 +73,12 @@
                                     [(ground :incoming) ?direction])
                                (and [% {:val2 6}]
                                     [(ground :outgoing) ?direction])))))
+  (is (parse-query '(:find [:ScmOwnsEnum ...] :in db :where [% {:enum :Scm2}])))
+  (is (parse-query '(:find :Birthday .
+                           :in $
+                           :where
+                           [% {:date ?date}]
+                           [(.before ^java.util.Date ?date #inst"2017")])))
 
   (testing "bad syntax"
     (is (thrown-with-msg?
