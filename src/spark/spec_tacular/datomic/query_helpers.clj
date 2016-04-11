@@ -127,13 +127,15 @@
            (if (primitive? t)
              {:map-entry [[k `'~v]]}
              {:map-entry [[k `'~v]]
-              :clause [[`'~v :spec-tacular/spec t]]})))
+              :clause (if (instance? Spec (get-spec t))
+                        [[`'~v :spec-tacular/spec t]] [])})))
     (and (keyword? v)
          (not (instance? EnumSpec (get-spec sub-spec-name)))
          (not (= :keyword sub-spec-name)))
     (let [v' (gensym (str "?" (lower-case (name v))))]
       {:map-entry [[k `'~v']]
-       :clause [[`'~v' :spec-tacular/spec v]]})
+       :clause (if (instance? Spec (get-spec v))
+                 [[`'~v' :spec-tacular/spec v]] [])})
     :else
     {:map-entry [[k v]]}))
 
