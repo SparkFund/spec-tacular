@@ -28,7 +28,16 @@
                    :in (cons '$ (list))
                    :where (list ['?animal {:spec-tacular/spec :Animal, :name "zuzu"}])}
                   (db))
-           #{}))))
+           #{}))
+    (is (= (query '{:find ([?scm68784 ?direction]),
+                    :in ($)
+                    :where ((or (and (and [?scm68784 :spec-tacular/spec :Scm]
+                                          [?scm68784 :scm/val2 5])
+                                     [(ground :incoming) ?direction])
+                                (and (and [?scm68784 :spec-tacular/spec :Scm]
+                                          [?scm68784 :scm/val2 6])
+                                     [(ground :outgoing) ?direction])))}
+                  (db))))))
 
 (deftest test-query-pull
   (with-test-db simple-schema
@@ -319,3 +328,13 @@
                 [:Scm {:val2 ?val2}]
                 [(- ?val2 5) %1])
              5)))))
+
+(deftest test-q-or-and
+  (with-test-db simple-schema
+    (let [ex (create! {:conn *conn*} (scm {:val2 6}))]
+      (is (= (q :find [:Scm ?kw] :in (db) :where
+                (or (and [% {:val2 5}]
+                         [(ground :five) ?kw])
+                    (and [% {:val2 6}]
+                         [(ground :six) ?kw])))
+             [ex :six])))))

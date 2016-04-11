@@ -57,6 +57,11 @@
              :where-expr (nth 2) rest)
          [:spec-tacular/spec :Person]))
   (is (parse-query '(:find ?scm2 . :in (db) :where [?scm [:Scm {:scm2 ?scm2}]] [?scm :scm/scm2 ?scm2])))
+  (is (parse-query '(:find [:Scm ?direction] :in db :where
+                           (or (and [% {:val2 5}]
+                                    [(ground :incoming) ?direction])
+                               (and [% {:val2 6}]
+                                    [(ground :outgoing) ?direction])))))
 
   (testing "bad syntax"
     (is (thrown-with-msg?
@@ -84,29 +89,17 @@
 ;; dynamic
 
 (deftest test-combine-where-clauses
-  (is (= (combine-where-clauses
-          '[(and [1] [2] [3])
-            (and [4] [5] [6])])
-         (combine-where-clauses
-          '[[1] [2] [3] (and [4] [5] [6])])
+  (is (= (combine-where-clauses '(and [1] [2] [3])
+                                '(and [4] [5] [6]))
+         (combine-where-clauses [1]
+                                [2]
+                                [3]
+                                '(and [4] [5] [6]))
          '(and [1] [2] [3] [4] [5] [6])))
-  (is (= (combine-where-clauses
-          '[(or (and [1]) (and [2]))])
-         '(or (and [1]) (and [2]))))
-  (is (= (rest (combine-where-clauses
-                (map datomify-where-clause
-                     '([?scm {:spec-tacular/spec :Scm
-                              :val2 ?val2}]
-                       [(- ?val2 5) ?long]))))
-         '([?scm :spec-tacular/spec :Scm]
-           [?scm :scm/val2 ?val2]
-           [(- ?val2 5) ?long])))
-  (is (= (rest (combine-where-clauses
-                (map datomify-where-clause
-                     '([?scm {:spec-tacular/spec :Scm
-                              :val2 5}]))))
-         '([?scm :spec-tacular/spec :Scm]
-           [?scm :scm/val2 5]))))
+  (is (= (combine-where-clauses '(or (and [1])
+                                     (and [2])))
+         '(or (and [1])
+              (and [2])))))
 
 (deftest test-datomify-spec-where-clause
   (is (= (datomify-spec-where-clause :Animal
@@ -157,7 +150,27 @@
            '(or (and [?animal :spec-tacular/spec :Ferret]
                      [?animal :ferret/name "zuzu"])
                 (and [?animal :spec-tacular/spec :Mouse]
-                     [?animal :mouse/name "zuzu"]))))))
+                     [?animal :mouse/name "zuzu"])))))
+  (testing "lots of and clauses"
+    (is (= (datomify-where-clause '(or (and [?scm73984 {:spec-tacular/spec :Scm, :val2 5}]
+                                            [(ground :incoming) ?direction])
+                                       (and [?scm73984 {:spec-tacular/spec :Scm, :val2 6}]
+                                            [(ground :outgoing) ?direction])))
+           '(or (and [?scm73984 :spec-tacular/spec :Scm]
+                     [?scm73984 :scm/val2 5]
+                     [(ground :incoming) ?direction])
+                (and [?scm73984 :spec-tacular/spec :Scm]
+                     [?scm73984 :scm/val2 6]
+                     [(ground :outgoing) ?direction]))))
+    (is (= (datomify-where-clause '(not (and [?scm73984 {:spec-tacular/spec :Scm, :val2 5}]
+                                             [(ground :incoming) ?direction])
+                                        (and [?scm73984 {:spec-tacular/spec :Scm, :val2 6}]
+                                             [(ground :outgoing) ?direction])))
+           '(not (and [?scm73984 :spec-tacular/spec :Scm]
+                      [?scm73984 :scm/val2 5]
+                      [(ground :incoming) ?direction]
+                      [?scm73984 :scm/val2 6]
+                      [(ground :outgoing) ?direction]))))))
 
 (deftest test-datomify-find-elems
   (with-test-db simple-schema

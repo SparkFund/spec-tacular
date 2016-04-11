@@ -259,7 +259,7 @@
   {:added "0.6.0"}
   [{find-elems :find clauses :where :as m} & args]
   (let [{:keys [datomic-find rebuild]} (datomify-find-elems find-elems)
-        clauses (combine-where-clauses (map datomify-where-clause clauses))
+        clauses (apply combine-where-clauses (map datomify-where-clause clauses))
         [db & _] args
         query (assoc m :find datomic-find :where (case (first clauses)
                                                    (and) (rest clauses)

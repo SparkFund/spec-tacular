@@ -37,258 +37,6 @@
       (throw (ex-info "var has two incompatible return types" {:x x :type1 t :type2 t-})))
     (do (swap! tenv assoc x t) nil)))
 
-#_
-(defn expand-ident [ident uenv tenv]
-  "takes an ident and returns a map with a unique variable and its intended spec"
-  (cond
-    (keyword? ident)
-    ,(let [uid (gensym (str "?" (lower-case (name ident))))]
-       (expand-ident [uid ident] uenv tenv))
-    (symbol? ident)
-    ,(let [spec-name (get @tenv ident)]
-       (when-not spec-name
-         (throw (ex-info (str "could not infer type for " ident)
-                         {:syntax ident :tenv @tenv})))
-       (expand-ident [ident spec-name] uenv tenv))
-    (vector? ident) 
-    ,(let [[var spec-name] ident
-           spec (get-spec spec-name)]
-       (when-not spec
-         (throw (ex-info (str "could not find spec for " spec-name)
-                         {:syntax ident})))
-       {:var var :spec spec})
-    :else (throw (ex-info (str (type ident) " unsupported ident") {:syntax ident}))))
-
-#_
-(declare expand-clause expand-map)
-
-#_
-(defn expand-item [item db-kw rhs x uenv tenv]
-  (let [{[arity sub-spec-name] :type} item
-        mk-where-clause (fn [rhs] [`'~x db-kw rhs])]
-    (cond
-      (::patvar (meta rhs))
-      ,(do (set-type! tenv rhs sub-spec-name)
-           (vec (concat (if-let [spec (get-spec (get @tenv rhs))]
-                          (when (instance? Spec spec)
-                            [[`'~rhs :spec-tacular/spec (get @tenv rhs)]])
-                          [])
-                        [(mk-where-clause `'~rhs)])))
-      (and (keyword? rhs)
-           (get-spec rhs))
-      ,(let [y (gensym "?tmp")]
-         (if (instance? spark.spec_tacular.spec.EnumSpec (get-spec rhs))
-           [(mk-where-clause `'~rhs)]
-           [(mk-where-clause `'~y)
-            [`'~y :spec-tacular/spec rhs]]))
-      (map? rhs)
-      ,(let [y (gensym "?tmp")
-             sub-atmap rhs]
-         `(conj ~(expand-map sub-atmap y (get-spec sub-spec-name) uenv tenv)
-                ~(mk-where-clause `'~y)))
-      (nil? rhs)
-      ,[[(list 'list ''missing? ''$ `'~x db-kw)]]
-      (vector? rhs)
-      ,(let [y (gensym "?tmp"), k (gensym "?kw")
-             [l r] rhs
-             spec (get-spec sub-spec-name)
-             spec (if (:elements spec)
-                    (get-spec sub-spec-name (get @tenv l))
-                    spec)]
-         (cond
-           (and (keyword? l)
-                (get-spec l))
-           `(conj ~(expand-clause [[y l] r] uenv tenv)
-                  ~(mk-where-clause `'~y))
-           (and (keyword? l)
-                (primitive? l))
-           ,(do (set-type! tenv r l)
-                (expand-item item db-kw r x uenv tenv))
-           (and (::patvar (meta l)) (:items spec))
-           ,(do (set-type! tenv l sub-spec-name)
-                `(conj ~(expand-clause [[l (:name spec)] r] uenv tenv)
-                       ~(mk-where-clause `'~l)))
-           (and (::patvar (meta l)) (::patvar (meta r)))
-           ,(do (set-type! tenv l :keyword)
-                (set-type! tenv r (:name spec))
-                [[`'~x db-kw `'~r]
-                 [`'~r :spec-tacular/spec `'~l]])
-           :else ;; fall back to dynamic resolution
-           (throw (ex-info "invalid item" {:syntax rhs}))))
-      :else
-      ;; We have a "thing" that eventually resolves into a value.
-      ,(let [sub-spec (get-spec sub-spec-name)
-             y (gensym "?tmp")
-             z (gensym)]
-         `(let [~z ~(if (= sub-spec-name :calendarday) `(timec/to-date ~rhs) rhs)
-                rhs-spec# (get-spec ~z)]
-            (when (nil? ~z)
-              (throw (ex-info "Maps cannot have nil values at runtime"
-                              {:field ~sub-spec-name :syntax '~rhs})))
-            (if (and rhs-spec# (instance? Spec rhs-spec#)) ;; Spec
-              (if-let [eid# (get-in ~z [:db-ref :eid])]
-                [['~x ~db-kw eid#]]
-                (let [item# (some #(if (:unique? %) %) (:items rhs-spec#))
-                      val#  (and item# ((:name item#) ~z))]
-                  (if (and item# (some? val#))
-                    [['~x ~db-kw '~y]
-                     ['~y (db-keyword rhs-spec# (:name item#)) val#]]
-                    (throw (ex-info "Cannot uniquely describe the given value"
-                                    {:syntax ~rhs :value ~z})))))
-              ~[(mk-where-clause z)])))))) ;; EnumSpec; everything else
-
-;; map = {:kw (ident | clause | map | value),+}
-#_
-(defn expand-map [atmap x spec uenv tenv]
-  (when-not (map? atmap)
-    (throw (ex-info "invalid map" {:syntax atmap})))
-  (let [{:keys [elements items]} spec]
-    (if items
-      (-> (fn [[kw rhs]]
-            (let [item (get-item spec kw)
-                  db-keyword (db-keyword spec kw)]
-              (cond
-                item
-                `(concat [['~x :spec-tacular/spec ~(:name spec)]]
-                         ~(expand-item item db-keyword rhs x uenv tenv))
-                (= kw :spec-tacular/spec)
-                (do (set-type! tenv rhs :keyword)
-                    [[`'~x :spec-tacular/spec `'~rhs]])
-                :else (throw (ex-info "could not find item" {:syntax atmap :field kw})))))
-          (keep atmap) (doall) (conj `concat))
-      (let [maybe-spec (:spec-tacular/spec atmap)]
-        (if (and (keyword? maybe-spec) (contains? elements maybe-spec))
-          `(conj ~(expand-map (dissoc atmap :spec-tacular/spec) x (get-spec maybe-spec) uenv tenv)
-                 ['~x :spec-tacular/spec ~maybe-spec])
-          (let [try-all (-> #(try {% (expand-map (dissoc atmap :spec-tacular/spec) x
-                                                 (get-spec %) uenv tenv)}
-                                  (catch clojure.lang.ExceptionInfo e {% e}))
-                            (keep elements))
-                try-map (into {} try-all)
-                grouped (group-by
-                         #(if (or (= (type (second %)) clojure.lang.PersistentList)
-                                  (= (type (second %)) clojure.lang.Cons))
-                            :syntax :error)
-                         try-map)]
-            (when (empty? (get grouped :syntax))
-              (throw (ex-info "does not conform to any possible unioned spec"
-                              {:syntax atmap :possible-specs elements
-                               :errors (get grouped :error)})))
-            (cond
-              (::patvar (meta maybe-spec))
-              ,(let [opts (into {} (get grouped :syntax))]
-                 (set-type! tenv maybe-spec :keyword)
-                 `(concat
-                   [['~x :spec-tacular/spec '~maybe-spec]]
-                   (let [opts# ~opts]
-                     (if (every? empty? (vals opts#)) []
-                         [(list ~''or ~@(map (fn [[kw stx]] `(~'cons ~''and (~'concat [[(~'list ~''ground ~kw) '~maybe-spec]] ~stx)))
-                                             opts))]))))
-              (symbol? maybe-spec)
-              `(let [opts# ~(into {} (get grouped :syntax))
-                     spec# ~maybe-spec]
-                 (concat [['~x :spec-tacular/spec spec#]]
-                         (or (get opts# spec#)
-                             (throw (ex-info "does not conform to any possible unioned spec"
-                                             {:computed-spec spec#
-                                              :available-specs (keys opts#)})))))
-              (and (nil? maybe-spec) (nil? (get grouped :error)))
-              `(let [opts# ~(into {} (get grouped :syntax))]
-                 [(cons ~''or (map (fn [[kw# stx#]] (cons ~''and stx#)) opts#))])
-              :else (throw (ex-info "Query syntax not supported"
-                                    {:syntax atmap :errors (get grouped :error)})))))))))
-
-#_
-(defn expand-clause [clause uenv tenv]
-  (cond
-    (vector? clause)
-    ,(cond
-       (= (count clause) 1)
-       ,[[(->> (rest (first clause))
-               (map (fn [x] (if (::patvar (meta x))
-                              `(with-meta '~x ~(merge (meta x) {:tag `'~(:type-symbol (get-type (get @tenv x)))}))
-                              x)))
-               (cons `'~(ffirst clause))
-               (cons 'list))]]
-       (= (count clause) 2)
-       ,(let [[ident atmap] clause
-              {:keys [var spec]} (expand-ident ident uenv tenv)]
-          (cond
-            (map? atmap) (expand-map atmap var spec uenv tenv)
-            :else (throw (ex-info "Invalid clause rhs" {:syntax clause})))))
-    (seq? clause)
-    ,(let [[head & clauses] clause]
-       (case head
-         'not-join
-         ,(let [[vars & clauses] clauses
-                clauses (map #(expand-clause % uenv tenv) clauses)]
-            `[(cons ~''not-join (cons '~vars (concat ~@clauses)))])
-         :else (throw (ex-info "unsupported sequence head"
-                               {:syntax clause}))))
-    :else (throw (ex-info "invalid clause type, expecting vector or sequence"
-                          {:type (type clause) :syntax clause}))))
-
-#_
-(defn annotate-retvars! [rets uenv tenv]
-  )
-
-#_
-(defn annotate-patvars! [clauses uenv tenv]
-  (let [mk-new #(with-meta (gensym (str "?" %)) {::patvar true})
-        annotate-clause! (fn [[id atmap]]
-                           (cond
-                             (symbol? id)
-                             ,(let [gs (mk-new id)]
-                                (swap! uenv assoc id gs))
-                             (vector? id)
-                             ,(let [gs (mk-new (first id))]
-                                (do (set-type! tenv gs (second id))
-                                    (swap! uenv assoc (first id) gs)))))]
-    (doall (map annotate-clause! clauses))))
-
-#_
-(defn expand-query [f wc]
-  (let [tenv (atom {}) 
-        uenv (atom {})]
-    (let [{:keys [rets clauses]} (desugar-query f wc uenv tenv)
-          clauses (doall (map #(expand-clause % uenv tenv) ;; side effects
-                              clauses))
-          clauses `(concat ~@clauses)]
-      (assert (= (count rets) (count f)) "internal error")
-      {:args rets :env @tenv :clauses clauses})))
-
-#_
-(defn desugar-query [rets clauses uenv tenv]
-  (let [rets     (annotate-retvars! rets uenv tenv)
-        bindings (apply concat '[% %1] (vec @uenv))
-        do-expr  (m/mexpand `(m/symbol-macrolet ~bindings ~clauses))
-        _        (annotate-patvars! clauses uenv tenv)]
-    {:rets rets :clauses (second do-expr)}))
-
-#_
-(let [n (atom 1) 
-        mk-new #(with-meta (gensym (str "?" %)) {::patvar true})
-        swap-keyword! (fn [spec]
-                        (let [%   (symbol (str "%" @n))
-                              new (mk-new (lower-case (name spec)))]
-                          (set-type! tenv new spec)
-                          (swap! n inc)
-                          (swap! uenv assoc % new)
-                          new))
-        swap-symbol! (fn [old] 
-                       (let [new (mk-new old)]
-                         (swap! uenv assoc old new) new))]
-    (letfn [(swap-retvar! [r]
-              (cond 
-                (keyword? r) (swap-keyword! r)
-                (symbol? r)  (swap-symbol! r)
-                (and (seq? r)
-                     (= (first r) 'pull))
-                (let [[pull ident pattern] r
-                      r' (swap-retvar! ident)]
-                  (list pull r' pattern))))]
-      (doall (map swap-retvar! rets))))
-
 (defn ^:no-doc expand-find-elem
   "Expands a single find element, returning an `:expanded-find-elem`
   suitable for `query` and a `:build-ret-type` that takes one
@@ -402,8 +150,8 @@
   (cond
     (instance? Spec spec)
     (let [rec (expand-map tenv spec rhs)]
-      (concat [[`'~lhs (into {:spec-tacular/spec (:name spec)} (:map-entry rec))]]
-              (:clause rec)))
+      (vec (concat [[`'~lhs (into {:spec-tacular/spec (:name spec)} (:map-entry rec))]]
+                   (:clause rec))))
     (instance? UnionSpec spec)
     (let [rec (->> (:elements spec)
                    (mapv (fn [spec-name]
@@ -453,8 +201,9 @@
     (expand-spec-where-clause tenv clause)
     [lhs [(spec-name :guard keyword?) (rhs :guard map?)]]
     (expand-spec-where-clause tenv clause)
-    ([(rator :guard #(case % (not or and) true false)) & clauses] :seq) ; not / or / and
-    [(cons rator (map expand-where-clause clauses))]
+    ([(rator :guard #(case % (not datomic-or datomic-and) true false)) & clauses] :seq) ; not / or / and
+    (let [clauses' (mapcat (partial expand-where-clause tenv) clauses)]
+      [(cons 'list (cons (case rator datomic-or ''or datomic-and ''and `'~rator) clauses'))])
     ([(rator :guard #(case % (not-join or-join) true false)) ([& syms] :seq) & clauses] :seq) ; not-join / or-join
     [(cons rator (cons syms (map expand-where-clause clauses)))]
     ([([rator & args] :seq) rhs] :seq)
@@ -480,7 +229,7 @@
             uenv (atom {})
             {:keys [find-expr build-ret-type]} (expand-find-elems tenv uenv f)
             ;; after uenv populated
-            bindings (apply concat '[% %1] (vec @uenv))
+            bindings (apply concat '[% %1] '[or datomic-or] '[and datomic-and] (vec @uenv))
             do-expr (m/mexpand `(m/symbol-macrolet ~bindings ~wc)) ; expands with a `do`
             clauses (second do-expr)
             where-expr (mapcat (partial expand-where-clause tenv) clauses)
@@ -518,17 +267,19 @@
 ;; bind-rel          = [ [(variable | '_')+] ]
 
 (defn combine-where-clauses [& clauses]
-  (let [clauses (apply concat clauses)]
-    (if (not (empty? (rest clauses)))
-      (cons 'and (distinct (mapcat #(case (first %) and (rest %) [%]) clauses)))
-      (first clauses))))
+  (if (not (empty? (rest clauses)))
+    (cons 'and (distinct (mapcat #(case (first %) and (rest %) [%]) clauses)))
+    (first clauses)))
+
+(defn or-clause [& clauses]
+  (if (empty? (rest clauses)) (first clauses) (cons 'or clauses)))
 
 (defn datomify-spec-where-clause [spec-name lhs rhs]
   (let [spec (get-spec spec-name)]
     (cond
       (instance? Spec spec)
       (apply combine-where-clauses
-             [[lhs :spec-tacular/spec spec-name]]
+             [lhs :spec-tacular/spec spec-name]
              (for [[k v] (dissoc rhs :spec-tacular/spec)
                    :let [{[arity sub-spec-name] :type :as item} (get-item spec k)
                          db-kw (db-keyword spec k)]]
@@ -536,31 +287,37 @@
                      (throw (ex-info "can't have nil args in clause"
                                      {:syntax rhs}))
                      (symbol? v)
-                     [[lhs db-kw v]]
+                     [lhs db-kw v]
                      (and (not (primitive? sub-spec-name))
-                             (= (:name (get-spec v) sub-spec-name)))
+                          (= (:name (get-spec v) sub-spec-name)))
                      (let [sub-spec (get-spec sub-spec-name)]
                        (if-let [eid (get-in v [:db-ref :eid])]
-                         [[lhs db-kw eid]]
+                         [lhs db-kw eid]
                          (when-let [unique-item (some #(when (and (:unique? %) (:identity? %)) %)
                                                       (:items sub-spec))]
                            (when-some [v' ((:name unique-item) v)]
                              (let [gs (gensym '?tmp)]
-                               [[lhs db-kw gs]
-                                [gs (db-keyword sub-spec (:name unique-item)) v']])))))
+                               (combine-where-clauses
+                                [lhs db-kw gs]
+                                [gs (db-keyword sub-spec (:name unique-item)) v']))))))
                      (and (= sub-spec-name :calendarday)
                           (instance? DateTime v))
-                     [[lhs db-kw (timec/to-date v)]]
+                     [lhs db-kw (timec/to-date v)]
                      :else
-                     [[lhs db-kw v]])))
+                     [lhs db-kw v])))
       (instance? UnionSpec spec)
-      (cons 'or (for [sub-spec-name (:elements spec)]
-                  (datomify-spec-where-clause sub-spec-name lhs rhs))))))
+      (apply or-clause
+             (for [sub-spec-name (:elements spec)]
+               (datomify-spec-where-clause sub-spec-name lhs rhs))))))
 
 (defn datomify-where-clause [clause]
   (match clause
     ([(rator :guard #(case % (not or and) true false)) & clauses] :seq) ;; not / or / and
-    (cons rator (map datomify-where-clause clauses))
+    (let [clauses (map datomify-where-clause clauses)]
+      (case rator
+        (or) (apply or-clause clauses)
+        (and) (apply combine-where-clauses clauses)
+        (not) (list 'not (apply combine-where-clauses clauses))))
     ([(rator :guard #(case % (not-join or-join) true false)) ([& syms] :seq) & clauses] :seq) ;; not-join / or-join
     (cons rator (cons syms (map datomify-where-clause clauses)))
     ([(lhs :guard seq?) rhs] :seq) ;; fn-expr
