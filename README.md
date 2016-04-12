@@ -31,14 +31,14 @@ the following in return:
 ## Quick Start
 
 ```clojure
-[spec-tacular "0.6.0"]
+[spec-tacular "0.6.1"]
 ```
 
 ```xml
 <dependency>
   <groupId>spec-tacular</groupId>
   <artifactId>spec-tacular</artifactId>
-  <version>0.6.0</version>
+  <version>0.6.1</version>
 </dependency>
 ```
 
