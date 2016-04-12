@@ -31,6 +31,7 @@ the following in return:
 ## Quick Start
 
 ```clojure
+[spec-tacular "0.6.2-SNAPSHOT"] ; unstable
 [spec-tacular "0.6.1"]
 ```
 
