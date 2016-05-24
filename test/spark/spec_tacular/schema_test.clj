@@ -106,7 +106,7 @@
         "removing an entry from schema")))
 
 (defspec Birthday
-  [date :is-a :calendarday])
+  [date :is-a :calendarday :doc "birthday date"])
 
 (def ns-schema (from-namespace *ns*))
 
@@ -131,7 +131,7 @@
                {:db/ident :birthday/date,
                 :db/valueType :db.type/instant,
                 :db/cardinality :db.cardinality/one,
-                :db/doc ""}]
+                :db/doc "birthday date"}]
               ns-schema)]
     (is (nil? missing) "no missing entries")
     (is (nil? extra) "no extra entries")))

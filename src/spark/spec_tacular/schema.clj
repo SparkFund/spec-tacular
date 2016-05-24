@@ -90,7 +90,8 @@
     :db/cardinality (case cardinality
                       :one :db.cardinality/one
                       :many :db.cardinality/many)
-    :db/doc         ""
+    :db/doc         (or (:doc item)
+                        "")
     :db.install/_attribute :db.part/db}
    (when (:unique? item)
      {:db/unique (if (:identity? item)
