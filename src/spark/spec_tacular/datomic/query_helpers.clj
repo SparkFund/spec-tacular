@@ -217,7 +217,7 @@
     ([([rator & args] :seq)] :seq) ; pred-expr
     [[(apply list 'list `'~rator (mapv wrap-variable args))]]
     ([(rator :guard symbol?) & (args :guard #(every? (complement seq?) %))] :seq) ; data pattern
-    [(mapv wrap-variable args)]
+    [(vec (cons `'~rator (map wrap-variable args)))]
     :else (throw (ex-info "invalid where clause" {:syntax clause}))))
 
 ;; (q :find find-expr+ :in clojure-expr :where clause+)
