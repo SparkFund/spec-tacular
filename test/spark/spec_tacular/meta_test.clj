@@ -1,8 +1,8 @@
 (ns spark.spec-tacular.meta-test
   {:core.typed {:collect-only true}
-   :spec-tacular {:ctor-name-fn  (fn [s] (str "mk-" (clojure.string/upper-case s)))
-                  :huh-name-fn   (fn [s] (str (clojure.string/upper-case s) "?"))
-                  :alias-name-fn (fn [s] (clojure.string/upper-case s))}}
+   :spec-tacular {:ctor-name-fn  '(fn [s] (str "mk-" (clojure.string/upper-case s)))
+                  :huh-name-fn   '(fn [s] (str (clojure.string/upper-case s) "?"))
+                  :alias-name-fn '(fn [s] (clojure.string/upper-case s))}}
   (:require [spark.spec-tacular :refer :all]
             [clojure.test :refer :all]
             [clojure.core.typed :as t]))

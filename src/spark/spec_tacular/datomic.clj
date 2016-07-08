@@ -267,8 +267,8 @@
     (try (rebuild db (apply db/q query args))
          (catch Exception e
            (throw (doto (ex-info "Encountered an error running Datomic query"
-                                 {:query query :args args})
-                    (.initCause e)))))))
+                                 {:query query :args args}
+                                 e)))))))
 
 ;; =============================================================================
 ;; database interfaces

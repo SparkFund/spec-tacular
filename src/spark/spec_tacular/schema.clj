@@ -59,7 +59,8 @@
     :db.install/function :db/noHistory :db/txInstant :spec-tacular/spec
     :db.excise/attrs :db/ident :db/cardinality :db/index :db.install/valueType
     :db/fn :db/isComponent :db/code :db/unique :db.excise/beforeT :db.excise/before
-    :db/valueType :fressian/tag :db/doc :db.install/attribute :db/fulltext})
+    :db/valueType :fressian/tag :db/doc :db.install/attribute :db/fulltext
+    :db.sys/reId :db.sys/partiallyIndexed})
 
 (t/ann ^:no-check spec-tacular-map InstallableEntityMap)
 (def
