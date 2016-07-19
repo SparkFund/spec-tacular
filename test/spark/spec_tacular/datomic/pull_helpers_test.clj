@@ -143,7 +143,21 @@
                  (set (:container/many pulled))))
           (is (refless= (set (:many (rebuild (db) pulled)))
                         (:many c))
-              "they aren't = anymore because they were pulled off the database at different times, but at least they're refless=")))))
+              "they aren't = anymore because they were pulled off the database at different times, but at least they're refless="))
+        (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Container [{:many [:number]}])
+              cs (sort-by :number (:many c))
+              pulled {:container/many [{:db/id (get-eid (db) (first cs))
+                                        :spec-tacular/spec :Container
+                                        :container/number 3}
+                                       {:db/id (get-eid (db) (second cs))
+                                        :spec-tacular/spec :Container
+                                        :container/number 4}]}]
+          (is (= datomic-pattern
+                 [{:container/many [:container/number]}]))
+          (is (= (d/pull (db) datomic-pattern (get-eid (db) c))
+                 {:container/many [{:container/number 4} {:container/number 3}]}))
+          (is (= (set (:many (rebuild (db) pulled)))
+                 #{{:number 3} {:number 4}}))))))
   (testing "enumeration"
     (let [{:keys [datomic-pattern rebuild]} (datomify-spec-pattern Spotlight [:color])]
       (is (= datomic-pattern 
