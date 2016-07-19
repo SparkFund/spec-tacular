@@ -430,9 +430,8 @@
         {:keys [tmpids specs]} (meta data)
         txn-result (try @(db/transact (:conn conn-ctx) data)
                         (catch java.util.concurrent.ExecutionException e
-                          (throw (doto (ex-info "Encountered an error during Datomic transaction"
-                                                {:data data})
-                                   (.initCause e)))))]
+                          (throw (ex-info "Encountered an error during Datomic transaction"
+                                          {:data data} e))))]
     ;; db side effect has occurred
     (let [db (db/db (:conn conn-ctx))
           db-si-coll (map #(some->> (db/resolve-tempid db (:tempids txn-result) %1)
