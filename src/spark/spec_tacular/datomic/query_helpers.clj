@@ -207,11 +207,12 @@
     (expand-spec-where-clause tenv clause)
     [lhs [(spec-name :guard keyword?) (rhs :guard map?)]]
     (expand-spec-where-clause tenv clause)
-    ([(rator :guard #(case % (not datomic-or datomic-and) true false)) & clauses] :seq) ; not / or / and
+    ([(rator :guard '#{not datomic-or datomic-and}) & clauses] :seq)
     (let [clauses' (mapcat (partial expand-where-clause tenv) clauses)]
       [(cons 'list (cons (case rator datomic-or ''or datomic-and ''and `'~rator) clauses'))])
-    ([(rator :guard #(case % (not-join or-join) true false)) ([& syms] :seq) & clauses] :seq) ; not-join / or-join
-    [(cons rator (cons syms (map expand-where-clause clauses)))]
+    ([(rator :guard '#{not-join or-join}) ([& syms] :seq) & clauses] :seq)
+    (let [clauses' (mapcat (partial expand-where-clause tenv) clauses)]
+      [(cons 'list (cons `'~rator (cons `'~syms clauses')))])
     ([([rator & args] :seq) rhs] :seq) ; fn-expr
     [[(apply list 'list `'~rator (mapv wrap-variable args)) (wrap-variable rhs)]]
     ([([rator & args] :seq)] :seq) ; pred-expr
@@ -320,14 +321,15 @@
 
 (defn datomify-where-clause [clause]
   (match clause
-    ([(rator :guard #(case % (not or and) true false)) & clauses] :seq) ;; not / or / and
+    ([(rator :guard '#{not or and}) & clauses] :seq)
     (let [clauses (map datomify-where-clause clauses)]
       (case rator
         (or) (apply or-clause clauses)
         (and) (apply combine-where-clauses clauses)
         (not) (list 'not (apply combine-where-clauses clauses))))
-    ([(rator :guard #(case % (not-join or-join) true false)) ([& syms] :seq) & clauses] :seq) ;; not-join / or-join
-    (cons rator (cons syms (map datomify-where-clause clauses)))
+    ([(rator :guard '#{not-join or-join}) ([& syms] :seq) & clauses] :seq)
+    (let [body (rest (apply combine-where-clauses (map datomify-where-clause clauses)))]
+      (cons rator (cons syms body)))
     ([(lhs :guard seq?) rhs] :seq) ;; fn-expr
     clause
     ([(lhs :guard symbol?) {:spec-tacular/spec spec-name}] :seq) ;; spec-tacular rhs

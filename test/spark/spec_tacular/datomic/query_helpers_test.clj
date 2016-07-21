@@ -135,8 +135,8 @@
   (is (= (datomify-where-clause '(not-join [?scm]
                                    [?scm {:spec-tacular/spec :Scm, :val2 5}]))
          '(not-join [?scm]
-            (and [?scm :spec-tacular/spec :Scm]
-                 [?scm :scm/val2 5]))))
+            [?scm :spec-tacular/spec :Scm]
+            [?scm :scm/val2 5])))
   (is (= (datomify-where-clause '[(.before ?date1 ?date2)])
          '[(.before ?date1 ?date2)]))
   (is (= (datomify-where-clause '[(ground :keyword) ?kw])
