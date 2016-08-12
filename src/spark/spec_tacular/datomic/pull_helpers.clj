@@ -72,11 +72,13 @@
                 {:datomic-pattern [db-kw datomic-pattern]
                  :rebuild (fn [db m]
                             (when-let [v (get m db-kw)]
-                              [kw-or-item (if (or (= arity :many)
-                                                  (and (instance? Item kw-or-item)
-                                                       (not component?)))
-                                            (map #(rebuild db %) v)
-                                            (rebuild db v))]))})]
+                              [kw-or-item (cond (instance? Item kw-or-item)
+                                                (if (:component? kw-or-item)
+                                                  (rebuild db v)
+                                                  (map #(rebuild db %) v))
+                                                (= arity :many)
+                                                (map #(rebuild db %) v)                                                
+                                                :else (rebuild db v))]))})]
       {:datomic-pattern [(dissoc (into {} (map :datomic-pattern rec)) nil)]
        :rebuild (fn [db m] (into {} (map #(% db m) (map :rebuild rec))))})))
 
