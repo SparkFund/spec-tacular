@@ -23,10 +23,7 @@ the following in return:
 * **Simple transaction interface with Datomic**, using `create!` as a
    constructor, and `assoc!` as an update function.
 
-***WARNING:*** spec-tacular is under active development, and makes no
- claims of stability.  It currently anticipates single-threaded,
- single-peer interactions with Datomic, and may act strangely if
- either of those invariants are broken.
+***WARNING:*** spec-tacular is not maintained.
 
 ## Quick Start
 
